@@ -1,0 +1,27 @@
+{
+  "acl_reversal": {
+    "after": "deny-chief-engineer",
+    "before": "allow-chief-engineer",
+    "document_id": "ENG-001",
+    "expected": "deny-after-change"
+  },
+  "ambiguous_asset_event": "EV-004",
+  "classification": "C0 synthetic only",
+  "deleted_source": {
+    "document_id": "DEC-001",
+    "expected": "remove-index-and-citation"
+  },
+  "expired_session": {
+    "expected": "deny",
+    "id": "lab-deckhand-1"
+  },
+  "malicious_citation_url": {
+    "expected": "reject",
+    "url": "https://invalid.example/synthetic"
+  },
+  "revoked_user": {
+    "expected": "deny",
+    "id": "lab-removed-1"
+  },
+  "unknown_asset_event": "EV-003"
+}

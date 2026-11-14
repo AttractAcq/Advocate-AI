@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "mode": "loopback-simulation",
+  "bind": "127.0.0.1",
+  "services": {
+    "console": 18080,
+    "core": 18081,
+    "knowledge": 18082,
+    "policy": 18083,
+    "intelligence": 18084,
+    "wazuh-simulator": 18085
+  },
+  "synthetic_nas": "fixtures/sources",
+  "synthetic_events": "fixtures/phase-1/events.jsonl",
+  "no_wan_egress_required": true
+}

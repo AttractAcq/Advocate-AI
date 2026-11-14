@@ -1,0 +1,7 @@
+# Repository controls for Phase 1
+
+The local `main` branch contains the source skeleton. [CI](../../.github/workflows/ci.yml) runs a dependency-free build and unit tests, a synthetic lab smoke test, Gitleaks, and dependency review on pull requests. [Dependabot](../../.github/dependabot.yml) monitors GitHub Actions and Python manifests. Actions are versioned in the workflow; before a production release, resolve and pin full commit SHAs and review action provenance.
+
+When the destination GitHub repository and named reviewers are known, configure `main` protection: require pull requests, at least one independent approving review, dismiss stale approvals, require the `quality`, `secrets` and `dependency-review` checks as applicable, prohibit force pushes and deletions, restrict bypass, and require conversation resolution. Add valid CODEOWNERS identities for security-sensitive paths. Enable repository secret scanning and push protection if the account plan supports them. Confirm the settings through the remote API or UI and save evidence before G0A. A local Git branch cannot enforce GitHub branch protection.
+
+Create release tags only from reviewed commits after CI passes. Phase 1 does not publish a software release. Signed bundles and rollback belong to Phase 5.

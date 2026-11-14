@@ -1,0 +1,83 @@
+{
+  "policy": "synthetic example only; vessel approver must replace for production",
+  "users": [
+    {
+      "id": "lab-captain-1",
+      "role": "captain",
+      "status": "active"
+    },
+    {
+      "id": "lab-captain-2",
+      "role": "captain",
+      "status": "active"
+    },
+    {
+      "id": "lab-chief_engineer-1",
+      "role": "chief_engineer",
+      "status": "active"
+    },
+    {
+      "id": "lab-chief_engineer-2",
+      "role": "chief_engineer",
+      "status": "active"
+    },
+    {
+      "id": "lab-chief_stewardess-1",
+      "role": "chief_stewardess",
+      "status": "active"
+    },
+    {
+      "id": "lab-chief_stewardess-2",
+      "role": "chief_stewardess",
+      "status": "active"
+    },
+    {
+      "id": "lab-deckhand-1",
+      "role": "deckhand",
+      "status": "active"
+    },
+    {
+      "id": "lab-deckhand-2",
+      "role": "deckhand",
+      "status": "active"
+    },
+    {
+      "id": "lab-avit_admin-1",
+      "role": "avit_admin",
+      "status": "active"
+    },
+    {
+      "id": "lab-avit_admin-2",
+      "role": "avit_admin",
+      "status": "active"
+    },
+    {
+      "id": "lab-removed-1",
+      "role": "deckhand",
+      "status": "revoked"
+    }
+  ],
+  "allow": {
+    "captain": [
+      "management",
+      "engineering",
+      "interior",
+      "deck"
+    ],
+    "chief_engineer": [
+      "engineering",
+      "deck"
+    ],
+    "chief_stewardess": [
+      "interior",
+      "deck"
+    ],
+    "deckhand": [
+      "deck"
+    ],
+    "avit_admin": [
+      "deck"
+    ]
+  },
+  "restricted_collection": "deny_all_by_default"
+}

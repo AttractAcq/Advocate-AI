@@ -1,0 +1,475 @@
+Phase 1 — Working private AI
+
+Build Sovereign Console, Core, local model integration and basic document retrieval.
+
+Result: Crew can use a completely local AI assistant with test documents.
+
+
+
+Phase 2 — Security and document permissions
+
+Develop the Policy Engine, complete document ingestion, enforce source permissions and implement audit logging.
+
+Result: Different crew members can access only authorised information, with access-control testing and independent review.
+
+
+
+Phase 3 — Cybersecurity intelligence
+
+Build Intelligence Engine and adapters for Wazuh and representative network hardware.
+
+Result: The AI can explain detected cybersecurity events using approved vessel context.
+
+
+
+Phase 4 — Production deployment
+
+Develop the installer, standard configurations, signed offline updates, health checks, encrypted backups and recovery process.
+
+Result: A repeatable, tested software appliance suitable for a controlled vessel pilot.
+
+
+
+Phase 5 — Fleet management and expansion
+
+Develop the company management portal, licence lifecycle, release management and additional vessel integrations.
+
+Result: We can support multiple installations using one standardised product.
+
+
+Phase	Objective
+0	Technical architecture, requirements and threat modelling
+1	Development environment, repositories and infrastructure
+2	Local AI model, backend and Sovereign Console
+3	RAG, document ingestion and access permissions
+4	Cybersecurity intelligence and vessel integrations
+5	Security hardening, offline deployment and recovery
+6	MVP validation and pilot-ready installation package
+7	Physical vessel installation, commissioning and handover
+8	Maintenance, updates and repeatable deployments
+
+
+Proprietary module	What we physically program	Technology
+01 — Sovereign Console	Chat interface, document upload, searchable history, source citations, department workspaces, admin screens, security dashboard	React, TypeScript, Tailwind
+02 — Sovereign Core	Backend APIs, AI request routing, conversation management, model connections, controlled tool execution	Python, FastAPI
+03 — Knowledge Engine	Document ingestion, parsing pipeline, indexing, permissions-aware retrieval, NAS synchronisation, citations	Python, Docling, PostgreSQL
+04 — Policy Engine	Document authorisation, user-to-resource mapping, access enforcement, audit events and data-handling rules	Python, Keycloak integration
+05 — Intelligence Engine	Security event normalisation, AI-assisted alert analysis, incident summaries, recommendations and reporting	Python, Wazuh API
+06 — Vessel Connect & Deploy	Vessel-specific integration adapters, configuration, installation automation, signed offline updates and recovery	Python, containers, deployment scripts
+07 — Sovereign Fleet	Customer accounts, vessel deployments, licence management, software releases, support and maintenance records	React, TypeScript, backend API
+
+
+
+
+
+
+DEFINITIONS:
+
+01 — Sovereign Console
+This is the application that officers and crew open on their computers.
+SOVEREIGN
+
+ILLUSTRATIVE APPLICATION
+
+WORKSPACE
+AI Chat
+
+Documents
+
+Security
+
+Administration
+
+
+Private Vessel Assistant
+What is the procedure for accessing the Cisco switches?
+
+According to the AV/IT SOP, connect to the authorised management network before accessing the switch interface.
+
+Source: Cisco Network Switch SOP
+
+Ask about vessel documents...
+
+
+
+
+We must develop the screens, interaction logic, API connections, application navigation and permission-aware user experience. You could personally lead this part because it closely matches your existing React/TypeScript development experience.
+02 — Sovereign Core
+This is the application brain, but not the language model itself.
+
+It determines what happens when a crew member submits a request.
+
+For example:
+1. Receives the question.
+2. Authenticates the user and obtains their authorised scope.
+3. Determines whether document retrieval or an approved security tool is needed.
+4. Calls the relevant service with restricted permissions.
+5. Sends the permitted context to the local AI model.
+6. Returns the answer, citations and authorised results.
+7. Records the relevant audit event.
+We must program this orchestration and the internal APIs.
+
+We don't need to build the inference engine. vLLM already exposes a compatible model-serving API. However, its documentation warns that API-key authentication alone does not secure every endpoint, so the inference service must remain behind our protected application boundary. 
+GitHub
+
+03 — Knowledge Engine
+This is one of the most commercially valuable parts of our software.
+
+We need to build an application that can connect to the yacht's approved documents, understand their structure, create searchable indexes and provide relevant information to the AI model.
+
+Our custom code would handle document import, folder-to-department mapping, access-control metadata, incremental indexing, deletion and permission-change propagation, source references, and retrieval quality.
+
+For instance, we would develop an adapter that reads approved QNAP folders, maps their permissions and processes supported files through Docling.
+
+This produces a secure vessel-specific knowledge base without needing to retrain the language model on each yacht's documents.
+04 — Policy Engine
+This is the part I would give the greatest engineering scrutiny.
+
+Keycloak already supports fine-grained authorisation policies, including role-based and attribute-based controls. 
+Keycloak
+
+
+Our proprietary work is to translate a yacht's organisational and document structure into enforceable policy.
+
+For example:
+User	Permitted information
+Captain	Approved command and management documents
+Chief Engineer	Engineering and technical records
+Chief Stewardess	Approved interior and hospitality records
+Deckhand	General operational SOPs and permitted deck records
+AV/IT administrator	Technical system records, without automatic access to private owner documents
+
+These are default policy examples, not universal access rights. Each vessel's owner or management must approve its access model.
+
+The policy engine must reject unauthorised retrieval before confidential content reaches the AI model. It must also control file downloads, search results, citations, cached content and tool use.
+
+This requires specialist security review. OWASP identifies prompt injection, sensitive-information disclosure and weaknesses in vector retrieval systems as important AI application threats. 
+OWASP Gen AI Security Project
+
+05 — Intelligence Engine
+This is the component that turns a private AI assistant into a cybersecurity and operational intelligence product.
+
+Instead of writing our own intrusion-detection software, we use Wazuh and other security technologies to generate reliable events.
+
+We develop:
+- Connectors to read approved security events.
+- Normalisation logic to translate events from different hardware manufacturers.
+- AI-assisted analysis and correlation of findings.
+- Vessel-specific asset and network context.
+- Incident summaries with supporting evidence.
+- Read-only investigation tools and reports.
+For example, a FortiGate event might identify a device making repeated suspicious connections. Sovereign would associate the IP address with a known device, retrieve the relevant event history and explain why an AV/IT officer should investigate it.
+
+Wazuh already provides a server API and offline deployment capability, so we would integrate it rather than recreate its SIEM functionality. 
+Wazuh server API · Wazuh documentation+1
+
+06 — Vessel Connect & Deploy
+This module makes the product repeatable.
+
+We would develop adapters for supported NAS systems, firewalls, switches, monitoring systems and onboard infrastructure.
+
+We would also build the installer, offline update manager, configuration validator, backup integration, rollback process and diagnostics.
+
+This is what prevents us from having to manually build the software from scratch for every client.
+
+For example, the first QNAP integration should become a reusable adapter. When a second yacht also has QNAP storage, we configure that existing adapter rather than write a new integration.
+07 — Sovereign Fleet
+This is the company's management application, not something every yacht needs to connect to.
+
+It would maintain customer records, supported hardware configurations, software versions, signed release packages, licence entitlements, maintenance schedules, support tickets and engineer assignments.
+
+For the strict zero-egress product, it would not collect vessel documents, prompts, embeddings or security logs. Deployment and health records would only be imported through expressly authorised offline or administrative procedures.
+
+
+___________
+
+
+Build Plan:
+
+
+
+
+SOVEREIGN AI
+Technical Development and Implementation Plan
+FROM ZERO  →  SECURITY-TESTED MVP  →  ONBOARD VESSEL IMPLEMENTATION
+
+Technical delivery only. Excludes marketing, advertising, company incorporation, fundraising and sales operations.
+The intended result
+A repeatable, independently testable onboard appliance that delivers private AI over approved documents, enforces vessel-specific permissions, analyses read-only cybersecurity telemetry, operates without cloud AI services, and can be maintained through controlled offline releases.
+
+
+01   Delivery boundaries and success definitions
+In scope
+Reference architecture and threat modelling; software build and test environments.
+Sovereign Console, Core, Knowledge, Policy, Intelligence and Vessel Connect/Deploy modules.
+Third-party integration: local LLM runtime, embedding and reranking services, Keycloak, PostgreSQL/pgvector, Docling, Wazuh.
+Offline installation packages; hardware qualification; network isolation; backups; operational monitoring.
+Controlled first-vessel survey, installation, site testing, crew handover and recurring maintenance procedures.
+Explicitly out of scope for V1
+Business formation, paid acquisition, branding, marketing operations or partnership negotiation.
+Developing a foundation model, SIEM engine, intrusion detection engine, firewall firmware or identity provider.
+Autonomous reconfiguration of firewalls, switches, operational technology, navigation, propulsion or safety systems.
+Unapproved ingestion of live yacht data, owner records, crew medical documents or credentials.
+Unrestricted remote support or external fleet telemetry in Strict Sovereign Mode.
+Four non-negotiable acceptance gates
+
+
+Default reference architecture
+
+
+02   Indicative engineering sequence
+The planning sequence below assumes a small multidisciplinary team and overlapping work. Week ranges are directional, not commitments. Discovery, hardware sourcing, classification review and security remediation can extend the programme.
+
+
+
+
+PHASE 0  |  Technical definition and security baseline
+
+
+Gate to exit: G0 — signed technical baseline and test plan.
+T-001  Define the V1 operating model
+Confirm Strict Sovereign Mode: no AI requests, documents, embeddings or security telemetry leave the vessel by default.
+Define allowed users and workflows: approved document Q&A, cited summaries, draft reports, read-only security analysis.
+Define exclusions: no autonomous network changes, no safety-critical interfaces, no uncontrolled internet access.
+Output / evidence: Scope statement, feature boundaries, deployment-mode decision.   |   Lead: Product/technical lead
+T-002  Create diagrams and trust boundaries
+Draw network zones, traffic directions, service-to-service APIs and physical data storage locations.
+Map every inbound/outbound path, including DNS, NTP, update transport, logs, backups, crash reports and admin access.
+Output / evidence: Logical architecture, data-flow diagram, network port matrix.   |   Lead: Infrastructure + security architect
+T-003  Threat model and information classification
+Assess external intrusion, compromised crew laptop, malicious document/prompt injection, insider access, stolen server and supply-chain compromise.
+Define permitted data classes, retention periods, key custody, break-glass access and rules for source credentials.
+Output / evidence: Threat model, risk register, document-classification policy.   |   Lead: Security architect
+T-004  Select reference software and licensing
+Choose Ubuntu LTS, vLLM versus NIM, approved models, Docling, PostgreSQL/pgvector, Keycloak and Wazuh versions.
+Verify offline compatibility, licences, commercial-use rights, third-party update terms and GPU/server support.
+Output / evidence: Reference stack matrix, initial SBOM, approved dependency list.   |   Lead: AI + DevSecOps engineers
+T-005  Write measurable acceptance tests before coding
+Specify offline behaviour, access-denial cases, citation correctness, load tests, backups, restore, audit and SIEM alert verification.
+Create a synthetic demo corpus and named lab roles; record proposed performance thresholds for confirmation by testing.
+Output / evidence: Test plan with IDs and pass/fail evidence fields.   |   Lead: QA + security architect
+PHASE 1  |  Repository, test laboratory and reproducibility
+
+
+Gate to exit: G0A — fresh build succeeds and lab environment reproduces from documentation.
+T-006  Create the source-code structure and secure CI
+Set up monorepo: apps/console, apps/api, services/knowledge, policy, intelligence, connectors, infrastructure and tests.
+Add code review, branch protection, dependency scanning, secret scanning, unit tests and controlled release tagging.
+Output / evidence: Version-controlled application skeleton and CI pipeline.   |   Lead: Full-stack + DevSecOps
+T-007  Build an isolated development network
+Provision GPU workstation/server, container runtime, segmented lab network, local DNS/PKI, test NAS and simulated firewall.
+Create a test-only security server or VM with synthetic Wazuh events.
+Output / evidence: Working lab topology and as-built inventory.   |   Lead: Infrastructure engineer
+T-008  Generate safe test fixtures
+Create fictional engineering manuals, interior documents, HR records, SOPs and PDFs across at least four user roles.
+Create negative cases: malicious instructions in documents, revoked permissions, duplicate files, malformed attachments and access-control edge cases.
+Output / evidence: Repeatable non-sensitive corpus and event fixtures.   |   Lead: QA + backend
+T-009  Introduce observability from day one
+Capture service health, errors, request timings and GPU/CPU/storage use without writing unnecessary sensitive prompts into logs.
+Establish development runbooks and a one-command local bring-up.
+Output / evidence: Health dashboard, structured logs and lab deployment scripts.   |   Lead: DevSecOps
+PHASE 2  |  Private AI inference and core application
+
+
+Gate to exit: G1 — chat and cited answers operate while WAN is disconnected.
+T-010  Provision and benchmark local inference
+Install NVIDIA driver/toolkit, GPU runtime and vLLM or NVIDIA NIM using pinned container/model versions.
+Prestage model weights, tokenizer and runtime artifacts locally; confirm no runtime download on start-up.
+Benchmark model size, context window, throughput, latency and concurrent sessions using representative tasks.
+Output / evidence: Inference service, model card, capacity benchmark and offline startup proof.   |   Lead: AI engineer
+T-011  Build Sovereign Core (FastAPI)
+Implement authenticated API endpoints for chat, session history, model selection, tool routing and error responses.
+Separate inference service behind internal-only network controls; introduce schema validation and request limits.
+Output / evidence: Core backend with automated API tests.   |   Lead: Backend engineer
+T-012  Build Sovereign Console (React)
+Implement sign-in, conversation view, file selection, source citations, department workspace and basic admin UI.
+Include clear handling of unavailable sources, model uncertainty, offline errors and timeouts.
+Output / evidence: Crew-facing MVP frontend using synthetic data.   |   Lead: Frontend engineer
+T-013  Create initial end-to-end demo
+Run the application with WAN disconnected and ask scripted questions against local synthetic documents.
+Capture successful responses and verify absence of calls to external AI or telemetry endpoints.
+Output / evidence: G1 demonstration record and issue list.   |   Lead: QA + infrastructure
+PHASE 3  |  Document knowledge and permission enforcement
+
+
+Gate to exit: Knowledge flow passes role, revocation, citation and injection tests.
+T-014  Build document-ingestion pipeline
+Connect to approved local folders through read-only service identities; import PDFs, DOCX, spreadsheets and text.
+Use Docling locally; quarantine malformed files; track document origin, owner, classification and integrity hash.
+Output / evidence: Knowledge ingestion service and supported-format register.   |   Lead: Backend/AI engineer
+T-015  Index and retrieve authorised passages
+Create local embeddings, chunk metadata, vector index and optional reranker; store access labels alongside each passage.
+Enforce filtering before retrieval and again before citation/file access; track source changes, deletions and reindexing.
+Output / evidence: Knowledge database, retrieval API and provenance citations.   |   Lead: AI/backend
+T-016  Set up local identity and policy controls
+Deploy Keycloak or equivalent local identity platform; implement local login, MFA approach, service identities and emergency access.
+Build server-side policy decisions for resource, action, user and document classification. Default deny on uncertainty.
+Output / evidence: Identity configuration, policy rules and admin workflow.   |   Lead: Security architect + backend
+T-017  Prove non-disclosure across roles
+Test captains, engineers, general crew, admins and removed crew against documents outside their permitted scope.
+Verify results, previews, citations, exports, cached answers and indexes cannot bypass revocation.
+Output / evidence: Automated ACL regression suite and audit evidence.   |   Lead: Independent QA/security
+PHASE 4  |  Read-only cybersecurity intelligence
+
+
+Gate to exit: Representative security alerts reliably appear with evidence and explanation.
+T-018  Deploy independent security monitoring
+Install Wazuh server, indexer and dashboard on a separate lab host or isolated VM; harden accounts and retention.
+Configure host/system event collectors and log storage; validate operation without WAN.
+Output / evidence: Security server baseline and retained test events.   |   Lead: Security/infrastructure
+T-019  Build source adapters and asset map
+Ingest test FortiGate syslog, switch events and host alerts through approved collectors and limited read-only APIs.
+Normalise devices by hostname, IP/VLAN, equipment owner and equipment class; avoid collecting credentials in logs.
+Output / evidence: Initial vessel asset registry, normalised event schema, adapter tests.   |   Lead: Network + backend
+T-020  Develop Sovereign Intelligence Engine
+Implement controlled query tools for incidents, timestamps and supporting evidence; permit the LLM to explain, not alter, events.
+Generate incident summaries and suggested analyst checks; show confidence limits and source events.
+Output / evidence: Read-only incident dashboard and explained alert cases.   |   Lead: AI/backend + security
+T-021  Verify independence and safety
+Simulate AI server outage and confirm Wazuh still collects and presents security events.
+Confirm no outbound access through LLM tools, no firewall rule writes and no interfaces into safety-critical systems.
+Output / evidence: Separation-of-duties and resilience test record.   |   Lead: QA + security architect
+PHASE 5  |  Hardening, offline release and recovery
+
+
+Gate to exit: G2 — all MVP-critical controls pass the lab test matrix.
+T-022  Harden all nodes and interfaces
+Apply secure baseline: full-disk encryption where feasible, service identities, TLS, host firewalls, locked-down admin, secrets management and audit trails.
+Segment the inference, application, knowledge, security and management services; remove default credentials and unnecessary services.
+Output / evidence: Hardened configuration baseline and configuration audit.   |   Lead: DevSecOps + security
+T-023  Enforce and test no-egress behaviour
+Configure default-deny public egress for the AI environment on FortiGate and host controls; inspect DNS, IPv6, proxy, container and telemetry paths.
+Test with WAN physically disconnected and with WAN available to other vessel networks; collect firewall and packet-level evidence.
+Output / evidence: Egress test report with documented exceptions and observed traffic.   |   Lead: Network + security
+T-024  Create signed offline update pipeline
+Build connected preparation workflow for verified dependencies, approved model files and container images; generate SBOM and checksums.
+Sign release bundle; scan approved media; import through controlled procedure; verify signature and rollback during staging.
+Output / evidence: Release bundle v0.x, signature verification procedure and rollback test.   |   Lead: DevSecOps
+T-025  Implement backup, restore and health checks
+Back up application database/configuration and keys using separate protected media; define custodian responsibility and recovery targets.
+Run restore to clean lab hardware; validate data integrity, auth, model start and offline function.
+Output / evidence: Recovery runbook, scheduled backup verification and restore evidence.   |   Lead: Infrastructure engineer
+T-026  Security test and remediate
+Run SAST/DAST, dependency and container scans, role-bypass checks, unsafe file parsing, prompt-injection fixtures and vulnerability review.
+Resolve critical/high findings or document formal justified exceptions before any vessel deployment.
+Output / evidence: MVP test dossier, remediation log, security review.   |   Lead: QA + independent security tester
+03   MVP definition of done — Gate G2
+A software demo is not the MVP acceptance milestone. G2 requires working features plus evidence that intended security boundaries hold in the lab.
+
+
+
+
+PHASE 6  |  Pilot-ready product and deployment kit
+
+
+Gate to exit: G3 — security-reviewed release and installation rehearsal are complete.
+T-027  Qualify the reference hardware
+Verify server/chassis compatibility for GPU, 128 GB ECC memory, mirrored enterprise SSDs, 10GbE, power and thermal headroom.
+Qualify independent security host, NAS/backup, UPS, rack depth, vibration/cable retention and management access.
+Output / evidence: Qualified hardware bill of materials and deployment drawings.   |   Lead: Infrastructure + maritime engineer
+T-028  Automate deployment and validation
+Write idempotent install playbooks/scripts, local certificate provision, environment configuration, service health checks and post-install tests.
+Keep source code in company repositories and distribute versioned signed images/binaries; never pre-load client data into packages.
+Output / evidence: V1 installer and configuration templates.   |   Lead: DevSecOps
+T-029  Rehearse a clean-room installation
+Install full stack onto wiped staging equipment without internet; restore baseline from configuration and signed packages.
+Test rollback, disk failure, reboot/power recovery, offline identity, service replacement and audit logging.
+Output / evidence: Deployment rehearsal report and updated runbooks.   |   Lead: DevSecOps + QA
+T-030  Commission independent security assessment
+Have qualified testers evaluate network isolation, app authorisation, RAG exfiltration paths, document parsing and maintenance channels.
+Remediate findings, document residual risks and approve the restricted pilot data policy.
+Output / evidence: Penetration test report, remediation evidence, risk acceptance.   |   Lead: Independent security tester
+T-031  Complete operator and engineer documentation
+Produce as-built diagrams, installation SOP, identity/permission SOP, backup/restore SOP, offline update SOP, alert triage SOP and incident escalation tree.
+Define health reporting without violating the strict no-egress configuration.
+Output / evidence: Vessel installation pack, acceptance checklist, training material.   |   Lead: Technical lead + support
+04   First-vessel implementation playbook
+Only perform these tasks after formal permission from the vessel owner/authorised management and an approved change plan. Never ingest production data or access production management networks based on informal access alone.
+PHASE 7A  |  Pre-installation technical survey
+
+
+Gate to exit: Vessel site design and approved change window.
+T-032  Survey onboard environment
+Inventory FortiGate model/policies, VLANs, managed switches, available rack space, UPS capacity, cooling, NAS shares and available physical ports.
+Verify supported log export methods, existing identity arrangements, DNS/NTP and backup responsibilities.
+Output / evidence: Site-survey worksheet, asset inventory and network drawing.   |   Lead: Maritime network + infrastructure
+T-033  Approve local data and access plan
+Identify authorised document folders, retention, role groups, system owners, allowed security telemetry and any prohibited repositories.
+Confirm controlled export rules for cloud-hosted source files, with no implied relocation of existing SaaS data.
+Output / evidence: Approved source/ACL matrix and data-handling schedule.   |   Lead: Security architect + vessel approver
+T-034  Design site-specific configuration
+Assign fixed VLANs, private addresses, DNS names, restricted service identities, firewall ACLs, certificate chain and update media custody.
+Define acceptance test owner, rollback plan, maintenance window and safety constraints.
+Output / evidence: Vessel configuration manifest and implementation method statement.   |   Lead: Infrastructure + vessel technical team
+PHASE 7B  |  Hardware installation and system configuration
+
+
+Gate to exit: Powered, isolated platform with documented as-built configuration.
+T-035  Install physical components
+Rack and label AI server, security server, NAS/backup interface and UPS; verify grounding, physical security and thermal capacity.
+Connect designated switch ports, out-of-band management where available and power-protection monitoring.
+Output / evidence: Photographs, asset tags, serial numbers and electrical checks.   |   Lead: Field/infrastructure engineer
+T-036  Implement network segmentation and controls
+Create AI/server/admin segments, allow only documented user HTTPS and approved service flows, block AI public egress.
+Validate firewall policies without changing unrelated routing or management access.
+Output / evidence: Firewall change record, port matrix and egress results.   |   Lead: Maritime network + security
+T-037  Install signed software package
+Verify bundle signatures, deploy containers/services, initialise encrypted databases and model files, issue internal certificates.
+Create vessel-specific settings from approved manifest; run installation smoke tests offline.
+Output / evidence: Installation log, release ID, service inventory and software hashes.   |   Lead: DevSecOps
+T-038  Connect approved data and telemetry
+Provision read-only NAS service accounts and limited source folders; import low-sensitivity pilot data first.
+Enable approved FortiGate/endpoint logs and read-only SIEM integration, verifying equipment ownership and log volume.
+Output / evidence: Connector report, indexing inventory and security event sample.   |   Lead: Backend + network
+PHASE 7C  |  Site acceptance, handover and launch
+
+
+Gate to exit: G4 — signed site acceptance test and operational handover.
+T-039  Execute onboard site acceptance testing (SAT)
+Repeat offline chat, permissions, egress, local logs, data-citation, security alert, service restart and restore scenarios.
+Test real user groups using approved files and ensure no access outside authorised collections.
+Output / evidence: Signed SAT with test IDs, screenshots/logs, deviations and action owner.   |   Lead: QA + vessel representative
+T-040  Perform controlled handover
+Transfer authorised admin credentials and emergency recovery material through the approved secure channel.
+Train captain/AVIT/engineers on permissions, alert response, backups, offline updates and support escalation.
+Output / evidence: Operator training record, admin custody record, approved SOPs.   |   Lead: Technical lead + vessel AVIT
+T-041  Close the pilot and fix residual defects
+Record first-use problems, false-positive alerts, retrieval failures, performance issues and usability concerns.
+Publish approved fixes as signed releases; re-test the affected control boundaries before installing.
+Output / evidence: Pilot closeout, verified defects register, stable V1 release notes.   |   Lead: Product + engineering
+05   Ongoing technical delivery after launch
+
+
+Support boundary: strict data sovereignty
+If no operational data or remote access may leave the vessel, central fleet operations cannot continuously receive detailed real-time logs. Support must use onboard personnel, approved field visits and signed offline media; any exception for telemetry/remote support needs separate authorisation, new threat analysis and a changed product claim.
+06   Engineering deliverables register
+
+
+07   Delivery roles and ownership
+
+
+Critical dependencies and risks
+
+
+08   Pilot implementation checklist
+Use this as the practical delivery checklist at the start of the first approved vessel deployment. Each item requires a recorded owner and evidence.
+
+
+Decision log to close during phases 0–2
+Choose inference runtime: vLLM as baseline or NVIDIA NIM, depending on commercial licence, GPU support and offline staging.
+Agree the permitted source file types, OCR scope and how original document permissions are synchronised.
+Confirm whether the security sensor needs passive network traffic or logs only (logs first for V1).
+Define user concurrency and document corpus size for performance benchmarks before committing to GPU hardware.
+Set acceptable RPO/RTO and patch-response expectations for each deployment tier.
+Decide whether each vessel owns encryption keys or uses a documented shared-custody arrangement.
+09   Technical reference sources
+Implementation guidance should be verified against vendor documentation at build time. These are primary reference starting points, not substitutes for independent security engineering.
+NVIDIA NIM — Air-Gap Deployment  —  Open official documentation
+Wazuh — Offline Installation  —  Open official documentation
+Keycloak — Authorization Services  —  Open official documentation
+Docling — Offline Processing FAQ  —  Open official documentation
+OWASP — LLM01 Prompt Injection  —  Open official documentation
+NIST — AI Risk Management Framework / Generative AI Profile  —  Open official documentation
+
+
+

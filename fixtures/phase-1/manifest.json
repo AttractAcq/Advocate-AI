@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "path": "artifacts/MAN-P1.pdf",
+      "sha256": "432faf5adc8f5411cbbdc849e01a15524e2ca0bfb362010e81093ddc5dda5054",
+      "collection": "management",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/ENG-P1.pdf",
+      "sha256": "37f9d5226dd3dea5da3f59c007b3d9fa5724bfc0930c0109767e1e126d67f5a6",
+      "collection": "engineering",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/INT-P1.pdf",
+      "sha256": "18e2db1712686c569529cf7bbba2ae52fd83e18df15e19dbb462fddbbf37fb97",
+      "collection": "interior",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/DEC-P1.pdf",
+      "sha256": "29c03658ab9f946b0af77f9471c7e0ad55942dd40d6a3fd057c40a472c1a9706",
+      "collection": "deck",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/RES-P1.pdf",
+      "sha256": "b8431a30fcd689f32c7a50f26ec6377f2b128f85316d25a7ae9ecbbcaba3ec77",
+      "collection": "restricted",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/ENG-P2.docx",
+      "sha256": "c3e82b380cc8f71e95ce21021ffd062682e6c931c0ebdaf43559e2b83c9fc395",
+      "collection": "engineering",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/INT-P2.docx",
+      "sha256": "31ed499b4ced8476e6c8d0e289a7bba7cebc1a3f6e9d0a8280116e70d5480ce6",
+      "collection": "interior",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/ENG-P3.xlsx",
+      "sha256": "ade0236635e72e51d9b2fa984d7aae0a421a6f9e17c0c37d5c6cfd9d6b2decbe",
+      "collection": "engineering",
+      "expected": "accept-and-classify"
+    },
+    {
+      "path": "artifacts/ENG-P2-duplicate.docx",
+      "sha256": "c3e82b380cc8f71e95ce21021ffd062682e6c931c0ebdaf43559e2b83c9fc395",
+      "collection": "engineering",
+      "expected": "detect-duplicate"
+    },
+    {
+      "path": "artifacts/malformed.pdf",
+      "sha256": "31ad149d6fef36b87fc05fa5c94abc81b75f5c4af37671cf4ebb6ce189470151",
+      "collection": "deck",
+      "expected": "quarantine"
+    },
+    {
+      "path": "artifacts/encoded-injection.txt",
+      "sha256": "d8a45612c355c61b19e730e51c07dc340c5831e0808850d0461b99e0fc9f89f6",
+      "collection": "deck",
+      "expected": "ignore-instructions"
+    },
+    {
+      "path": "artifacts/oversized-declaration.json",
+      "sha256": "f21cd37d7fec6f1b36dbe760a86562a76953c7207c4d5ce5aa05f76c309fc2ad",
+      "collection": "deck",
+      "expected": "reject-by-declared-limit"
+    }
+  ]
+}

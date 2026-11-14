@@ -1,0 +1,29 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:6f67515c-1a20-4c8a-95ad-d4cf337eaa40",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-14T12:41:49Z",
+    "properties": [
+      {"name": "sovereign-ai:inventory-status", "value": "candidate-only; no artifacts acquired or installed"},
+      {"name": "sovereign-ai:required-next-step", "value": "resolve exact model revisions, transitive dependencies and artifact hashes during Phase 1"}
+    ]
+  },
+  "components": [
+    {"type": "operating-system", "name": "Ubuntu Server", "version": "24.04.5 LTS", "bom-ref": "ubuntu-server", "externalReferences": [{"type": "website", "url": "https://documentation.ubuntu.com/release-notes/24.04/"}]},
+    {"type": "application", "name": "vLLM", "version": "0.32.0", "bom-ref": "vllm", "licenses": [{"license": {"id": "Apache-2.0"}}], "externalReferences": [{"type": "vcs", "url": "https://github.com/vllm-project/vllm"}]},
+    {"type": "machine-learning-model", "name": "Qwen3-8B", "bom-ref": "qwen3-8b", "licenses": [{"license": {"id": "Apache-2.0"}}], "externalReferences": [{"type": "website", "url": "https://huggingface.co/Qwen/Qwen3-8B"}]},
+    {"type": "machine-learning-model", "name": "bge-m3", "bom-ref": "bge-m3", "licenses": [{"license": {"id": "MIT"}}], "externalReferences": [{"type": "website", "url": "https://huggingface.co/BAAI/bge-m3"}]},
+    {"type": "machine-learning-model", "name": "bge-reranker-v2-m3", "bom-ref": "bge-reranker-v2-m3", "licenses": [{"license": {"id": "Apache-2.0"}}], "externalReferences": [{"type": "website", "url": "https://huggingface.co/BAAI/bge-reranker-v2-m3"}]},
+    {"type": "library", "name": "Docling", "version": "2.139.0", "bom-ref": "docling", "licenses": [{"license": {"id": "MIT"}}], "externalReferences": [{"type": "distribution", "url": "https://pypi.org/project/docling/2.139.0/"}]},
+    {"type": "application", "name": "PostgreSQL", "version": "18.7", "bom-ref": "postgresql", "licenses": [{"license": {"id": "PostgreSQL"}}], "externalReferences": [{"type": "website", "url": "https://www.postgresql.org/docs/release/18.7/"}]},
+    {"type": "library", "name": "pgvector", "version": "0.8.7", "bom-ref": "pgvector", "licenses": [{"license": {"id": "PostgreSQL"}}], "externalReferences": [{"type": "vcs", "url": "https://github.com/pgvector/pgvector"}]},
+    {"type": "application", "name": "Keycloak", "version": "26.8.2", "bom-ref": "keycloak", "licenses": [{"license": {"id": "Apache-2.0"}}], "externalReferences": [{"type": "website", "url": "https://www.keycloak.org/downloads"}]},
+    {"type": "application", "name": "Wazuh", "version": "4.14.10", "bom-ref": "wazuh", "licenses": [{"license": {"id": "GPL-2.0-only"}}], "externalReferences": [{"type": "website", "url": "https://documentation.wazuh.com/current/installation-guide/packages-list.html"}]},
+    {"type": "library", "name": "React", "version": "19.3.0", "bom-ref": "react", "licenses": [{"license": {"id": "MIT"}}], "externalReferences": [{"type": "vcs", "url": "https://github.com/facebook/react"}]},
+    {"type": "library", "name": "TypeScript", "version": "7.0.2", "bom-ref": "typescript", "licenses": [{"license": {"id": "Apache-2.0"}}], "externalReferences": [{"type": "vcs", "url": "https://github.com/microsoft/TypeScript"}]},
+    {"type": "library", "name": "Tailwind CSS", "version": "4.3.5", "bom-ref": "tailwindcss", "licenses": [{"license": {"id": "MIT"}}], "externalReferences": [{"type": "vcs", "url": "https://github.com/tailwindlabs/tailwindcss"}]},
+    {"type": "library", "name": "FastAPI", "version": "0.162.6", "bom-ref": "fastapi", "licenses": [{"license": {"id": "MIT"}}], "externalReferences": [{"type": "distribution", "url": "https://pypi.org/project/fastapi/0.162.6/"}]}
+  ]
+}

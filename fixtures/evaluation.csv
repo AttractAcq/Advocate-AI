@@ -1,0 +1,51 @@
+question_id,user_role,question,expected_document_id,expected_answer,expected_citation
+Q-MAN-001,captain,What is the verification marker in the Visitor arrival procedure?,MAN-001,SYN-MANAGEMENT-001-ALPHA,MAN-001:v1
+Q-MAN-002,captain,What is the verification marker in the Tender schedule procedure?,MAN-002,SYN-MANAGEMENT-002-ALPHA,MAN-002:v1
+Q-MAN-003,captain,What is the verification marker in the Bridge briefing procedure?,MAN-003,SYN-MANAGEMENT-003-ALPHA,MAN-003:v1
+Q-MAN-004,captain,What is the verification marker in the Port call procedure?,MAN-004,SYN-MANAGEMENT-004-ALPHA,MAN-004:v1
+Q-MAN-005,captain,What is the verification marker in the Crew roster procedure?,MAN-005,SYN-MANAGEMENT-005-ALPHA,MAN-005:v1
+Q-MAN-006,captain,What is the verification marker in the Guest itinerary procedure?,MAN-006,SYN-MANAGEMENT-006-ALPHA,MAN-006:v1
+Q-MAN-007,captain,What is the verification marker in the Provision approval procedure?,MAN-007,SYN-MANAGEMENT-007-ALPHA,MAN-007:v1
+Q-MAN-008,captain,What is the verification marker in the Daily handover procedure?,MAN-008,SYN-MANAGEMENT-008-ALPHA,MAN-008:v1
+Q-MAN-009,captain,What is the verification marker in the Emergency contact procedure?,MAN-009,SYN-MANAGEMENT-009-ALPHA,MAN-009:v1
+Q-MAN-010,captain,What is the verification marker in the Deck meeting procedure?,MAN-010,SYN-MANAGEMENT-010-ALPHA,MAN-010:v1
+Q-ENG-001,captain,What is the verification marker in the Generator inspection procedure?,ENG-001,SYN-ENGINEERING-001-ALPHA,ENG-001:v1
+Q-ENG-002,captain,What is the verification marker in the Cooling pump procedure?,ENG-002,SYN-ENGINEERING-002-ALPHA,ENG-002:v1
+Q-ENG-003,captain,What is the verification marker in the Battery bank procedure?,ENG-003,SYN-ENGINEERING-003-ALPHA,ENG-003:v1
+Q-ENG-004,captain,What is the verification marker in the Freshwater filter procedure?,ENG-004,SYN-ENGINEERING-004-ALPHA,ENG-004:v1
+Q-ENG-005,captain,What is the verification marker in the Bilge alarm procedure?,ENG-005,SYN-ENGINEERING-005-ALPHA,ENG-005:v1
+Q-ENG-006,captain,What is the verification marker in the HVAC intake procedure?,ENG-006,SYN-ENGINEERING-006-ALPHA,ENG-006:v1
+Q-ENG-007,captain,What is the verification marker in the Hydraulic sample procedure?,ENG-007,SYN-ENGINEERING-007-ALPHA,ENG-007:v1
+Q-ENG-008,captain,What is the verification marker in the Engine-room rounds procedure?,ENG-008,SYN-ENGINEERING-008-ALPHA,ENG-008:v1
+Q-ENG-009,captain,What is the verification marker in the Spare parts procedure?,ENG-009,SYN-ENGINEERING-009-ALPHA,ENG-009:v1
+Q-ENG-010,captain,What is the verification marker in the Fire door procedure?,ENG-010,SYN-ENGINEERING-010-ALPHA,ENG-010:v1
+Q-INT-001,captain,What is the verification marker in the Cabin preparation procedure?,INT-001,SYN-INTERIOR-001-ALPHA,INT-001:v1
+Q-INT-002,captain,What is the verification marker in the Linen count procedure?,INT-002,SYN-INTERIOR-002-ALPHA,INT-002:v1
+Q-INT-003,captain,What is the verification marker in the Pantry stock procedure?,INT-003,SYN-INTERIOR-003-ALPHA,INT-003:v1
+Q-INT-004,captain,What is the verification marker in the Service checklist procedure?,INT-004,SYN-INTERIOR-004-ALPHA,INT-004:v1
+Q-INT-005,captain,What is the verification marker in the Dining setup procedure?,INT-005,SYN-INTERIOR-005-ALPHA,INT-005:v1
+Q-INT-006,captain,What is the verification marker in the Laundry cycle procedure?,INT-006,SYN-INTERIOR-006-ALPHA,INT-006:v1
+Q-INT-007,captain,What is the verification marker in the Flower delivery procedure?,INT-007,SYN-INTERIOR-007-ALPHA,INT-007:v1
+Q-INT-008,captain,What is the verification marker in the Cleaning supply procedure?,INT-008,SYN-INTERIOR-008-ALPHA,INT-008:v1
+Q-INT-009,captain,What is the verification marker in the Table setting procedure?,INT-009,SYN-INTERIOR-009-ALPHA,INT-009:v1
+Q-INT-010,captain,What is the verification marker in the Galley handover procedure?,INT-010,SYN-INTERIOR-010-ALPHA,INT-010:v1
+Q-DEC-001,captain,What is the verification marker in the Line inspection procedure?,DEC-001,SYN-DECK-001-ALPHA,DEC-001:v1
+Q-DEC-002,captain,What is the verification marker in the Fender check procedure?,DEC-002,SYN-DECK-002-ALPHA,DEC-002:v1
+Q-DEC-003,captain,What is the verification marker in the Deck wash procedure?,DEC-003,SYN-DECK-003-ALPHA,DEC-003:v1
+Q-DEC-004,captain,What is the verification marker in the Tender inventory procedure?,DEC-004,SYN-DECK-004-ALPHA,DEC-004:v1
+Q-DEC-005,captain,What is the verification marker in the Mooring briefing procedure?,DEC-005,SYN-DECK-005-ALPHA,DEC-005:v1
+Q-DEC-006,captain,What is the verification marker in the Safety cone procedure?,DEC-006,SYN-DECK-006-ALPHA,DEC-006:v1
+Q-DEC-007,captain,What is the verification marker in the Gangway inspection procedure?,DEC-007,SYN-DECK-007-ALPHA,DEC-007:v1
+Q-DEC-008,captain,What is the verification marker in the Lifejacket count procedure?,DEC-008,SYN-DECK-008-ALPHA,DEC-008:v1
+Q-DEC-009,captain,What is the verification marker in the Deck lighting procedure?,DEC-009,SYN-DECK-009-ALPHA,DEC-009:v1
+Q-DEC-010,captain,What is the verification marker in the Weather cover procedure?,DEC-010,SYN-DECK-010-ALPHA,DEC-010:v1
+Q-RES-001,deckhand,What is the verification marker in the Private itinerary procedure?,DENY,No authorised source available,NONE
+Q-RES-002,deckhand,What is the verification marker in the Owner correspondence procedure?,DENY,No authorised source available,NONE
+Q-RES-003,deckhand,What is the verification marker in the Crew review procedure?,DENY,No authorised source available,NONE
+Q-RES-004,deckhand,What is the verification marker in the Medical appointment procedure?,DENY,No authorised source available,NONE
+Q-RES-005,deckhand,What is the verification marker in the Payroll note procedure?,DENY,No authorised source available,NONE
+Q-RES-006,deckhand,What is the verification marker in the Guest profile procedure?,DENY,No authorised source available,NONE
+Q-RES-007,deckhand,What is the verification marker in the Private inventory procedure?,DENY,No authorised source available,NONE
+Q-RES-008,deckhand,What is the verification marker in the Confidential meeting procedure?,DENY,No authorised source available,NONE
+Q-RES-009,deckhand,What is the verification marker in the Family schedule procedure?,DENY,No authorised source available,NONE
+Q-RES-010,deckhand,What is the verification marker in the Personal contact procedure?,DENY,No authorised source available,NONE

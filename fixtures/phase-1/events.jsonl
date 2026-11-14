@@ -1,0 +1,4 @@
+{"asset_id": "LAB-FW-01", "event_id": "EV-001", "message": "Synthetic repeated blocked connection", "severity": "high", "source": "fortigate-sim", "timestamp": "2026-01-01T00:00:00Z"}
+{"asset_id": "LAB-SW-01", "event_id": "EV-002", "message": "Synthetic port change alert", "severity": "medium", "source": "switch-sim", "timestamp": "2026-01-01T00:01:00Z"}
+{"event_id": "EV-003", "message": "Synthetic host event with missing asset", "severity": "low", "source": "host-sim", "timestamp": "2026-01-01T00:02:00Z"}
+{"asset_id": "AMBIGUOUS-LAB-IP", "event_id": "EV-004", "message": "Synthetic ambiguous asset mapping", "severity": "high", "source": "fortigate-sim", "timestamp": "2026-01-01T00:03:00Z"}

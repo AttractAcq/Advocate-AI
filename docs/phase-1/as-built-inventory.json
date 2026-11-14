@@ -1,0 +1,27 @@
+{
+  "recorded_date": "2026-11-14",
+  "status": "local-loopback-simulation-only",
+  "host": {
+    "platform": "macOS 26.5.2 arm64",
+    "processor": "Apple M3",
+    "nvidia_gpu": false,
+    "python": "3.14.3",
+    "git": "2.50.1",
+    "docker_cli": true,
+    "docker_engine_running": false
+  },
+  "network": {
+    "bind": "127.0.0.1",
+    "segmented_lab": false,
+    "local_dns_pki": false
+  },
+  "storage": {
+    "test_nas_appliance": false,
+    "synthetic_source_directory": "fixtures/sources"
+  },
+  "security": {
+    "separate_wazuh_host": false,
+    "synthetic_event_feed": "fixtures/phase-1/events.jsonl"
+  },
+  "target_lab_hardware": "unassigned"
+}

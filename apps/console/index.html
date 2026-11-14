@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sovereign AI — synthetic lab health</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #193047; }
+    h1 { margin-bottom: 0; }
+    p { margin-top: .3rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; }
+    th, td { text-align: left; border-bottom: 1px solid #ccd7e0; padding: .6rem; }
+    .ok { color: #146435; font-weight: bold; }
+    .down { color: #a12020; font-weight: bold; }
+    #updated { color: #4b6070; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sovereign AI</h1>
+    <p>Phase 1 synthetic lab health dashboard. This is a local simulation, not a vessel application.</p>
+    <p id="updated" aria-live="polite">Loading service status…</p>
+    <table>
+      <thead><tr><th>Service</th><th>Status</th><th>Requests</th><th>Errors</th><th>CPU load</th><th>Free storage</th><th>GPU</th></tr></thead>
+      <tbody id="services"></tbody>
+    </table>
+  </main>
+  <script>
+    async function refresh() {
+      const body = document.getElementById('services');
+      const updated = document.getElementById('updated');
+      try {
+        const response = await fetch('/lab-status', {cache: 'no-store'});
+        if (!response.ok) throw new Error('status request failed');
+        const data = await response.json();
+        body.replaceChildren();
+        for (const [name, item] of Object.entries(data.services)) {
+          const row = document.createElement('tr');
+          const metrics = item.metrics || {};
+          const values = [
+            name, item.status, metrics.requests_total ?? '—', metrics.errors_total ?? '—',
+            metrics.cpu_load_1m?.toFixed(2) ?? '—',
+            metrics.storage_free_bytes == null ? '—' : (metrics.storage_free_bytes / 1073741824).toFixed(1) + ' GiB',
+            metrics.gpu?.available ? 'Available' : 'Unavailable'
+          ];
+          values.forEach((value, index) => {
+            const cell = document.createElement('td');
+            cell.textContent = String(value);
+            if (index === 1) cell.className = item.status === 'ok' ? 'ok' : 'down';
+            row.appendChild(cell);
+          });
+          body.appendChild(row);
+        }
+        updated.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } catch {
+        updated.textContent = 'Lab status unavailable';
+      }
+    }
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

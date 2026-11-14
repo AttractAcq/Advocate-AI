@@ -1,0 +1,96 @@
+# Sovereign AI
+
+Sovereign AI is a private vessel assistant and read-only cybersecurity intelligence product. The [technical development and implementation plan](docs/Sovereign_AI_Technical_Development_and_Implementation_Plan.docx) is the detailed build plan for this repository. Its task IDs and gates govern delivery. The [build-plan overview](<docs/Soverign AI build plan 14_11_2026.txt>) describes the five product milestones and seven proprietary modules.
+
+**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 is in progress; [G0A evidence and remaining work](docs/phase-1/gate.md) records its actual state. This baseline does not authorise vessel access, production data, procurement or deployment.
+
+## Product milestones
+
+| Milestone | Result | Detailed phases |
+|---|---|---|
+| Working private AI | Crew use Console and Core with a local model and cited answers from test documents. | 1: reproducible lab; 2: Core, Console and inference; initial retrieval in 2–3 |
+| Security and document permissions | Knowledge and Policy Engines enforce source permissions and audit access. | 3: ingestion and access control; security verification through 5–6 |
+| Cybersecurity intelligence | Intelligence Engine explains Wazuh and representative network events using approved context. | 4: read-only security analysis and adapters |
+| Production deployment | Installer, configurations, signed offline updates, health checks, encrypted backups and recovery form a pilot-ready appliance. | 5: hardening and recovery; 6: release kit; 7A–7C: authorised pilot |
+| Fleet management and expansion | Company portal manages customers, licences, releases and support across installations. | Expansion after pilot; post-launch delivery section of the plan |
+
+## Engineering phases and gates
+
+| Phase | Work | Exit |
+|---|---|---|
+| 0 | Requirements, architecture, threat model, stack and test plan | **G0 passed** for synthetic lab development |
+| 1 | Repository, isolated lab and reproducible build | G0A: fresh build and documented lab reproduction |
+| 2 | Local model serving, Sovereign Core and Console, basic cited retrieval | G1: chat and citations with WAN disconnected |
+| 3 | Knowledge ingestion, source permissions, Policy Engine and audit enforcement | Role, revocation, citation and injection tests pass |
+| 4 | Read-only cybersecurity intelligence and vessel adapters | Representative alerts have evidence and explanations |
+| 5 | Security hardening, offline release, backup and recovery | G2: MVP-critical lab controls pass |
+| 6 | MVP validation and pilot-ready installation package | G3: security-reviewed release and installation rehearsal |
+| 7A–7C | Approved site survey, installation, commissioning and handover | G4: signed site acceptance and handover |
+| Post-launch | Maintenance, signed updates, recovery checks and repeatable deployments | Operational records and release gates |
+
+The five milestones describe product outcomes; the engineering phases set their delivery order. The Phase 2 demonstration uses synthetic data. Full permissions and security review are later gates.
+
+## Proprietary modules
+
+| Module | Responsibility |
+|---|---|
+| Sovereign Console | Crew chat, documents, citations, history, workspaces and administration |
+| Sovereign Core | Authenticated APIs, request orchestration, model connection and controlled tool use |
+| Knowledge Engine | Parsing, indexing, NAS synchronisation and permission-aware retrieval |
+| Policy Engine | Resource authorisation, source permission mapping and audit events |
+| Intelligence Engine | Read-only security event normalisation, analysis and reporting |
+| Vessel Connect & Deploy | Integration adapters, installation, offline updates, diagnostics and recovery |
+| Sovereign Fleet | Separate company portal for customers, vessels, licences, releases and support |
+
+Strict Sovereign Mode is the V1 default: prompts, vessel documents, embeddings and security telemetry remain onboard. Sovereign Fleet has no standing live connection to a strict-mode vessel.
+
+## Repository layout
+
+```text
+Development/
+├── README.md                 Product roadmap and repository map
+├── apps/                     Console and Core skeletons
+├── services/                 Knowledge, Policy, Intelligence and connector skeletons
+├── infrastructure/           Synthetic lab and release-manifest checks
+├── scripts/                  Build, repository checks and lab control
+├── tests/                    Phase 1 unit tests
+├── .github/                  CI and dependency update configuration
+├── Makefile                  One-command build, tests and lab bring-up
+├── pyproject.toml            Dependency-free Python lab metadata
+├── docs/                     Build plan and technical documentation
+│   ├── Sovereign_AI_Technical_Development_and_Implementation_Plan.docx
+│   ├── Soverign AI build plan 14_11_2026.txt
+│   ├── 01-scope-and-requirements.md
+│   ├── 02-architecture.md
+│   ├── 03-threat-model-and-data-policy.md
+│   ├── 04-stack-and-provenance.md
+│   ├── 05-acceptance-tests.md
+│   ├── 06-decision-and-signoff.md
+│   ├── candidate-sbom.json
+│   ├── fixtures.md
+│   ├── phase-1/              Runbook, inventory, controls and gate evidence
+│   └── approval/2026-11-14-g0.md
+└── fixtures/                 Synthetic generators, manifests and local generated data
+    ├── generate.py
+    ├── evaluation.csv
+    ├── manifest.csv
+    ├── roles.json
+    ├── negative-prompt-injection.txt
+    ├── phase-1/              Mixed formats, negative cases and events
+    └── sources/              100 generated fictional text documents (Git ignored)
+```
+
+The Phase 1 code is a synthetic lab skeleton. Generated fixture payloads are reproducible with `make fixtures` and ignored by Git; their generators, expected results and manifests are versioned. It does not yet implement the Phase 2 assistant or satisfy the G0A hardware and network gate.
+
+## Phase 0 evidence
+
+| Plan task | Evidence |
+|---|---|
+| T-001 Operating model | [Scope and requirements](docs/01-scope-and-requirements.md) |
+| T-002 Trust boundaries | [Architecture](docs/02-architecture.md) |
+| T-003 Threat model | [Threat model and data policy](docs/03-threat-model-and-data-policy.md) |
+| T-004 Reference stack | [Stack and provenance](docs/04-stack-and-provenance.md), [candidate SBOM](docs/candidate-sbom.json) |
+| T-005 Acceptance tests | [Test plan](docs/05-acceptance-tests.md), [fixture guide](docs/fixtures.md) |
+| G0 Technical baseline | [Decision and sign-off](docs/06-decision-and-signoff.md), [approval record](docs/approval/2026-11-14-g0.md) |
+
+The candidate SBOM records selected top-level components. A resolved SBOM, artifact hashes, specialist security review and licence distribution review belong to later gates.
