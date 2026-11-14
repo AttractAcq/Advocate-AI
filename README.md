@@ -2,7 +2,7 @@
 
 Sovereign AI is a private vessel assistant and read-only cybersecurity intelligence product. The [technical development and implementation plan](docs/Sovereign_AI_Technical_Development_and_Implementation_Plan.docx) is the detailed build plan for this repository. Its task IDs and gates govern delivery. The [build-plan overview](<docs/Soverign AI build plan 14_11_2026.txt>) describes the five product milestones and seven proprietary modules.
 
-**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 is in progress; [G0A evidence and remaining work](docs/phase-1/gate.md) records its actual state. This baseline does not authorise vessel access, production data, procurement or deployment.
+**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 local simulation and GitHub CI are implemented; hardware and enforced remote controls remain open in [G0A evidence](docs/phase-1/gate.md). [Phase 2 synthetic retrieval](docs/phase-2-retrieval.md) has started. This baseline does not authorise vessel access, production data, procurement or deployment.
 
 ## Product milestones
 
@@ -53,7 +53,7 @@ Development/
 ├── services/                 Knowledge, Policy, Intelligence and connector skeletons
 ├── infrastructure/           Synthetic lab and release-manifest checks
 ├── scripts/                  Build, repository checks and lab control
-├── tests/                    Phase 1 unit tests
+├── tests/                    Phase 1 and synthetic retrieval tests
 ├── .github/                  CI and dependency update configuration
 ├── Makefile                  One-command build, tests and lab bring-up
 ├── pyproject.toml            Dependency-free Python lab metadata
@@ -80,7 +80,7 @@ Development/
     └── sources/              100 generated fictional text documents (Git ignored)
 ```
 
-The Phase 1 code is a synthetic lab skeleton. Generated fixture payloads are reproducible with `make fixtures` and ignored by Git; their generators, expected results and manifests are versioned. It does not yet implement the Phase 2 assistant or satisfy the G0A hardware and network gate.
+The Phase 1 code is a synthetic lab skeleton. Generated fixture payloads are reproducible with `make fixtures` and ignored by Git; their generators, expected results and manifests are versioned. The Phase 2 retrieval prototype searches only generated text fixtures; it is not an AI assistant. G0A hardware and network checks remain open.
 
 ## Phase 0 evidence
 
