@@ -2,6 +2,18 @@
   "schema": 1,
   "mode": "loopback-simulation",
   "bind": "127.0.0.1",
+  "tls": "short-lived local lab CA",
+  "dns": {
+    "port": 18053,
+    "names": {
+      "console.lab.sovereign.test": "127.0.0.1",
+      "core.lab.sovereign.test": "127.0.0.1",
+      "knowledge.lab.sovereign.test": "127.0.0.1",
+      "policy.lab.sovereign.test": "127.0.0.1",
+      "intelligence.lab.sovereign.test": "127.0.0.1",
+      "security.lab.sovereign.test": "127.0.0.1"
+    }
+  },
   "services": {
     "console": 18080,
     "core": 18081,

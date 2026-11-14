@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -17,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import urlopen
+
+from infrastructure.lab.pki import CA, SERVER_CERT, SERVER_KEY
 
 ROOT = Path(__file__).resolve().parents[2]
 TOPOLOGY = json.loads((ROOT / "infrastructure/lab/topology.json").read_text())
@@ -86,7 +89,9 @@ def make_handler(service: str):
                             service, Handler.requests, Handler.errors, Handler.durations_ms)}
                         continue
                     try:
-                        with urlopen(f"http://127.0.0.1:{port}/metrics", timeout=0.5) as reply:
+                        context = ssl.create_default_context(cafile=str(CA))
+                        with urlopen(f"https://127.0.0.1:{port}/metrics",
+                                     timeout=0.5, context=context) as reply:
                             status[peer] = {"status": "ok", "metrics": json.load(reply)}
                     except (URLError, TimeoutError, ValueError, OSError):
                         status[peer] = {"status": "down"}
@@ -126,6 +131,10 @@ def main() -> None:
         raise SystemExit("Phase 1 lab only permits 127.0.0.1")
     port = TOPOLOGY["services"][args.service]
     with ThreadingHTTPServer((host, port), make_handler(args.service)) as server:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(certfile=SERVER_CERT, keyfile=SERVER_KEY)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
         print(json.dumps({"service": args.service, "event": "started",
                           "host": host, "port": port}), file=sys.stderr, flush=True)
         server.serve_forever(poll_interval=0.2)

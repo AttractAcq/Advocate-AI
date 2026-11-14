@@ -13,7 +13,7 @@
   "network": {
     "bind": "127.0.0.1",
     "segmented_lab": false,
-    "local_dns_pki": false
+    "local_dns_pki": "loopback-simulation-only"
   },
   "storage": {
     "test_nas_appliance": false,

@@ -5,21 +5,27 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import os
 from pathlib import Path
+import sys
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build/sovereign-phase1-skeleton.tar.gz"
-SKIP = {".git", "build", "__pycache__", ".venv", "node_modules", ".pytest_cache"}
+SKIP = {".git", "build", "runtime", "__pycache__", ".venv", "node_modules", ".pytest_cache"}
+INCLUDE = {".github", ".gitignore", "Makefile", "pyproject.toml",
+           "apps", "services", "infrastructure", "scripts", "tests", "fixtures"}
 
 
 def source_files() -> list[Path]:
     return sorted(
         p for p in ROOT.rglob("*")
         if p.is_file() and not p.is_symlink()
+        and p.relative_to(ROOT).parts[0] in INCLUDE
         and not any(part in SKIP for part in p.relative_to(ROOT).parts)
         and p.relative_to(ROOT).parts[:2] != ("fixtures", "sources")
         and p.relative_to(ROOT).parts[:3] != ("fixtures", "phase-1", "artifacts")
+        and p.name != ".DS_Store"
         and not p.name.endswith((".pyc", ".log", ".pem", ".key"))
     )
 
@@ -30,6 +36,8 @@ def build() -> str:
         with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
                 for source in source_files():
+                    if os.environ.get("SOVEREIGN_BUILD_DEBUG") == "1":
+                        print(f"packing {source.relative_to(ROOT)}", file=sys.stderr, flush=True)
                     info = archive.gettarinfo(str(source), arcname=str(source.relative_to(ROOT)))
                     info.uid = info.gid = 0
                     info.uname = info.gname = ""

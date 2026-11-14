@@ -10,19 +10,19 @@ check:
 	$(PYTHON) -m compileall -q apps services infrastructure scripts tests
 	$(PYTHON) -m py_compile fixtures/generate.py fixtures/phase-1/generate.py
 	$(PYTHON) -m unittest discover -s tests -v
-	$(PYTHON) scripts/check_repository.py
+	$(PYTHON) -m scripts.check_repository
 
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
 lab-up:
-	$(PYTHON) scripts/labctl.py up
+	$(PYTHON) -m scripts.labctl up
 
 lab-check:
-	$(PYTHON) scripts/labctl.py check
+	$(PYTHON) -m scripts.labctl check
 
 lab-smoke:
-	$(PYTHON) scripts/labctl.py smoke
+	$(PYTHON) -m scripts.labctl smoke
 
 fixtures:
 	$(PYTHON) fixtures/generate.py
