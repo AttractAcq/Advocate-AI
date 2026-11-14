@@ -2,7 +2,7 @@
 
 | Task | Evidence now | State |
 |---|---|---|
-| T-006 source structure | Monorepo skeleton, published GitHub `main`, CI workflow, unit tests | Remote CI repair in progress; reviewer identities and enforced branch protection unverified |
+| T-006 source structure | Monorepo skeleton, published GitHub `main`, CI workflow, unit tests | Remote CI repair in progress; dependency review unavailable on current private-repo plan; reviewer identities and enforced branch protection unverified |
 | T-007 isolated lab | Loopback topology, disposable local DNS/PKI, lab command and as-built inventory | Incomplete: GPU Ubuntu host, container runtime, segmented network, test NAS and separate Wazuh host/VM absent; local DNS/PKI does not replace the target lab services |
 | T-008 safe fixtures | Deterministic 100-text corpus; mixed PDF/DOCX/XLSX, duplicate, malformed, encoded injection, ACL and event cases in `fixtures/phase-1` | Local hashes, file structure, expected cases and event normalisation pass; independent fixture review remains |
 | T-009 observability | Structured request logs, TLS health and metrics endpoints, local dashboard, runbook and one-command lab bring-up | Local simulation smoke checks pass; target host observability unverified |
