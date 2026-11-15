@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -231,3 +232,41 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["method"], "evidence-only")
         self.assertNotIn("Change firewall rules", response.text)
+
+    async def test_new_indexer_alerts_arrive_while_model_is_down(self):
+        fixture_hits = json.loads(ALERTS.read_text())["hits"]["hits"]
+        stored = [fixture_hits[0]]
+        requests = []
+
+        def indexer(request):
+            requests.append(request)
+            query = json.loads(request.content)
+            filters = query["query"]["bool"]["filter"]
+            ids = next((set(item["ids"]["values"]) for item in filters if "ids" in item), None)
+            hits = [item for item in stored if ids is None or item["_id"] in ids]
+            return httpx.Response(200, json={"hits": {"hits": hits[:query["size"]]}})
+
+        reader = WazuhIndexerReader("https://10.40.1.10:9200", "synthetic-read-token",
+                                     transport=httpx.MockTransport(indexer))
+        with patch("apps.api.main.WazuhIndexerReader", return_value=reader):
+            app = create_app(Settings(lab_password="synthetic-test-passphrase",
+                                      wazuh_indexer_endpoint="https://10.40.1.10:9200",
+                                      wazuh_read_token="synthetic-read-token"), self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            login = await client.post("/api/login", json={"user_id": "lab-avit_admin-1",
+                                                      "password": "synthetic-test-passphrase"})
+            headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+            before = (await client.get("/api/security/incidents", headers=headers)).json()["incidents"]
+            self.assertEqual(len(before), 1)
+            self.model.offline = True
+            stored.append(fixture_hits[1])  # Independent simulated indexer receives an event.
+            during = (await client.get("/api/security/incidents", headers=headers)).json()["incidents"]
+            self.assertEqual(len(during), 2)
+            new_id = during[1]["incident_id"]
+            self.assertEqual((await client.get(f"/api/security/incidents/{new_id}", headers=headers)).status_code, 200)
+            self.assertEqual((await client.post(f"/api/security/incidents/{new_id}/explain", headers=headers)).status_code, 503)
+            self.model.offline = False
+            self.assertEqual((await client.post(f"/api/security/incidents/{new_id}/explain", headers=headers)).status_code, 200)
+        self.assertTrue(requests)
+        self.assertTrue(all(request.method == "POST" and request.url.path == "/wazuh-alerts*/_search"
+                            for request in requests))
