@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -109,11 +110,18 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         reply = await self.client.post("/api/chat", headers=engineer, json={"message": "generator inspection"})
         cid = reply.json()["conversation_id"]
         self.policy["document_rules"] = {"ENG-001": {"deny_users": ["engineer"]}}
+        changed_at = time.monotonic()
         (self.root / "roles.json").write_text(json.dumps(self.policy))
         self.assertEqual(search_index(self.root, self.manifest, self.database, "engineer", "generator inspection"), [])
+        self.assertEqual((await self.client.get("/api/sources/ENG-001/preview", headers=engineer)).status_code, 404)
+        denied = await self.client.post("/api/chat", headers=engineer,
+                                        json={"message": "generator inspection", "selected_documents": ["ENG-001"]})
+        self.assertEqual(denied.json()["citations"], [])
+        self.assertEqual(len(self.model.contexts), 1)
         history = await self.client.get(f"/api/conversations/{cid}", headers=engineer)
         self.assertEqual(history.json()["turns"][0]["mode"], "redacted")
         self.assertNotIn("Synthetic answer", history.text)
+        self.assertLess(time.monotonic() - changed_at, 60)
         self.policy["document_rules"] = {}
         (self.root / "roles.json").write_text(json.dumps(self.policy))
         (self.root / "sources/ENG-001.txt").unlink()
