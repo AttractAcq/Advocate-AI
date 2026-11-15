@@ -1,5 +1,11 @@
 # G0A evidence and remaining work
 
+**Requester review:** The requester stated “1. revieeed and approved” on
+15 November 2026. The [approval record](../approval/2026-11-15-phase0-phase1.md)
+accepts the completed Phase 1 local software and documentation work for
+continued development. The target G0A lab checks and independent PR review
+remain open.
+
 | Task | Evidence now | State |
 |---|---|---|
 | T-006 source structure | Monorepo, public GitHub repository, CI, full-history secret scan, Python/npm dependency audits; `main` protection now requires pull request, one independent approval, fresh review after a push, resolved conversations, linear history and `quality`, `secrets`, `dependency-review` checks | Appoint an external reviewer and obtain an attributable review of the current changes; qualify remaining action provenance before release |
