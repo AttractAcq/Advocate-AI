@@ -32,6 +32,8 @@ export default function App() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [admin, setAdmin] = useState<AdminStatus | null>(null)
   const [incidents, setIncidents] = useState<SecurityIncident[]>([])
+  const [securitySince, setSecuritySince] = useState('')
+  const [securityUntil, setSecurityUntil] = useState('')
   const [incident, setIncident] = useState<SecurityDetail | null>(null)
   const [analysis, setAnalysis] = useState<SecurityAnalysis | null>(null)
   const [filter, setFilter] = useState('')
@@ -100,6 +102,8 @@ export default function App() {
     setSelectedSources([])
     setAdmin(null)
     setIncidents([])
+    setSecuritySince('')
+    setSecurityUntil('')
     setIncident(null)
     setAnalysis(null)
     setPreview(null)
@@ -159,7 +163,17 @@ export default function App() {
     setError('')
     setIncident(null)
     setAnalysis(null)
-    try { setIncidents((await api<{ incidents: SecurityIncident[] }>('/security/incidents', token)).incidents) }
+    setIncidents([])
+    if (Boolean(securitySince) !== Boolean(securityUntil)) {
+      setError('Enter both start and end times, or clear both to view recent alerts.')
+      return
+    }
+    try {
+      const range = securitySince && securityUntil
+        ? `?since=${encodeURIComponent(new Date(securitySince).toISOString())}&until=${encodeURIComponent(new Date(securityUntil).toISOString())}`
+        : ''
+      setIncidents((await api<{ incidents: SecurityIncident[] }>(`/security/incidents${range}`, token)).incidents)
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Security alerts unavailable') }
   }
 
@@ -400,7 +414,12 @@ export default function App() {
         {view === 'security' && identity.role === 'avit_admin' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-7 shadow-sm">
           <h2 className="text-xl font-semibold">Read-only incident review</h2>
           <p className="mt-2 text-sm text-[#5d7380]">Synthetic alert evidence. Verify every finding in the independent Wazuh store before acting.</p>
-          <button className="secondary-button mt-4" onClick={() => void openSecurity()}>Refresh alerts</button>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="text-sm">From<input className="field mt-1" type="datetime-local" value={securitySince} onChange={(event) => setSecuritySince(event.target.value)} /></label>
+            <label className="text-sm">To<input className="field mt-1" type="datetime-local" value={securityUntil} onChange={(event) => setSecurityUntil(event.target.value)} /></label>
+            <button className="secondary-button" onClick={() => void openSecurity()}>Refresh alerts</button>
+          </div>
+          <p className="mt-2 text-xs text-[#5d7380]">Select a range of at most seven days, or leave both times empty for recent alerts.</p>
           <div className="mt-5 grid gap-3">
             {incidents.map((item) => <button key={item.incident_id} className="rounded-xl border border-[#dce5e5] p-4 text-left hover:bg-[#f7faf8]" onClick={() => void openIncident(item.incident_id)}>
               <strong className="block text-sm">{item.summary}</strong><span className="text-xs text-[#5d7380]">{item.severity} · {item.timestamp} · {item.incident_id}</span>
@@ -413,12 +432,12 @@ export default function App() {
             <p className="mt-2 text-sm">Source asset: {incident.event.asset?.hostname || incident.event.asset_status} · Owner: {incident.event.asset?.owner || 'unmapped'}</p>
             <p className="mt-2 text-sm">Related asset mapping: {incident.event.related_asset_status}</p>
             <h4 className="mt-5 text-sm font-semibold">Evidence</h4>
-            <ul className="mt-2 list-disc pl-5 text-sm">{incident.evidence.map((entry) => <li key={entry.event_id}>{entry.event_id} · {entry.timestamp} · rule {entry.rule_id} · {entry.location}</li>)}</ul>
+            <ul className="mt-2 list-disc pl-5 text-sm">{incident.evidence.map((entry) => <li key={`${entry.index_name}:${entry.index_id}`}>Wazuh alert {entry.event_id} · index {entry.index_name} / {entry.index_id} · {entry.timestamp} · rule {entry.rule_id} · {entry.location}</li>)}</ul>
             <h4 className="mt-5 text-sm font-semibold">Suggested checks</h4>
             <ul className="mt-2 list-disc pl-5 text-sm">{incident.suggested_checks.map((check) => <li key={check}>{check}</li>)}</ul>
             <p className="mt-4 text-xs text-[#5d7380]">{incident.confidence}</p>
-            <button className="primary-button mt-5" disabled={pending} onClick={() => void explainIncident()}>{pending ? 'Analysing…' : 'Explain with local AI'}</button>
-            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">AI explanation</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
+            <button className="primary-button mt-5" disabled={pending} onClick={() => void explainIncident()}>{pending ? 'Analysing…' : 'Explain event'}</button>
+            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">{analysis.method === 'local-model' ? 'AI explanation' : 'Evidence summary'}</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
           </article>}
         </section>}
 

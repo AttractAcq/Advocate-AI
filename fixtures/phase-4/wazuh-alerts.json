@@ -1,7 +1,87 @@
 {
-  "hits": {"hits": [
-    {"_id": "lab-wazuh-forti-001", "_source": {"id": "lab-wazuh-forti-001", "timestamp": "2026-11-15T10:00:00Z", "rule": {"id": "lab-1001", "level": 10, "description": "Repeated denied connections"}, "decoder": {"name": "fortigate"}, "agent": {"id": "lab-agent-1", "name": "lab-forti-1"}, "data": {"srcip": "10.40.1.20", "dstip": "198.51.100.10", "action": "deny", "vlan": 40}, "location": "lab-fortigate-syslog"}},
-    {"_id": "lab-wazuh-switch-002", "_source": {"id": "lab-wazuh-switch-002", "timestamp": "2026-11-15T10:01:00Z", "rule": {"id": "lab-1002", "level": 6, "description": "Switch management login failed"}, "decoder": {"name": "switch-syslog"}, "agent": {"id": "lab-agent-2", "name": "lab-switch-1"}, "data": {"srcip": "10.40.1.2", "action": "login-failed", "vlan": 40}, "location": "lab-switch-syslog"}},
-    {"_id": "lab-wazuh-host-003", "_source": {"id": "lab-wazuh-host-003", "timestamp": "2026-11-15T10:02:00Z", "rule": {"id": "lab-1003", "level": 8, "description": "Host malware test alert"}, "decoder": {"name": "host-agent"}, "agent": {"id": "lab-agent-3", "name": "lab-workstation-1"}, "data": {"srcip": "10.40.1.20", "action": "detected", "vlan": 40}, "location": "lab-host-agent"}}
-  ]}
+  "hits": {
+    "hits": [
+      {
+        "_id": "doc-forti-001",
+        "_source": {
+          "id": "lab-wazuh-forti-001",
+          "timestamp": "2026-11-15T10:00:00Z",
+          "rule": {
+            "id": "lab-1001",
+            "level": 10,
+            "description": "Repeated denied connections"
+          },
+          "decoder": {
+            "name": "fortigate"
+          },
+          "agent": {
+            "id": "000",
+            "name": "lab-wazuh-manager"
+          },
+          "data": {
+            "srcip": "10.40.1.20",
+            "dstip": "198.51.100.10",
+            "action": "deny",
+            "vlan": 40,
+            "devname": "lab-forti-1"
+          },
+          "location": "lab-fortigate-syslog"
+        },
+        "_index": "wazuh-alerts-4.x-2026.11.15"
+      },
+      {
+        "_id": "doc-switch-002",
+        "_source": {
+          "id": "lab-wazuh-switch-002",
+          "timestamp": "2026-11-15T10:01:00Z",
+          "rule": {
+            "id": "lab-1002",
+            "level": 6,
+            "description": "Switch management login failed"
+          },
+          "decoder": {
+            "name": "switch-syslog"
+          },
+          "agent": {
+            "id": "000",
+            "name": "lab-wazuh-manager"
+          },
+          "data": {
+            "srcip": "10.40.1.2",
+            "action": "login-failed",
+            "vlan": 40,
+            "device_name": "lab-switch-1"
+          },
+          "location": "lab-switch-syslog"
+        },
+        "_index": "wazuh-alerts-4.x-2026.11.15"
+      },
+      {
+        "_id": "doc-host-003",
+        "_source": {
+          "id": "lab-wazuh-host-003",
+          "timestamp": "2026-11-15T10:02:00Z",
+          "rule": {
+            "id": "lab-1003",
+            "level": 8,
+            "description": "Host malware test alert"
+          },
+          "decoder": {
+            "name": "host-agent"
+          },
+          "agent": {
+            "id": "lab-agent-3",
+            "name": "lab-workstation-1"
+          },
+          "data": {
+            "srcip": "10.40.1.20",
+            "action": "detected",
+            "vlan": 40
+          },
+          "location": "lab-host-agent"
+        },
+        "_index": "wazuh-alerts-4.x-2026.11.15"
+      }
+    ]
+  }
 }

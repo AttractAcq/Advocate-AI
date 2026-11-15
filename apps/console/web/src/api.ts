@@ -24,9 +24,9 @@ export type SecurityDetail = {
   event: { source: string; action: string; asset_status: string; related_asset_status: string; asset: { hostname: string; owner: string; equipment_class: string } | null }
   suggested_checks: string[]
   confidence: string
-  evidence: { event_id: string; timestamp: string; rule_id: string; location: string }[]
+  evidence: { event_id: string; index_name: string; index_id: string; timestamp: string; rule_id: string; location: string }[]
 }
-export type SecurityAnalysis = { analysis: string; notice: string; evidence: SecurityDetail['evidence'] }
+export type SecurityAnalysis = { analysis: string; notice: string; method: 'local-model' | 'evidence-only'; evidence: SecurityDetail['evidence'] }
 
 export async function api<T>(path: string, token: string | null, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
