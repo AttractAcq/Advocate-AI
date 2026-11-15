@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "classification": "synthetic lab only",
+  "assets": [
+    {"asset_id": "lab-firewall-1", "hostname": "lab-forti-1", "owner": "AV/IT", "equipment_class": "firewall", "addresses": [{"ip": "10.40.1.1", "vlan": 40}]},
+    {"asset_id": "lab-switch-1", "hostname": "lab-switch-1", "owner": "AV/IT", "equipment_class": "network switch", "addresses": [{"ip": "10.40.1.2", "vlan": 40}]},
+    {"asset_id": "lab-host-1", "hostname": "lab-workstation-1", "owner": "AV/IT", "equipment_class": "workstation", "addresses": [{"ip": "10.40.1.20", "vlan": 40}]}
+  ]
+}
