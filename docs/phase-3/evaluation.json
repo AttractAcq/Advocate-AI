@@ -1,0 +1,448 @@
+{
+  "cases": [
+    {
+      "expected": "MAN-001",
+      "lexical": "MAN-001",
+      "question_id": "Q-MAN-001",
+      "vector": "MAN-001"
+    },
+    {
+      "expected": "MAN-002",
+      "lexical": "MAN-002",
+      "question_id": "Q-MAN-002",
+      "vector": "MAN-002"
+    },
+    {
+      "expected": "MAN-003",
+      "lexical": "MAN-003",
+      "question_id": "Q-MAN-003",
+      "vector": "MAN-003"
+    },
+    {
+      "expected": "MAN-004",
+      "lexical": "MAN-004",
+      "question_id": "Q-MAN-004",
+      "vector": "MAN-004"
+    },
+    {
+      "expected": "MAN-005",
+      "lexical": "MAN-005",
+      "question_id": "Q-MAN-005",
+      "vector": "MAN-005"
+    },
+    {
+      "expected": "MAN-006",
+      "lexical": "MAN-006",
+      "question_id": "Q-MAN-006",
+      "vector": "MAN-006"
+    },
+    {
+      "expected": "MAN-007",
+      "lexical": "MAN-007",
+      "question_id": "Q-MAN-007",
+      "vector": "MAN-007"
+    },
+    {
+      "expected": "MAN-008",
+      "lexical": "MAN-008",
+      "question_id": "Q-MAN-008",
+      "vector": "MAN-008"
+    },
+    {
+      "expected": "MAN-009",
+      "lexical": "MAN-009",
+      "question_id": "Q-MAN-009",
+      "vector": "MAN-009"
+    },
+    {
+      "expected": "MAN-010",
+      "lexical": "MAN-010",
+      "question_id": "Q-MAN-010",
+      "vector": "MAN-010"
+    },
+    {
+      "expected": "ENG-001",
+      "lexical": "ENG-001",
+      "question_id": "Q-ENG-001",
+      "vector": "ENG-001"
+    },
+    {
+      "expected": "ENG-002",
+      "lexical": "ENG-002",
+      "question_id": "Q-ENG-002",
+      "vector": "ENG-002"
+    },
+    {
+      "expected": "ENG-003",
+      "lexical": "ENG-003",
+      "question_id": "Q-ENG-003",
+      "vector": "ENG-003"
+    },
+    {
+      "expected": "ENG-004",
+      "lexical": "ENG-004",
+      "question_id": "Q-ENG-004",
+      "vector": "ENG-004"
+    },
+    {
+      "expected": "ENG-005",
+      "lexical": "ENG-005",
+      "question_id": "Q-ENG-005",
+      "vector": "ENG-005"
+    },
+    {
+      "expected": "ENG-006",
+      "lexical": "ENG-006",
+      "question_id": "Q-ENG-006",
+      "vector": "ENG-006"
+    },
+    {
+      "expected": "ENG-007",
+      "lexical": "ENG-007",
+      "question_id": "Q-ENG-007",
+      "vector": "ENG-007"
+    },
+    {
+      "expected": "ENG-008",
+      "lexical": "ENG-008",
+      "question_id": "Q-ENG-008",
+      "vector": "ENG-008"
+    },
+    {
+      "expected": "ENG-009",
+      "lexical": "ENG-009",
+      "question_id": "Q-ENG-009",
+      "vector": "ENG-009"
+    },
+    {
+      "expected": "ENG-010",
+      "lexical": "ENG-010",
+      "question_id": "Q-ENG-010",
+      "vector": "ENG-010"
+    },
+    {
+      "expected": "INT-001",
+      "lexical": "INT-001",
+      "question_id": "Q-INT-001",
+      "vector": "INT-001"
+    },
+    {
+      "expected": "INT-002",
+      "lexical": "INT-002",
+      "question_id": "Q-INT-002",
+      "vector": "INT-002"
+    },
+    {
+      "expected": "INT-003",
+      "lexical": "INT-003",
+      "question_id": "Q-INT-003",
+      "vector": "INT-003"
+    },
+    {
+      "expected": "INT-004",
+      "lexical": "INT-004",
+      "question_id": "Q-INT-004",
+      "vector": "INT-004"
+    },
+    {
+      "expected": "INT-005",
+      "lexical": "INT-005",
+      "question_id": "Q-INT-005",
+      "vector": "INT-005"
+    },
+    {
+      "expected": "INT-006",
+      "lexical": "INT-006",
+      "question_id": "Q-INT-006",
+      "vector": "INT-006"
+    },
+    {
+      "expected": "INT-007",
+      "lexical": "INT-007",
+      "question_id": "Q-INT-007",
+      "vector": "INT-007"
+    },
+    {
+      "expected": "INT-008",
+      "lexical": "INT-008",
+      "question_id": "Q-INT-008",
+      "vector": "INT-008"
+    },
+    {
+      "expected": "INT-009",
+      "lexical": "INT-009",
+      "question_id": "Q-INT-009",
+      "vector": "INT-009"
+    },
+    {
+      "expected": "INT-010",
+      "lexical": "INT-010",
+      "question_id": "Q-INT-010",
+      "vector": "INT-010"
+    },
+    {
+      "expected": "DEC-001",
+      "lexical": "DEC-001",
+      "question_id": "Q-DEC-001",
+      "vector": "DEC-001"
+    },
+    {
+      "expected": "DEC-002",
+      "lexical": "DEC-002",
+      "question_id": "Q-DEC-002",
+      "vector": "DEC-002"
+    },
+    {
+      "expected": "DEC-003",
+      "lexical": "DEC-003",
+      "question_id": "Q-DEC-003",
+      "vector": "DEC-003"
+    },
+    {
+      "expected": "DEC-004",
+      "lexical": "DEC-004",
+      "question_id": "Q-DEC-004",
+      "vector": "DEC-004"
+    },
+    {
+      "expected": "DEC-005",
+      "lexical": "DEC-005",
+      "question_id": "Q-DEC-005",
+      "vector": "DEC-005"
+    },
+    {
+      "expected": "DEC-006",
+      "lexical": "DEC-006",
+      "question_id": "Q-DEC-006",
+      "vector": "DEC-006"
+    },
+    {
+      "expected": "DEC-007",
+      "lexical": "DEC-007",
+      "question_id": "Q-DEC-007",
+      "vector": "DEC-007"
+    },
+    {
+      "expected": "DEC-008",
+      "lexical": "DEC-008",
+      "question_id": "Q-DEC-008",
+      "vector": "DEC-008"
+    },
+    {
+      "expected": "DEC-009",
+      "lexical": "DEC-009",
+      "question_id": "Q-DEC-009",
+      "vector": "DEC-009"
+    },
+    {
+      "expected": "DEC-010",
+      "lexical": "DEC-010",
+      "question_id": "Q-DEC-010",
+      "vector": "DEC-010"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-001",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-002",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-003",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-004",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-005",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-006",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-007",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-008",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-009",
+      "vector": "DENY"
+    },
+    {
+      "expected": "DENY",
+      "lexical": "DENY",
+      "question_id": "Q-RES-010",
+      "vector": "DENY"
+    }
+  ],
+  "embedding_model": "embeddinggemma:300m",
+  "fixture_manifest_sha256": "f377e8e5a683de55348a72d797f8771d5bd83b5137340b310b47316dad5563a9",
+  "host": {
+    "machine": "arm64",
+    "python": "3.14.3",
+    "system": "Darwin"
+  },
+  "ingestion": {
+    "deleted": [],
+    "indexed": [],
+    "quarantined": [
+      "ENG-P2-DUP",
+      "MALFORMED",
+      "OVERSIZED-DECLARATION"
+    ],
+    "unchanged": [
+      "DEC-001",
+      "DEC-002",
+      "DEC-003",
+      "DEC-004",
+      "DEC-005",
+      "DEC-006",
+      "DEC-007",
+      "DEC-008",
+      "DEC-009",
+      "DEC-010",
+      "DEC-011",
+      "DEC-012",
+      "DEC-013",
+      "DEC-014",
+      "DEC-015",
+      "DEC-016",
+      "DEC-017",
+      "DEC-018",
+      "DEC-019",
+      "DEC-020",
+      "DEC-P1",
+      "ENCODED-INJECTION",
+      "ENG-001",
+      "ENG-002",
+      "ENG-003",
+      "ENG-004",
+      "ENG-005",
+      "ENG-006",
+      "ENG-007",
+      "ENG-008",
+      "ENG-009",
+      "ENG-010",
+      "ENG-011",
+      "ENG-012",
+      "ENG-013",
+      "ENG-014",
+      "ENG-015",
+      "ENG-016",
+      "ENG-017",
+      "ENG-018",
+      "ENG-019",
+      "ENG-020",
+      "ENG-P1",
+      "ENG-P2",
+      "ENG-P3",
+      "INT-001",
+      "INT-002",
+      "INT-003",
+      "INT-004",
+      "INT-005",
+      "INT-006",
+      "INT-007",
+      "INT-008",
+      "INT-009",
+      "INT-010",
+      "INT-011",
+      "INT-012",
+      "INT-013",
+      "INT-014",
+      "INT-015",
+      "INT-016",
+      "INT-017",
+      "INT-018",
+      "INT-019",
+      "INT-020",
+      "INT-P1",
+      "INT-P2",
+      "MAN-001",
+      "MAN-002",
+      "MAN-003",
+      "MAN-004",
+      "MAN-005",
+      "MAN-006",
+      "MAN-007",
+      "MAN-008",
+      "MAN-009",
+      "MAN-010",
+      "MAN-011",
+      "MAN-012",
+      "MAN-013",
+      "MAN-014",
+      "MAN-015",
+      "MAN-016",
+      "MAN-017",
+      "MAN-018",
+      "MAN-019",
+      "MAN-020",
+      "MAN-P1",
+      "RES-001",
+      "RES-002",
+      "RES-003",
+      "RES-004",
+      "RES-005",
+      "RES-006",
+      "RES-007",
+      "RES-008",
+      "RES-009",
+      "RES-010",
+      "RES-011",
+      "RES-012",
+      "RES-013",
+      "RES-014",
+      "RES-015",
+      "RES-016",
+      "RES-017",
+      "RES-018",
+      "RES-019",
+      "RES-020",
+      "RES-P1"
+    ]
+  },
+  "limits": [
+    "synthetic data only",
+    "guarded vector search requires exact query terms",
+    "this tests retrieval selection, not generated-answer correctness or vessel ACLs"
+  ],
+  "new_vectors": 0,
+  "schema": 1,
+  "source_commit": "fdd1dc95a0c7740979d2df87ede9b393a5cdc856",
+  "summary": {
+    "cases": 50,
+    "guarded_vector_correct": 50,
+    "lexical_correct": 50,
+    "no_answer_cases": 10,
+    "no_answer_lexical": 10,
+    "no_answer_vector": 10
+  },
+  "timestamp_utc": "2026-11-15T11:06:40.039710+00:00"
+}

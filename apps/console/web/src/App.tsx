@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
 import type { AdminStatus, ChatResult, Identity, Source, Turn } from './api'
+import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 
 type View = 'chat' | 'documents' | 'administration'
 type LoginReply = { access_token: string }
@@ -34,21 +35,19 @@ export default function App() {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    if (!oidcEnabled()) return
+    void finishOidc().then((bearer) => bearer ? loadSession(bearer) : undefined)
+      .catch((cause) => setError(cause instanceof Error ? cause.message : 'Local sign-in failed'))
+  }, [])
+
   const collections = useMemo(() => [...new Set(sources.map((source) => source.collection))].sort(), [sources])
   const visibleSources = useMemo(() => sources.filter((source) =>
     (!workspace || source.collection === workspace) &&
     `${source.document_id} ${source.collection}`.toLowerCase().includes(filter.toLowerCase()),
   ), [sources, workspace, filter])
 
-  async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPending(true)
-    setError('')
-    try {
-      const login = await api<LoginReply>('/login', null, {
-        method: 'POST', body: JSON.stringify({ user_id: username.trim(), password }),
-      })
-      const bearer = login.access_token
+  async function loadSession(bearer: string) {
       const [me, files, modelList, sessions] = await Promise.all([
         api<Identity>('/me', bearer),
         api<{ sources: Source[] }>('/sources', bearer),
@@ -61,6 +60,17 @@ export default function App() {
       setModels(modelList.models)
       setConversationIds(sessions.conversation_ids)
       setPassword('')
+  }
+
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPending(true)
+    setError('')
+    try {
+      const login = await api<LoginReply>('/login', null, {
+        method: 'POST', body: JSON.stringify({ user_id: username.trim(), password }),
+      })
+      await loadSession(login.access_token)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Sign-in failed')
     } finally {
@@ -81,6 +91,7 @@ export default function App() {
     setSelectedSources([])
     setAdmin(null)
     setError('')
+    if (oidcEnabled()) endOidc()
   }
 
   async function openConversation(id: string) {
@@ -158,8 +169,8 @@ export default function App() {
         <section className="flex flex-col justify-center p-10 sm:p-14">
           <div className="mb-8 text-xs font-semibold uppercase tracking-[.2em] text-[#ad7650]">Crew access</div>
           <h2 className="text-3xl font-semibold">Sign in</h2>
-          <p className="mt-2 text-sm text-[#607583]">Use a named synthetic lab account and the local lab passphrase.</p>
-          <form onSubmit={signIn} className="mt-8 space-y-5">
+          <p className="mt-2 text-sm text-[#607583]">{oidcEnabled() ? 'Use your named account with the local identity provider.' : 'Use a named synthetic lab account and the local lab passphrase.'}</p>
+          {oidcEnabled() ? <button className="primary-button mt-8 w-full" onClick={() => void beginOidc().catch((cause) => setError(cause instanceof Error ? cause.message : 'Sign-in unavailable'))}>Continue to local sign-in</button> : <form onSubmit={signIn} className="mt-8 space-y-5">
             <label className="block text-sm font-medium">User ID
               <input className="field mt-2" value={username} onChange={(event) => setUsername(event.target.value)}
                 autoComplete="username" required placeholder="lab-chief_engineer-1" />
@@ -170,8 +181,9 @@ export default function App() {
             </label>
             {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
             <button className="primary-button w-full" disabled={pending}>{pending ? 'Connecting…' : 'Enter workspace'}</button>
-          </form>
-          <p className="mt-8 text-xs leading-5 text-[#778b96]">This sign-in is for synthetic testing. Production identity and security review are later gates.</p>
+          </form>}
+          {error && oidcEnabled() && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+          <p className="mt-8 text-xs leading-5 text-[#778b96]">Synthetic lab only. Vessel identity and security review require separate approval.</p>
         </section>
       </main>
     </div>

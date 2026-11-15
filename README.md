@@ -2,7 +2,7 @@
 
 Sovereign AI is a private vessel assistant and read-only cybersecurity intelligence product. The [technical development and implementation plan](docs/Sovereign_AI_Technical_Development_and_Implementation_Plan.docx) is the detailed build plan for this repository. Its task IDs and gates govern delivery. The [build-plan overview](<docs/Soverign AI build plan 14_11_2026.txt>) describes the five product milestones and seven proprietary modules.
 
-**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 local simulation and GitHub CI are implemented; hardware and enforced remote controls remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence and open work](docs/phase-2/gate.md) keeps the hardware and offline acceptance gate open. This baseline does not authorise vessel access, production data, procurement or deployment.
+**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 local simulation and GitHub CI are implemented; hardware and enforced remote controls remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence and open work](docs/phase-2/gate.md) keeps the hardware and offline acceptance gate open. Phase 3 local ingestion, indexed retrieval, Keycloak identity and audit work is under test; its [gate record](docs/phase-3/gate.md) lists the remaining controls. This baseline does not authorise vessel access, production data, procurement or deployment.
 
 ## Product milestones
 
@@ -28,7 +28,7 @@ Sovereign AI is a private vessel assistant and read-only cybersecurity intellige
 | 7A–7C | Approved site survey, installation, commissioning and handover | G4: signed site acceptance and handover |
 | Post-launch | Maintenance, signed updates, recovery checks and repeatable deployments | Operational records and release gates |
 
-The five milestones describe product outcomes; the engineering phases set their delivery order. The Phase 2 demonstration uses synthetic data. Full permissions and security review are later gates.
+The five milestones describe product outcomes; the engineering phases set their delivery order. Phase 2 and 3 demonstrations use synthetic data. Full vessel permissions and security review are later gates.
 
 ## Proprietary modules
 
@@ -72,6 +72,7 @@ Development/
 │   ├── fixtures.md
 │   ├── phase-1/              Runbook, inventory, controls and gate evidence
 │   ├── phase-2/              Core/Console runbook, model card and G1 evidence
+│   ├── phase-3/              Ingestion, identity, retrieval and gate evidence
 │   └── approval/2026-11-14-g0.md
 └── fixtures/                 Synthetic generators, manifests and local generated data
     ├── generate.py

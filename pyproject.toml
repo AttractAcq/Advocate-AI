@@ -2,11 +2,17 @@
 name = "sovereign-ai-lab"
 version = "0.1.0"
 description = "Sovereign AI synthetic development lab"
-requires-python = ">=3.11"
+requires-python = ">=3.11.5"
 dependencies = [
     "fastapi==0.162.6",
     "httpx==0.28.1",
+    "pyjwt[crypto]==2.15.1",
     "uvicorn==0.38.0",
+]
+
+[project.optional-dependencies]
+phase3 = [
+    "docling==2.150.1",
 ]
 
 [tool.sovereign]
