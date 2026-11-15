@@ -58,6 +58,9 @@ class IntelligenceTests(unittest.TestCase):
         hit["_source"]["rule"]["description"] = "bad\nheader"
         with self.assertRaises(ValueError):
             normalize_alert({"index_id": hit["_id"], "source": hit["_source"]}, AssetRegistry(ASSETS))
+        hit["_source"]["rule"]["description"] = "password=fixture-canary-do-not-copy"
+        with self.assertRaises(ValueError):
+            normalize_alert({"index_id": hit["_id"], "source": hit["_source"]}, AssetRegistry(ASSETS))
 
     def test_indexer_reader_fixed_query_and_private_endpoint(self):
         observed = []

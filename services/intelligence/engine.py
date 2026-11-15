@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 from typing import Mapping
 
 from services.intelligence.assets import AssetRegistry
@@ -27,6 +28,13 @@ def _nested(source: Mapping[str, object], key: str) -> Mapping[str, object]:
     if not isinstance(value, dict):
         raise ValueError("invalid alert field")
     return value
+
+
+def _description(value: object) -> str:
+    description = _text(value, limit=160)
+    if re.search(r"\b(?:password|passwd|token|api[_-]?key|secret)\s*[:=]", description, re.I):
+        raise ValueError("credential-like alert description")
+    return description
 
 
 def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[str, object]:
@@ -69,7 +77,7 @@ def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[
     return {
         "event_id": event_id, "timestamp": moment.isoformat(), "source": SOURCES[decoder],
         "rule_id": _text(rule.get("id"), limit=80),
-        "description": _text(rule.get("description"), limit=160),
+        "description": _description(rule.get("description")),
         "severity": "critical" if level >= 12 else "high" if level >= 9 else "medium" if level >= 5 else "low",
         "action": action, "location": _text(source.get("location"), limit=80),
         "asset": {key: asset[key] for key in ("asset_id", "hostname", "owner", "equipment_class")} if asset else None,
