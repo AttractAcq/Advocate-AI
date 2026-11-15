@@ -357,7 +357,8 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             except ModelUnavailable as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         citations = [{"document_id": item["document_id"], "version": item["version"],
-                      "collection": item["collection"], "sha256": item["sha256"]} for item in context]
+                      "collection": item["collection"], "sha256": item["sha256"],
+                      "ordinal": item.get("ordinal", 0)} for item in context]
         current = {row["document_id"]: row for row in permitted_sources(user_id)}
         if any(citation["document_id"] not in current or
                citation["sha256"] != current[citation["document_id"]]["sha256"] or

@@ -105,6 +105,20 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(allowed.json()["citations"][0]["document_id"], "ENG-001")
         self.assertEqual(self.model.contexts[0][0]["document_id"], "ENG-001")
 
+    async def test_citation_points_to_retrieved_passage(self) -> None:
+        self.add("ENG-002", "engineering", "routine text " * 115 + "secondpassage uniquemarker")
+        self.save()
+        engineer = await self.login("engineer")
+        reply = await self.client.post("/api/chat", headers=engineer,
+                                       json={"message": "secondpassage uniquemarker", "selected_documents": ["ENG-002"]})
+        self.assertEqual(reply.status_code, 200)
+        citation = reply.json()["citations"][0]
+        self.assertGreater(citation["ordinal"], 0)
+        preview = await self.client.get(f"/api/sources/ENG-002/preview?ordinal={citation['ordinal']}", headers=engineer)
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["sha256"], citation["sha256"])
+        self.assertIn("secondpassage uniquemarker", preview.json()["excerpt"])
+
     async def test_acl_change_delete_and_reindex_revoke_history(self) -> None:
         engineer = await self.login("engineer")
         reply = await self.client.post("/api/chat", headers=engineer, json={"message": "generator inspection"})
