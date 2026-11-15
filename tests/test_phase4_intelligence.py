@@ -33,7 +33,7 @@ class FakeModel:
 
 class IntelligenceTests(unittest.TestCase):
     def test_fortigate_syslog_adapter_drops_unapproved_fields(self):
-        parsed = parse_fortigate_syslog((ROOT / "fixtures/phase-4/fortigate.log").read_text().strip())
+        parsed = parse_fortigate_syslog((ROOT / "fixtures/phase-4/fortigate-syslog.txt").read_text().strip())
         self.assertEqual(parsed["action"], "deny")
         self.assertEqual(parsed["srcip"], "10.40.1.20")
         self.assertNotIn("password", parsed)
