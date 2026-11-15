@@ -266,15 +266,20 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         return {"models": [settings.model_name]}
 
     @app.get("/api/tools")
-    def tools(_: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
-        return {"read_only": ["synthetic_document_search"], "write": []}
+    def tools(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
+        read_only = ["synthetic_document_search"]
+        if identity[1]["role"] == "avit_admin":
+            read_only.append("wazuh_alert_search" if wazuh else "synthetic_alert_search")
+        return {"read_only": read_only, "write": []}
 
     @app.get("/api/admin/status")
     def admin_status(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
         if identity[1]["role"] != "avit_admin":
             raise HTTPException(status.HTTP_403_FORBIDDEN, "admin scope required")
         return {"mode": "synthetic-only", "identity": "local-keycloak" if oidc else "ephemeral-lab", "model": settings.model_name,
-                "read_only_tools": ["synthetic_document_search"], "write_tools": []}
+                "read_only_tools": ["synthetic_document_search",
+                                    "wazuh_alert_search" if wazuh else "synthetic_alert_search"],
+                "write_tools": []}
 
     @app.get("/api/security/incidents")
     def security_list(since: datetime | None = None, until: datetime | None = None,

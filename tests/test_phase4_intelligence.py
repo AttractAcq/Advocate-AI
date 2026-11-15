@@ -176,6 +176,15 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_role_scope_evidence_and_model_outage(self):
         admin = await self.login("lab-avit_admin-1")
         crew = await self.login("lab-deckhand-1")
+        crew_tools = (await self.client.get("/api/tools", headers=crew)).json()
+        admin_tools = (await self.client.get("/api/tools", headers=admin)).json()
+        self.assertNotIn("synthetic_alert_search", crew_tools["read_only"])
+        self.assertIn("synthetic_alert_search", admin_tools["read_only"])
+        self.assertEqual(crew_tools["write"], [])
+        self.assertEqual(admin_tools["write"], [])
+        for path in ("/api/security/firewall/rules", "/api/security/switch/config",
+                     "/api/security/nas/files", "/api/security/safety/control"):
+            self.assertEqual((await self.client.post(path, headers=admin)).status_code, 404)
         self.assertEqual((await self.client.get("/api/security/incidents", headers=crew)).status_code, 403)
         self.assertEqual((await self.client.get("/api/security/incidents")).status_code, 401)
         listing = await self.client.get("/api/security/incidents", headers=admin)
