@@ -73,7 +73,7 @@ Development/
 │   ├── phase-1/              Runbook, inventory, controls and gate evidence
 │   ├── phase-2/              Core/Console runbook, model card and G1 evidence
 │   ├── phase-3/              Ingestion, identity, retrieval and gate evidence
-│   ├── phase-4/              Security intelligence runbook and open gate
+│   ├── phase-4/              Security intelligence runbook, host worksheet and open gate
 │   └── approval/2026-11-14-g0.md
 └── fixtures/                 Synthetic generators, manifests and local generated data
     ├── generate.py
