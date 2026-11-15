@@ -9,7 +9,7 @@ equipment is purchased.
 |---|---|---|
 | T-010 Local inference and benchmark | [Mac model card](model-card.md), [recorded benchmark](benchmark-mac.json), local Ollama 2B flow | Install and pin NVIDIA driver/runtime, vLLM or approved NIM, Qwen3-8B weights/tokenizer on target host; record exact artifacts, context, quality, concurrency, throughput and offline cold start |
 | T-011 Sovereign Core | `apps/api` FastAPI endpoints for chat, history, model routing, source search/preview and audit; Phase 3 adds local Keycloak OIDC/JWT integration and persistent logout revocation in the synthetic lab | Production identity administration, deployment network controls and durable conversation storage; repeat API tests in target topology |
-| T-012 Sovereign Console | `apps/console/web` React/TypeScript/Tailwind sign-in, chat, documents, citations, department scope, history and read-only admin view; local build passes | Interactive browser/accessibility review and target reverse-proxy/TLS deployment still required |
+| T-012 Sovereign Console | `apps/console/web` React/TypeScript/Tailwind sign-in, chat, documents, inspectable citations, department scope, mobile history and read-only admin view; local build and [accessibility source review](console-accessibility.md) pass | Interactive keyboard/screen-reader/zoom review and target reverse-proxy/TLS deployment still required |
 | T-013 End-to-end demo | [Synthetic demo record](demo-result.json), [runbook](runbook.md); five active roles sign in, removed users denied, engineer receives `ENG-001` cited answer, restricted query denied | Repeat with WAN physically disconnected, record packet capture/egress proof, build/host/fixture evidence and issue review on target lab |
 
 ## G1 acceptance check

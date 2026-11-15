@@ -1,6 +1,7 @@
 export type Identity = { id: string; role: string }
 export type Source = { document_id: string; collection: string; version: string }
-export type Citation = Source & { sha256: string }
+export type Citation = Source & { sha256: string; ordinal?: number }
+export type SourcePreview = { document_id: string; version: string; sha256: string; ordinal: number; excerpt: string }
 export type Turn = {
   message: string
   answer: string

@@ -34,7 +34,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   transition: background .15s;
 }
 .primary-button:hover:not(:disabled) { background: #235445; }
-.primary-button:focus-visible, .secondary-button:focus-visible, .nav-button:focus-visible {
+button:focus-visible, summary:focus-visible, a:focus-visible {
   outline: 3px solid #e1a66d;
   outline-offset: 2px;
 }
@@ -55,5 +55,5 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 }
 .nav-button:hover, .nav-active { background: #244a5a; color: white; }
 .status-card { border: 1px solid #e1eae7; border-radius: .85rem; padding: 1.2rem; }
-.status-card dt { color: #657b85; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+.status-card dt { color: #5d7380; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
 .status-card dd { margin: .5rem 0 0; font-weight: 650; }
