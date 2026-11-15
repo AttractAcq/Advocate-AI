@@ -8,16 +8,23 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sqlite3
 from typing import Literal
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.auth import LabRateLimiter, LabSessions
 from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable
+from apps.api.oidc import OidcVerifier
 from services.knowledge.acl import source_access
 from services.knowledge.retrieval import search_fixture_documents
+from services.knowledge.indexed_retrieval import approved_rows, preview_index, search_index
+from services.knowledge.embedding import LocalEmbedder, vector_search
+from services.knowledge.injection import instruction_like
+from services.policy.audit import AuditLog, verify as verify_audit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,6 +35,12 @@ class Settings:
     lab_password: str | None = None
     inference_endpoint: str = "http://127.0.0.1:11434/v1"
     model_name: str = "qwen3.5:2b"
+    knowledge_manifest: Path | None = None
+    knowledge_db: Path | None = None
+    audit_path: Path | None = None
+    oidc_issuer: str | None = None
+    embedding_endpoint: str = "http://127.0.0.1:11434"
+    embedding_model: str = "embeddinggemma:300m"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -35,6 +48,12 @@ class Settings:
             lab_password=os.environ.get("SOVEREIGN_LAB_PASSWORD"),
             inference_endpoint=os.environ.get("SOVEREIGN_MODEL_ENDPOINT", cls.inference_endpoint),
             model_name=os.environ.get("SOVEREIGN_MODEL_NAME", cls.model_name),
+            knowledge_manifest=Path(os.environ["SOVEREIGN_KNOWLEDGE_MANIFEST"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_MANIFEST") else None,
+            knowledge_db=Path(os.environ["SOVEREIGN_KNOWLEDGE_DB"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_DB") else None,
+            audit_path=Path(os.environ["SOVEREIGN_AUDIT_PATH"]) if os.environ.get("SOVEREIGN_AUDIT_PATH") else None,
+            oidc_issuer=os.environ.get("SOVEREIGN_OIDC_ISSUER"),
+            embedding_endpoint=os.environ.get("SOVEREIGN_EMBEDDING_ENDPOINT", cls.embedding_endpoint),
+            embedding_model=os.environ.get("SOVEREIGN_EMBEDDING_MODEL", cls.embedding_model),
         )
 
 
@@ -54,13 +73,57 @@ class ChatRequest(BaseModel):
     workspace: Literal["management", "engineering", "interior", "deck"] | None = None
 
 
+class SearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, max_length=1000)
+    mode: Literal["lexical", "vector"] = "lexical"
+    selected_documents: list[str] = Field(default_factory=list, max_length=5)
+    workspace: Literal["management", "engineering", "interior", "deck"] | None = None
+
+
 def create_app(settings: Settings | None = None, model: LocalModel | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     model = model or LocalModel(settings.inference_endpoint, settings.model_name)
     sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password)
+    oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json") if settings.oidc_issuer else None
     limiter = LabRateLimiter()
     app = FastAPI(title="Sovereign Core synthetic lab", docs_url=None, redoc_url=None)
     app.state.sessions = sessions
+    audit = AuditLog(settings.audit_path) if settings.audit_path else None
+
+    def record_decision(actor: str, action: str, resource: str, decision: str) -> None:
+        if audit is None:
+            return
+        try:
+            version = hashlib.sha256((settings.fixture_root / "roles.json").read_bytes()).hexdigest()
+            audit.append(actor=actor, action=action, resource=resource,
+                         decision=decision, policy_version=version)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "audit unavailable") from exc
+
+    @app.middleware("http")
+    async def audit_requests(request: Request, call_next):
+        if audit is None or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        try:
+            verify_audit(audit.path)
+            policy_version = hashlib.sha256((settings.fixture_root / "roles.json").read_bytes()).hexdigest()
+        except (OSError, ValueError, json.JSONDecodeError):
+            return JSONResponse({"detail": "audit unavailable"}, status_code=503)
+        auth = request.headers.get("authorization", "")
+        user = (oidc.user_for(auth[7:]) if oidc else sessions.user_for(auth[7:])) if auth.startswith("Bearer ") else None
+        actor = user["id"] if user else "unauthenticated"
+        path = request.url.path
+        resource = path.split("/")[3] if path.startswith("/api/sources/") and len(path.split("/")) > 3 else "-"
+        response = await call_next(request)
+        try:
+            correlation = audit.append(actor=actor, action=f"{request.method} {path.split('/')[2]}",
+                                       resource=resource, decision="allow" if response.status_code < 400 else "deny",
+                                       policy_version=policy_version)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return JSONResponse({"detail": "audit unavailable"}, status_code=503)
+        response.headers["X-Correlation-ID"] = correlation
+        return response
 
     @app.middleware("http")
     async def limit_request_body(request: Request, call_next):
@@ -85,12 +148,14 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
         token = authorization[7:]
-        user = sessions.user_for(token)
+        user = oidc.user_for(token) if oidc else sessions.user_for(token)
         if not user:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
         return token, user
 
     def permitted_sources(user_id: str) -> list[dict[str, str]]:
+        if settings.knowledge_manifest and settings.knowledge_db:
+            return approved_rows(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db, user_id)
         policy = json.loads((settings.fixture_root / "roles.json").read_text(encoding="utf-8"))
         base = settings.fixture_root.resolve()
         permitted: list[dict[str, str]] = []
@@ -111,6 +176,8 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.post("/api/login")
     def login(request: LoginRequest, http_request: Request) -> dict[str, object]:
+        if oidc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "use local identity provider")
         if not settings.lab_password or len(settings.lab_password) < 12:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "lab authentication is not configured")
         origin = http_request.client.host if http_request.client else "unknown"
@@ -123,7 +190,8 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.post("/api/logout")
     def logout(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, bool]:
-        sessions.logout(identity[0])
+        if not oidc:
+            sessions.logout(identity[0])
         return {"ok": True}
 
     @app.get("/api/me")
@@ -143,7 +211,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     def admin_status(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
         if identity[1]["role"] != "avit_admin":
             raise HTTPException(status.HTTP_403_FORBIDDEN, "admin scope required")
-        return {"mode": "synthetic-only", "identity": "ephemeral-lab", "model": settings.model_name,
+        return {"mode": "synthetic-only", "identity": "local-keycloak" if oidc else "ephemeral-lab", "model": settings.model_name,
                 "read_only_tools": ["synthetic_document_search"], "write_tools": []}
 
     @app.get("/api/sources")
@@ -151,6 +219,50 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         permitted = permitted_sources(identity[1]["id"])
         return {"sources": [{"document_id": row["document_id"], "collection": row["collection"],
                              "version": row["version"]} for row in permitted]}
+
+    @app.get("/api/sources/{document_id}/preview")
+    def source_preview(document_id: str, ordinal: int = 0,
+                       identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
+        if not settings.knowledge_manifest or not settings.knowledge_db:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "preview not available")
+        preview = preview_index(settings.fixture_root, settings.knowledge_manifest,
+                                settings.knowledge_db, identity[1]["id"], document_id, ordinal)
+        if preview is None:
+            record_decision(identity[1]["id"], "preview", document_id, "deny")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "source not found")
+        record_decision(identity[1]["id"], "preview", document_id, "allow")
+        return preview
+
+    @app.post("/api/search")
+    def search(request: SearchRequest,
+               identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
+        if not settings.knowledge_manifest or not settings.knowledge_db:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "knowledge index unavailable")
+        options = {"limit": 5,
+                   "document_ids": set(request.selected_documents) if request.selected_documents else None,
+                   "collections": {request.workspace} if request.workspace else None}
+        try:
+            if request.mode == "vector":
+                hits = vector_search(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db,
+                                     identity[1]["id"], request.query,
+                                     LocalEmbedder(settings.embedding_endpoint, settings.embedding_model), **options)
+            else:
+                hits = search_index(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db,
+                                    identity[1]["id"], request.query, **options)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        except (OSError, httpx.HTTPError, KeyError, sqlite3.Error) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "knowledge search unavailable") from exc
+        current = {row["document_id"]: row for row in permitted_sources(identity[1]["id"])}
+        results = [hit for hit in hits if hit["document_id"] in current and
+                            hit["sha256"] == current[hit["document_id"]]["sha256"] and
+                            hit["version"] == current[hit["document_id"]]["version"]]
+        if not results:
+            record_decision(identity[1]["id"], "search", ",".join(request.selected_documents) or "-", "deny")
+        else:
+            for hit in results:
+                record_decision(identity[1]["id"], "search", str(hit["document_id"]), "allow")
+        return {"results": results}
 
     @app.get("/api/conversations")
     def conversations(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, list[str]]:
@@ -162,11 +274,13 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         stored = sessions.conversation(conversation_id, user_id)
         if not stored:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "conversation not found")
-        allowed_ids = {row["document_id"] for row in permitted_sources(user_id)}
+        allowed = {row["document_id"]: row for row in permitted_sources(user_id)}
         turns = []
         for turn in stored.turns:
             citations = turn.get("citations", [])
-            if any(item["document_id"] not in allowed_ids for item in citations):
+            if any(item["document_id"] not in allowed or
+                   item.get("sha256") != allowed[item["document_id"]]["sha256"] or
+                   item.get("version") != allowed[item["document_id"]]["version"] for item in citations):
                 turns.append({"message": "[Source access changed]", "answer": "Answer hidden after source access changed.",
                               "citations": [], "mode": "redacted"})
             else:
@@ -198,16 +312,26 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         context: list[dict[str, object]] = []
         if request.mode == "documents":
             try:
-                context = search_fixture_documents(
-                    settings.fixture_root, user_id, request.message, limit=5,
-                    document_ids=set(request.selected_documents) if request.selected_documents else None,
-                    collections={request.workspace} if request.workspace else None,
-                )
+                options = {"limit": 5,
+                           "document_ids": set(request.selected_documents) if request.selected_documents else None,
+                           "collections": {request.workspace} if request.workspace else None}
+                if settings.knowledge_manifest and settings.knowledge_db:
+                    context = search_index(settings.fixture_root, settings.knowledge_manifest,
+                                           settings.knowledge_db, user_id, request.message, **options)
+                else:
+                    context = search_fixture_documents(settings.fixture_root, user_id, request.message, **options)
             except ValueError as exc:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
         if request.mode == "documents" and not context:
+            record_decision(user_id, "retrieve", ",".join(request.selected_documents) or "-", "deny")
             answer = "No matching permitted source was found. I cannot answer from vessel documents."
+        elif request.mode == "documents" and any(instruction_like(str(item["excerpt"])) for item in context):
+            for hit in context:
+                record_decision(user_id, "retrieve", str(hit["document_id"]), "flagged")
+            answer = "A permitted source contains instruction-like text. Its contents were withheld from the AI model; review the cited source directly."
         else:
+            for hit in context:
+                record_decision(user_id, "retrieve", str(hit["document_id"]), "allow")
             try:
                 answer = await model.complete(request.message, context, general=request.mode == "general")
             except ModelTimeout as exc:
@@ -216,6 +340,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         citations = [{"document_id": item["document_id"], "version": item["version"],
                       "collection": item["collection"], "sha256": item["sha256"]} for item in context]
+        current = {row["document_id"]: row for row in permitted_sources(user_id)}
+        if any(citation["document_id"] not in current or
+               citation["sha256"] != current[citation["document_id"]]["sha256"] or
+               citation["version"] != current[citation["document_id"]]["version"]
+               for citation in citations):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "source access changed")
         turn = {"message": request.message, "answer": answer, "citations": citations,
                 "mode": request.mode, "workspace": request.workspace}
         sessions.add_turn(conversation_id, user_id, turn)

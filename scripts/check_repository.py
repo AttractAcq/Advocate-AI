@@ -76,6 +76,14 @@ def check() -> None:
         assert all(pool.map(verify_artifact, records))
     hashes = {item["path"]: item["sha256"] for item in records}
     assert hashes["artifacts/ENG-P2.docx"] == hashes["artifacts/ENG-P2-duplicate.docx"]
+    phase3 = json.loads((ROOT / "fixtures/phase-3/approved-sources.json").read_text())
+    sources = phase3["sources"]
+    assert phase3["schema"] == 1 and len(sources) == len(manifest) + len(records)
+    assert len({item["document_id"] for item in sources}) == len(sources)
+    for item in sources:
+        source = (ROOT / "fixtures" / item["relative_path"]).resolve()
+        assert source.is_relative_to((ROOT / "fixtures").resolve())
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == item["sha256"]
     cases = json.loads((phase1 / "cases.json").read_text())
     assert cases["revoked_user"]["expected"] == "deny"
     assert cases["acl_reversal"]["expected"] == "deny-after-change"

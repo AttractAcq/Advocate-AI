@@ -25,7 +25,7 @@ jobs:
           node-version: "22"
       - name: Build and test Core and the synthetic lab
         run: |
-          uv sync --locked
+          uv sync --locked --extra phase3
           make fixtures
           make check
           make lab-smoke
@@ -73,6 +73,8 @@ jobs:
           uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.lock
           git diff --exit-code -- requirements.lock
           uvx --from pip-audit==2.10.1 pip-audit -r requirements.lock --require-hashes --disable-pip --progress-spinner off
+          uv export --locked --extra phase3 --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/phase3-requirements.lock"
+          uvx --from pip-audit==2.10.1 pip-audit -r "$RUNNER_TEMP/phase3-requirements.lock" --require-hashes --disable-pip --progress-spinner off
       - name: Scan Console dependency lock
         working-directory: apps/console/web
         run: npm audit --audit-level=high
