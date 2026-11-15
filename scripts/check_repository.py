@@ -91,8 +91,11 @@ def check() -> None:
                 continue
             assert (doc.parent / target.split("#", 1)[0]).exists(), (doc, target)
         return True
+    docs = (doc for doc in ROOT.rglob("*.md")
+            if not any(part in {".venv", "node_modules", "build", "dist", ".git"}
+                       for part in doc.relative_to(ROOT).parts))
     with ThreadPoolExecutor(max_workers=12) as pool:
-        assert all(pool.map(verify_links, ROOT.rglob("*.md")))
+        assert all(pool.map(verify_links, docs))
     print(f"Repository checks passed; {len(manifest)} sources, "
           f"{len(records)} mixed-format cases and {len(events)} events verified")
 

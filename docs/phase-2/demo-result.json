@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "recorded_at_utc": "2026-11-15T10:29:09.652416+00:00",
+  "source_commit": "f43ce4fc8ab5d644d25e99ccc3426da45367b325",
+  "source_bundle_sha256": "82cf7a7a9d5345b0cb92859d8cf75f0757b240d462a346b92ac3bddc5cec29a1",
+  "fixture_manifest_sha256": "8ae63145f3b7c6a7250ea26d0b0011788ee164a55bcc897b8396c0295860d66e",
+  "target": "http://127.0.0.1:18101",
+  "accounts_checked": [
+    "captain",
+    "chief_engineer",
+    "chief_stewardess",
+    "deckhand",
+    "avit_admin"
+  ],
+  "removed_and_unknown_denied": true,
+  "question_id": "Q-ENG-001",
+  "model": "qwen3.5:2b",
+  "citation_ids": [
+    "ENG-001"
+  ],
+  "answer_contains_expected_marker": true,
+  "answer_sha256": "b492bb9834720ecdf33a571755b19ae09c3b970dbdb8bb7bea1d7cbd7c285f4a",
+  "answer_excerpt": "Based on the retrieved source text, the unique verification marker for the Generator inspection procedure is **SYN-ENGINEERING-001-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. Note that ",
+  "chat_seconds": 8.347,
+  "history_and_cross_user_checks": true,
+  "restricted_document_denied": true,
+  "admin_scope_checked": true,
+  "wan_disconnected": false,
+  "packet_capture_recorded": false
+}

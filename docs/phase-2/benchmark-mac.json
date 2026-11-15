@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "recorded_at_utc": "2026-11-15T10:29:38.853840+00:00",
+  "source_commit": "f43ce4fc8ab5d644d25e99ccc3426da45367b325",
+  "source_bundle_sha256": "82cf7a7a9d5345b0cb92859d8cf75f0757b240d462a346b92ac3bddc5cec29a1",
+  "fixture_manifest_sha256": "8ae63145f3b7c6a7250ea26d0b0011788ee164a55bcc897b8396c0295860d66e",
+  "endpoint": "http://127.0.0.1:11434",
+  "host": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "processor": "arm",
+    "memory_bytes": 8589934592
+  },
+  "model": {
+    "name": "qwen3.5:2b",
+    "digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
+    "size_bytes": 3117475695,
+    "details": {
+      "parent_model": "",
+      "format": "safetensors",
+      "family": "",
+      "families": null,
+      "parameter_size": "",
+      "quantization_level": "mxfp8",
+      "runner": "mlx"
+    }
+  },
+  "installed_before_run": true,
+  "loaded_before_run": false,
+  "context_size_configured": 4096,
+  "model_memory_bytes": 3200364384,
+  "runner": "mlx",
+  "single_samples": [
+    {
+      "task": "cold_short",
+      "wall_seconds": 3.5,
+      "prompt_tokens": 33,
+      "output_tokens": 1,
+      "prompt_seconds": 0.085,
+      "generation_seconds": 0.055,
+      "output_tokens_per_second": 18.304,
+      "load_seconds": 3.326,
+      "answer_sha256": "c2e3ac47f4a325469c1a2d5f117e463ec943c721986d5d9f09ac4540b7d80526"
+    },
+    {
+      "task": "source_question",
+      "wall_seconds": 2.097,
+      "prompt_tokens": 177,
+      "output_tokens": 18,
+      "prompt_seconds": 0.505,
+      "generation_seconds": 1.559,
+      "output_tokens_per_second": 11.544,
+      "load_seconds": 0.014,
+      "answer_sha256": "dc073c0c5b97362a9f0fb256707affa67ea3cce077c15704db2fbe3c2d884157"
+    }
+  ],
+  "concurrent_two": {
+    "wall_seconds": 8.634,
+    "samples": [
+      {
+        "task": "concurrent_source",
+        "wall_seconds": 3.352,
+        "prompt_tokens": 178,
+        "output_tokens": 29,
+        "prompt_seconds": 0.567,
+        "generation_seconds": 2.694,
+        "output_tokens_per_second": 10.764,
+        "load_seconds": 0.054,
+        "answer_sha256": "40261e0c3004be772a5efd798e2a936eb1856e25c05160e88c3f32965e71481e"
+      },
+      {
+        "task": "concurrent_general",
+        "wall_seconds": 8.394,
+        "prompt_tokens": 39,
+        "output_tokens": 52,
+        "prompt_seconds": 0.177,
+        "generation_seconds": 4.785,
+        "output_tokens_per_second": 10.868,
+        "load_seconds": 0.063,
+        "answer_sha256": "527d790e437554cbf38b26df0bf1169a44d6b254716f7fb8cb47856783948e72"
+      }
+    ]
+  },
+  "wan_disconnected": false,
+  "network_capture": null,
+  "target_nvidia_host": false
+}

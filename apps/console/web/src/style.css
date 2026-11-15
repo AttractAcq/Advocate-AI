@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .58; }
+
+.field {
+  display: block;
+  width: 100%;
+  border: 1px solid #cddbd9;
+  border-radius: .75rem;
+  background: white;
+  padding: .75rem .9rem;
+  color: #173045;
+  outline: none;
+}
+.field:focus { border-color: #2e7669; box-shadow: 0 0 0 3px #c7e5d9; }
+.field:disabled { background: #eef2f1; color: #819299; }
+
+.primary-button {
+  border-radius: .75rem;
+  background: #2e6d5a;
+  color: white;
+  font-weight: 650;
+  padding: .8rem 1.25rem;
+  transition: background .15s;
+}
+.primary-button:hover:not(:disabled) { background: #235445; }
+.primary-button:focus-visible, .secondary-button:focus-visible, .nav-button:focus-visible {
+  outline: 3px solid #e1a66d;
+  outline-offset: 2px;
+}
+
+.secondary-button {
+  border: 1px solid #799992;
+  border-radius: .75rem;
+  color: inherit;
+  font-weight: 600;
+  padding: .7rem 1rem;
+}
+.secondary-button:hover { background: #244a5a; }
+.nav-button {
+  border-radius: .7rem;
+  color: #c6d8d9;
+  padding: .8rem 1rem;
+  text-align: left;
+}
+.nav-button:hover, .nav-active { background: #244a5a; color: white; }
+.status-card { border: 1px solid #e1eae7; border-radius: .85rem; padding: 1.2rem; }
+.status-card dt { color: #657b85; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
+.status-card dd { margin: .5rem 0 0; font-weight: 650; }

@@ -15,12 +15,15 @@ import re
 from services.knowledge.acl import source_access
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
+_STOPWORDS = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
+              "with", "from", "into", "about", "that", "this", "are", "can", "does", "did",
+              "tell", "please", "there", "their", "your"}
 _MAX_DOCUMENT_BYTES = 64 * 1024
 _MAX_QUERY_CHARS = 1000
 
 
 def _terms(value: str) -> set[str]:
-    return set(_WORDS.findall(value.casefold()))
+    return set(_WORDS.findall(value.casefold())) - _STOPWORDS
 
 
 def search_fixture_documents(
@@ -29,6 +32,8 @@ def search_fixture_documents(
     query: str,
     *,
     limit: int = 3,
+    document_ids: set[str] | None = None,
+    collections: set[str] | None = None,
 ) -> list[dict[str, object]]:
     """Return matched, authorised, hash-verified fixture excerpts and citations.
 
@@ -51,6 +56,10 @@ def search_fixture_documents(
         for source in csv.DictReader(stream):
             # Authorise metadata before opening the content file.
             if not source_access(user_id, source, policy):
+                continue
+            if document_ids is not None and source.get("document_id") not in document_ids:
+                continue
+            if collections is not None and source.get("collection") not in collections:
                 continue
             relative = source.get("relative_path", "")
             if not relative.endswith(".txt"):

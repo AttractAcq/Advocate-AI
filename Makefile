@@ -1,6 +1,6 @@
 .PHONY: build check test lab-up lab-check lab-smoke fixtures
 
-PYTHON ?= python3
+PYTHON ?= .venv/bin/python
 
 build:
 	$(PYTHON) scripts/build.py

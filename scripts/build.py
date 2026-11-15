@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a deterministic Phase 1 source bundle without external dependencies."""
+"""Build a deterministic source bundle from committed application inputs."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ import sys
 import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "build/sovereign-phase1-skeleton.tar.gz"
+OUT = ROOT / "build/sovereign-source.tar.gz"
 SKIP = {".git", "build", "runtime", "__pycache__", ".venv", "node_modules", ".pytest_cache"}
-INCLUDE = {".github", ".gitignore", "Makefile", "pyproject.toml",
+INCLUDE = {".github", ".gitignore", "Makefile", "pyproject.toml", "uv.lock", "requirements.lock",
            "apps", "services", "infrastructure", "scripts", "tests", "fixtures"}
 
 
