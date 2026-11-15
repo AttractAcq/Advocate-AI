@@ -41,6 +41,7 @@ class Settings:
     oidc_issuer: str | None = None
     embedding_endpoint: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma:300m"
+    oidc_revocations: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -54,6 +55,7 @@ class Settings:
             oidc_issuer=os.environ.get("SOVEREIGN_OIDC_ISSUER"),
             embedding_endpoint=os.environ.get("SOVEREIGN_EMBEDDING_ENDPOINT", cls.embedding_endpoint),
             embedding_model=os.environ.get("SOVEREIGN_EMBEDDING_MODEL", cls.embedding_model),
+            oidc_revocations=Path(os.environ["SOVEREIGN_OIDC_REVOCATIONS"]) if os.environ.get("SOVEREIGN_OIDC_REVOCATIONS") else None,
         )
 
 
@@ -85,7 +87,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     settings = settings or Settings.from_env()
     model = model or LocalModel(settings.inference_endpoint, settings.model_name)
     sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password)
-    oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json") if settings.oidc_issuer else None
+    oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json",
+                        revocations_path=settings.oidc_revocations or
+                        ROOT / "infrastructure/lab/runtime/phase3-identity/revoked-tokens.jsonl") if settings.oidc_issuer else None
     limiter = LabRateLimiter()
     app = FastAPI(title="Sovereign Core synthetic lab", docs_url=None, redoc_url=None)
     app.state.sessions = sessions
@@ -190,7 +194,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.post("/api/logout")
     def logout(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, bool]:
-        if not oidc:
+        if oidc:
+            oidc.revoke(identity[0])
+        else:
             sessions.logout(identity[0])
         return {"ok": True}
 
@@ -232,6 +238,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             raise HTTPException(status.HTTP_404_NOT_FOUND, "source not found")
         record_decision(identity[1]["id"], "preview", document_id, "allow")
         return preview
+
+    @app.get("/api/sources/{document_id}/download")
+    def source_download(document_id: str,
+                        identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> None:
+        record_decision(identity[1]["id"], "download", document_id, "deny")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "source downloads are disabled in this lab")
 
     @app.post("/api/search")
     def search(request: SearchRequest,
@@ -286,6 +298,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             else:
                 turns.append(turn)
         return {"conversation_id": conversation_id, "turns": turns}
+
+    @app.get("/api/conversations/{conversation_id}/export")
+    def conversation_export(conversation_id: str,
+                            identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> None:
+        record_decision(identity[1]["id"], "export", conversation_id, "deny")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "conversation export is disabled in this lab")
 
     @app.post("/api/chat")
     async def chat(request: ChatRequest, identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:

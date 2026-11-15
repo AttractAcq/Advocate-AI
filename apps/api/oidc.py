@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
+import os
 from pathlib import Path
+from threading import RLock
 import time
 from urllib.parse import urlsplit
 
@@ -14,7 +17,8 @@ import jwt
 
 class OidcVerifier:
     def __init__(self, issuer: str, roles_path: Path, audience: str = "sovereign-core",
-                 *, transport: httpx.BaseTransport | None = None) -> None:
+                 *, transport: httpx.BaseTransport | None = None,
+                 revocations_path: Path | None = None) -> None:
         parsed = urlsplit(issuer)
         try:
             address = ipaddress.ip_address(parsed.hostname or "")
@@ -30,6 +34,43 @@ class OidcVerifier:
         self.transport = transport
         self._keys: dict[str, object] = {}
         self._expires = 0.0
+        self.revocations_path = revocations_path
+        self._revoked_in_memory: set[str] = set()
+        self._lock = RLock()
+
+    def revoke(self, token: str) -> None:
+        """Reject a logged-out access token immediately, including after restart."""
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with self._lock:
+            if self.revocations_path is None:
+                self._revoked_in_memory.add(digest)
+                return
+            self.revocations_path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(self.revocations_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(descriptor, (json.dumps({"sha256": digest}) + "\n").encode())
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+    def _is_revoked(self, token: str) -> bool:
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with self._lock:
+            if digest in self._revoked_in_memory:
+                return True
+            if self.revocations_path is None or not self.revocations_path.exists():
+                return False
+            try:
+                with self.revocations_path.open(encoding="utf-8") as stream:
+                    for line in stream:
+                        item = json.loads(line)
+                        if not isinstance(item, dict) or not isinstance(item.get("sha256"), str):
+                            return True
+                        if item["sha256"] == digest:
+                            return True
+            except (OSError, ValueError, json.JSONDecodeError):
+                return True
+        return False
 
     def _key(self, kid: str):
         if time.monotonic() > self._expires or kid not in self._keys:
@@ -43,6 +84,8 @@ class OidcVerifier:
         return self._keys.get(kid)
 
     def user_for(self, token: str) -> dict[str, str] | None:
+        if self._is_revoked(token):
+            return None
         try:
             header = jwt.get_unverified_header(token)
             if header.get("alg") != "RS256" or not isinstance(header.get("kid"), str):

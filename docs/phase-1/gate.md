@@ -2,7 +2,7 @@
 
 | Task | Evidence now | State |
 |---|---|---|
-| T-006 source structure | Monorepo skeleton, published GitHub `main`, CI workflow, unit tests; PR #1 passed quality, secrets and the dependency-free manifest gate, then merged | GitHub-native dependency review and enforced branch protection unavailable on current private-repo plan; independent reviewer identity still open |
+| T-006 source structure | Monorepo, public GitHub repository, CI, full-history secret scan, Python/npm dependency audits; `main` protection now requires pull request, one independent approval, fresh review after a push, resolved conversations, linear history and `quality`, `secrets`, `dependency-review` checks | Appoint an external reviewer and obtain an attributable review of the current changes; qualify remaining action provenance before release |
 | T-007 isolated lab | Loopback topology, disposable local DNS/PKI, lab command and as-built inventory | Incomplete: GPU Ubuntu host, container runtime, segmented network, test NAS and separate Wazuh host/VM absent; local DNS/PKI does not replace the target lab services |
 | T-008 safe fixtures | Deterministic 100-text corpus; mixed PDF/DOCX/XLSX, duplicate, malformed, encoded injection, ACL and event cases in `fixtures/phase-1` | Local hashes, file structure, expected cases and event normalisation pass; independent fixture review remains |
 | T-009 observability | Structured request logs, TLS health and metrics endpoints, local dashboard, runbook and one-command lab bring-up | Local simulation smoke checks pass; target host observability unverified |
@@ -10,7 +10,7 @@
 
 The requester chose a **local simulation for now**, then authorised publication to [AttractAcq/Advocate-AI](https://github.com/AttractAcq/Advocate-AI). Hardware-dependent lab work remains deferred until the equipment is purchased; software work continues with synthetic fixtures. These choices do not change the original G0A criteria. The Phase 0 G0 approval still applies only to synthetic lab work. Do not mark G0A passed from the Mac simulation.
 
-GitHub displays a warning that neither rulesets nor classic branch protection are enforced for this private repository until the organization moves to a Team or Enterprise plan. No ineffective protection rule was saved. PR #1 was merged after its three available checks passed. The dependency gate currently rejects the introduction of runtime dependencies; GitHub-native dependency review requires the missing repository features.
+On 15 November 2026 the requester authorised making the repository public. `AttractAcq/Advocate-AI` is now public and GitHub's branch-protection API confirms the `main` rules listed above. The dependency gate audits the locked Python base and Phase 3 dependency sets with pip-audit and the Console lock with npm audit. An external reviewer has been selected in principle but not appointed. These remote controls do not substitute for the target lab and its independent QA record.
 
 ## Local reproduction evidence — 14 November 2026
 
@@ -20,7 +20,7 @@ GitHub displays a warning that neither rulesets nor classic branch protection ar
 - `make lab-smoke` passed in the fresh clone: six loopback health probes, dashboard, metrics and the read-only event feed. Loopback bind required local sandbox escalation during this session.
 - Source archive SHA-256 matched between workspace and fresh clone: `9ac3facb2b44233cbbcee58b849855077eb6f0e8f9968e39063d397e356d33f4`.
 
-This proves local source reproducibility on macOS. It does not prove GPU inference, segmented network isolation, container deployment or remote CI/branch protection.
+This proves local source reproducibility on macOS. It does not prove GPU inference, segmented network isolation or target container deployment. Remote CI and branch protection were configured later, as recorded above.
 
 ## Expanded local checks — 14 November 2026
 

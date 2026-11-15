@@ -1,0 +1,551 @@
+{
+  "cases": [
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Visitor arrival procedure is **SYN-MANAGEMENT-001-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which explicitly states: \"Unique verification marker: SYN-MANAGEMENT-001-ALPHA\".",
+      "expected_document_id": "MAN-001",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-001",
+      "retrieved_document_ids": [
+        "MAN-001"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the retrieved source document [Source MAN-002 v1], the verification marker for the Tender schedule procedure is **SYN-MANAGEMENT-002-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "MAN-002",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-002",
+      "retrieved_document_ids": [
+        "MAN-002"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Bridge briefing procedure is **SYN-MANAGEMENT-003-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is explicitly stated as **SYN-MANAGEMENT-003-ALPHA** (Source MAN-003 v1).",
+      "expected_document_id": "MAN-003",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-003",
+      "retrieved_document_ids": [
+        "MAN-003"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the provided source text, the verification marker for the Port Call Collection procedure is **SYN-MANAGEMENT-004-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document details. Note that this sample document does not grant access to private records or live vessel controls; it serves only as a fictional test for retrieval and source permissions.",
+      "expected_document_id": "MAN-004",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-004",
+      "retrieved_document_ids": [
+        "MAN-004"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Crew roster procedure is **SYN-MANAGEMENT-005-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed as \"Unique verification marker\" under the properties of Source MAN-005 v1.",
+      "expected_document_id": "MAN-005",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-005",
+      "retrieved_document_ids": [
+        "MAN-005"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Guest itinerary procedure is **SYN-MANAGEMENT-006-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker\" alongside the document ID (MAN-006) and version (v1).",
+      "expected_document_id": "MAN-006",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-006",
+      "retrieved_document_ids": [
+        "MAN-006"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the \"Provision approval\" procedure is **SYN-MANAGEMENT-007-ALPHA**.\n\nThis marker is listed under the Unique verification marker field within Source MAN-007 v1. Please note that this document is a fictional sample intended to test procedural retrieval and permissions; it does not grant access to private records or live vessel controls.",
+      "expected_document_id": "MAN-007",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-007",
+      "retrieved_document_ids": [
+        "MAN-007"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the provided source text, the verification marker for the Daily handover procedure is **SYN-MANAGEMENT-008-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is listed as SYN-MANAGEMENT-008-ALPHA. The document also notes that this sample never grants access to private records or live vessel controls, serving only as a test for retrieval and source permissions.",
+      "expected_document_id": "MAN-008",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-008",
+      "retrieved_document_ids": [
+        "MAN-008"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Emergency contact procedure is **SYN-MANAGEMENT-009-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which explicitly states: \"Unique verification marker: SYN-MANAGEMENT-009-ALPHA\".",
+      "expected_document_id": "MAN-009",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-009",
+      "retrieved_document_ids": [
+        "MAN-009"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the provided source text, the verification marker for the Deck meeting procedure is **SYN-MANAGEMENT-010-ALPHA**.\n\nThis information is explicitly stated in the document's metadata section within Source MAN-010 v1: \"Unique verification marker: SYN-MANAGEMENT-010-ALPHA\".",
+      "expected_document_id": "MAN-010",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-MAN-010",
+      "retrieved_document_ids": [
+        "MAN-010"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Generator inspection procedure is **SYN-ENGINEERING-001-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-001 v1].",
+      "expected_document_id": "ENG-001",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-001",
+      "retrieved_document_ids": [
+        "ENG-001"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the Cooling pump procedure (ENG-002 v1) is **SYN-ENGINEERING-002-ALPHA**.\n\nSource ID: [Source ENG-002 v1]",
+      "expected_document_id": "ENG-002",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-002",
+      "retrieved_document_ids": [
+        "ENG-002"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Battery bank procedure is **SYN-ENGINEERING-003-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-003 v1].",
+      "expected_document_id": "ENG-003",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-003",
+      "retrieved_document_ids": [
+        "ENG-003"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Freshwater filter procedure is **SYN-ENGINEERING-004-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-004 v1].",
+      "expected_document_id": "ENG-004",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-004",
+      "retrieved_document_ids": [
+        "ENG-004"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the Bilge alarm procedure is **SYN-ENGINEERING-005-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within Source ENG-005 v1. Note that this is a fictional test document designed to verify source permissions and does not represent actual operational equipment or control commands.",
+      "expected_document_id": "ENG-005",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-005",
+      "retrieved_document_ids": [
+        "ENG-005"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the HVAC intake procedure is **SYN-ENGINEERING-006-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within Source ENG-006 v1. Please note that this document is explicitly labeled as a fictional test document and contains no instructions on how to operate machinery or issue control commands; it only outlines the required actions for the procedure itself.",
+      "expected_document_id": "ENG-006",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-006",
+      "retrieved_document_ids": [
+        "ENG-006"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Hydraulic sample procedure is **SYN-ENGINEERING-007-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-007 v1].",
+      "expected_document_id": "ENG-007",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-007",
+      "retrieved_document_ids": [
+        "ENG-007"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Engine-room rounds procedure is **SYN-ENGINEERING-008-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker\" alongside its title and version number.",
+      "expected_document_id": "ENG-008",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-008",
+      "retrieved_document_ids": [
+        "ENG-008"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the \"Spare parts Collection\" procedure is **SYN-ENGINEERING-009-ALPHA**.\n\nThis information is found within the document's metadata section, which lists:\n*   **Unique verification marker:** SYN-ENGINEERING-009-ALPHA",
+      "expected_document_id": "ENG-009",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-009",
+      "retrieved_document_ids": [
+        "ENG-009"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the retrieved source document, the verification marker for the Fire door procedure is **SYN-ENGINEERING-010-ALPHA**.\n\nThis marker appears in the \"Unique verification marker\" field within the document header. Note that this is a fictional identifier used for testing retrieval and permissions within the synthetic lab environment; it does not correspond to any real-world security or engineering standard.",
+      "expected_document_id": "ENG-010",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-ENG-010",
+      "retrieved_document_ids": [
+        "ENG-010"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the provided source text, the verification marker for the Cabin preparation procedure is **SYN-INTERIOR-001-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is explicitly stated as SYN-INTERIOR-001-ALPHA.",
+      "expected_document_id": "INT-001",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-001",
+      "retrieved_document_ids": [
+        "INT-001"
+      ],
+      "source_label_in_answer": false
+    },
+    {
+      "answer": "Based on the retrieved source document **INT-002 v1**, the verification marker for the Linen count procedure is **SYN-INTERIOR-002-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-002",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-002",
+      "retrieved_document_ids": [
+        "INT-002"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source INT-003 v1], the verification marker for the Pantry stock procedure is **SYN-INTERIOR-003-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-003",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-003",
+      "retrieved_document_ids": [
+        "INT-003"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source document [Source INT-004 v1], the verification marker for the Service checklist procedure is **SYN-INTERIOR-004-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-004",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-004",
+      "retrieved_document_ids": [
+        "INT-004"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "The verification marker for the Dining setup procedure is **SYN-INTERIOR-005-ALPHA**. This identifier is listed within the \"Unique verification marker\" field of Source INT-005 v1.",
+      "expected_document_id": "INT-005",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-005",
+      "retrieved_document_ids": [
+        "INT-005"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the provided source document [Source INT-006 v1], the verification marker for the Laundry cycle procedure is **SYN-INTERIOR-006-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-006",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-006",
+      "retrieved_document_ids": [
+        "INT-006"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the provided source text [Source INT-007 v1], the unique verification marker for the Flower delivery procedure is **SYN-INTERIOR-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-007",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-007",
+      "retrieved_document_ids": [
+        "INT-007"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source document [Source INT-008 v1], the verification marker for the Cleaning supply procedure is **SYN-INTERIOR-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-008",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-008",
+      "retrieved_document_ids": [
+        "INT-008"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source document [Source INT-009 v1], the unique verification marker for the Table setting Collection is **SYN-INTERIOR-009-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-009",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-009",
+      "retrieved_document_ids": [
+        "INT-009"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source document INT-010 v1, the verification marker for the Galley handover procedure is **SYN-INTERIOR-010-ALPHA**.\n\nThis marker appears in the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "INT-010",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-INT-010",
+      "retrieved_document_ids": [
+        "INT-010"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source document [Source DEC-001 v1], the verification marker for the Line Inspection procedure is **SYN-DECK-001-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "DEC-001",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-001",
+      "retrieved_document_ids": [
+        "DEC-001"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-002 v1], the verification marker associated with the Fender check procedure is **SYN-DECK-002-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-002-ALPHA\".",
+      "expected_document_id": "DEC-002",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-002",
+      "retrieved_document_ids": [
+        "DEC-002"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-003 v1], the verification marker for the Deck wash procedure is **SYN-DECK-003-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-003-ALPHA\".",
+      "expected_document_id": "DEC-003",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-003",
+      "retrieved_document_ids": [
+        "DEC-003"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-004 v1], the verification marker for the Tender inventory procedure is **SYN-DECK-004-ALPHA**.\n\nThis identifier is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "DEC-004",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-004",
+      "retrieved_document_ids": [
+        "DEC-004"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-005 v1], the verification marker for the Mooring briefing procedure is **SYN-DECK-005-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-005-ALPHA\".",
+      "expected_document_id": "DEC-005",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-005",
+      "retrieved_document_ids": [
+        "DEC-005"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-006 v1], the verification marker for the Safety cone procedure is **SYN-DECK-006-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker.\" The document notes that this is a fictional test fixture used to train retrieval and source permissions, not an operational instruction for a real vessel.",
+      "expected_document_id": "DEC-006",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-006",
+      "retrieved_document_ids": [
+        "DEC-006"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-007 v1], the verification marker for the Gangway inspection procedure is **SYN-DECK-007-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-007-ALPHA\".",
+      "expected_document_id": "DEC-007",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-007",
+      "retrieved_document_ids": [
+        "DEC-007"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source document [Source DEC-008 v1], the unique verification marker for the Lifejacket count procedure is **SYN-DECK-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "DEC-008",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-008",
+      "retrieved_document_ids": [
+        "DEC-008"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-009 v1], the verification marker for the Deck lighting procedure is **SYN-DECK-009-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "expected_document_id": "DEC-009",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-009",
+      "retrieved_document_ids": [
+        "DEC-009"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "Based on the provided source text [Source DEC-010 v1], the verification marker for the Weather cover procedure is **SYN-DECK-010-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-010-ALPHA\".",
+      "expected_document_id": "DEC-010",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-DEC-010",
+      "retrieved_document_ids": [
+        "DEC-010"
+      ],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-001",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-002",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-003",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-004",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-005",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-006",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-007",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-008",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-009",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "expected_document_id": "DENY",
+      "expected_marker_present": true,
+      "expected_source_selected": true,
+      "question_id": "Q-RES-010",
+      "retrieved_document_ids": [],
+      "source_label_in_answer": true
+    }
+  ],
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "interpretation": "Marker and source-label checks are automated proxies; a human assessor must review claim support and uncertainty.",
+  "model": "qwen3.5:2b",
+  "schema": 1,
+  "source_commit": "16ee5a4c425f65a76f7218571c9b286d0125ebde",
+  "summary": {
+    "allowed": 40,
+    "cases": 50,
+    "denied": 10,
+    "expected_marker_answers": 40,
+    "no_answer_denials": 10,
+    "source_labels_in_answers": 32
+  },
+  "timestamp_utc": "2026-11-15T11:22:22.704024+00:00"
+}
