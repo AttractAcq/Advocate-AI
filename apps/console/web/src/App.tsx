@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
-import type { AdminStatus, ChatResult, Citation, Identity, Source, SourcePreview, Turn } from './api'
+import type { AdminStatus, ChatResult, Citation, Identity, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, Turn } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 
-type View = 'chat' | 'documents' | 'administration'
+type View = 'chat' | 'documents' | 'security' | 'administration'
 type LoginReply = { access_token: string }
 
 const roleName: Record<string, string> = {
@@ -31,6 +31,9 @@ export default function App() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [admin, setAdmin] = useState<AdminStatus | null>(null)
+  const [incidents, setIncidents] = useState<SecurityIncident[]>([])
+  const [incident, setIncident] = useState<SecurityDetail | null>(null)
+  const [analysis, setAnalysis] = useState<SecurityAnalysis | null>(null)
   const [filter, setFilter] = useState('')
   const [preview, setPreview] = useState<{ bearer: string; source: SourcePreview } | null>(null)
   const [pending, setPending] = useState(false)
@@ -96,6 +99,9 @@ export default function App() {
     setSources([])
     setSelectedSources([])
     setAdmin(null)
+    setIncidents([])
+    setIncident(null)
+    setAnalysis(null)
     setPreview(null)
     setError('')
     if (oidcEnabled()) endOidc()
@@ -145,6 +151,33 @@ export default function App() {
     setError('')
     try { setAdmin(await api<AdminStatus>('/admin/status', token)) }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Administration unavailable') }
+  }
+
+  async function openSecurity() {
+    if (!token || identity?.role !== 'avit_admin') return
+    setView('security')
+    setError('')
+    setIncident(null)
+    setAnalysis(null)
+    try { setIncidents((await api<{ incidents: SecurityIncident[] }>('/security/incidents', token)).incidents) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Security alerts unavailable') }
+  }
+
+  async function openIncident(id: string) {
+    if (!token) return
+    setError('')
+    setAnalysis(null)
+    try { setIncident(await api<SecurityDetail>(`/security/incidents/${encodeURIComponent(id)}`, token)) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Incident unavailable') }
+  }
+
+  async function explainIncident() {
+    if (!token || !incident || pending) return
+    setPending(true)
+    setError('')
+    try { setAnalysis(await api<SecurityAnalysis>(`/security/incidents/${encodeURIComponent(incident.incident_id)}/explain`, token, { method: 'POST' })) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Analysis unavailable') }
+    finally { setPending(false) }
   }
 
   async function sendQuestion(event: FormEvent<HTMLFormElement>) {
@@ -229,6 +262,8 @@ export default function App() {
         <nav aria-label="Workspace" className="mt-9 flex flex-wrap gap-2 lg:flex-col">
           <button className={`nav-button ${view === 'chat' ? 'nav-active' : ''}`} aria-current={view === 'chat' ? 'page' : undefined} onClick={() => setView('chat')}>AI Chat</button>
           <button className={`nav-button ${view === 'documents' ? 'nav-active' : ''}`} aria-current={view === 'documents' ? 'page' : undefined} onClick={() => setView('documents')}>Documents</button>
+          {identity.role === 'avit_admin' && <button className={`nav-button ${view === 'security' ? 'nav-active' : ''}`}
+            aria-current={view === 'security' ? 'page' : undefined} onClick={() => void openSecurity()}>Security</button>}
           {identity.role === 'avit_admin' && <button className={`nav-button ${view === 'administration' ? 'nav-active' : ''}`}
             aria-current={view === 'administration' ? 'page' : undefined} onClick={openAdmin}>Administration</button>}
         </nav>
@@ -263,7 +298,7 @@ export default function App() {
         <header className="mb-8 flex flex-wrap items-start justify-between gap-4 border-b border-[#dce5e5] pb-6">
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-[.2em] text-[#895534]">{roleName[identity.role] || identity.role} workspace</div>
-            <h1 id="view-heading" tabIndex={-1} className="text-3xl font-semibold outline-none sm:text-4xl">{view === 'chat' ? 'Private Vessel Assistant' : view === 'documents' ? 'Approved documents' : 'Lab administration'}</h1>
+            <h1 id="view-heading" tabIndex={-1} className="text-3xl font-semibold outline-none sm:text-4xl">{view === 'chat' ? 'Private Vessel Assistant' : view === 'documents' ? 'Approved documents' : view === 'security' ? 'Security alerts' : 'Lab administration'}</h1>
             <p className="mt-2 text-sm text-[#637985]">Local AI · Synthetic documents only · Read-only tools</p>
           </div>
           <button className="secondary-button lg:hidden" onClick={signOut}>Sign out</button>
@@ -360,6 +395,31 @@ export default function App() {
             </label>)}
             {visibleSources.length === 0 && <p className="text-sm text-[#5d7380]">No permitted sources match this filter.</p>}
           </div>
+        </section>}
+
+        {view === 'security' && identity.role === 'avit_admin' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-7 shadow-sm">
+          <h2 className="text-xl font-semibold">Read-only incident review</h2>
+          <p className="mt-2 text-sm text-[#5d7380]">Synthetic alert evidence. Verify every finding in the independent Wazuh store before acting.</p>
+          <button className="secondary-button mt-4" onClick={() => void openSecurity()}>Refresh alerts</button>
+          <div className="mt-5 grid gap-3">
+            {incidents.map((item) => <button key={item.incident_id} className="rounded-xl border border-[#dce5e5] p-4 text-left hover:bg-[#f7faf8]" onClick={() => void openIncident(item.incident_id)}>
+              <strong className="block text-sm">{item.summary}</strong><span className="text-xs text-[#5d7380]">{item.severity} · {item.timestamp} · {item.incident_id}</span>
+            </button>)}
+            {incidents.length === 0 && <p className="text-sm text-[#5d7380]">No alerts are available.</p>}
+          </div>
+          {incident && <article className="mt-7 rounded-xl bg-[#f3f6f4] p-5">
+            <h3 className="font-semibold">{incident.incident_id}</h3>
+            <p className="mt-2 text-sm">{incident.summary}</p>
+            <p className="mt-2 text-sm">Source asset: {incident.event.asset?.hostname || incident.event.asset_status} · Owner: {incident.event.asset?.owner || 'unmapped'}</p>
+            <p className="mt-2 text-sm">Related asset mapping: {incident.event.related_asset_status}</p>
+            <h4 className="mt-5 text-sm font-semibold">Evidence</h4>
+            <ul className="mt-2 list-disc pl-5 text-sm">{incident.evidence.map((entry) => <li key={entry.event_id}>{entry.event_id} · {entry.timestamp} · rule {entry.rule_id} · {entry.location}</li>)}</ul>
+            <h4 className="mt-5 text-sm font-semibold">Suggested checks</h4>
+            <ul className="mt-2 list-disc pl-5 text-sm">{incident.suggested_checks.map((check) => <li key={check}>{check}</li>)}</ul>
+            <p className="mt-4 text-xs text-[#5d7380]">{incident.confidence}</p>
+            <button className="primary-button mt-5" disabled={pending} onClick={() => void explainIncident()}>{pending ? 'Analysing…' : 'Explain with local AI'}</button>
+            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">AI explanation</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
+          </article>}
         </section>}
 
         {view === 'administration' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-7 shadow-sm">

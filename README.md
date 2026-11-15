@@ -2,7 +2,7 @@
 
 Sovereign AI is a private vessel assistant and read-only cybersecurity intelligence product. The [technical development and implementation plan](docs/Sovereign_AI_Technical_Development_and_Implementation_Plan.docx) is the detailed build plan for this repository. Its task IDs and gates govern delivery. The [build-plan overview](<docs/Soverign AI build plan 14_11_2026.txt>) describes the five product milestones and seven proprietary modules.
 
-**Current state:** Phase 0 G0 was approved by the requester on 14 November 2026 and reconfirmed on 15 November for synthetic lab development ([approval records](docs/approval/2026-11-15-phase0-phase1.md)). The requester also reviewed and approved completed Phase 1 local work; the public repository has enforced `main` protection, while target hardware/network checks and independent review remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence](docs/phase-2/gate.md) keeps the target hardware and disconnected-WAN gate open. Phase 3 local ingestion, indexed retrieval, Keycloak identity and audit work is under test; its [gate record](docs/phase-3/gate.md) and [external review brief](docs/review/phase-0-3-external-review.md) list remaining controls. This baseline does not authorise vessel access, production data, procurement or deployment.
+**Current state:** Phase 0 G0 was approved by the requester on 14 November 2026 and reconfirmed on 15 November for synthetic lab development ([approval records](docs/approval/2026-11-15-phase0-phase1.md)). The requester also reviewed and approved completed Phase 1 local work; the public repository has enforced `main` protection, while target hardware/network checks and independent review remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence](docs/phase-2/gate.md) keeps the target hardware and disconnected-WAN gate open. Phase 3 local ingestion, indexed retrieval, Keycloak identity and audit work is under test; its [gate record](docs/phase-3/gate.md) and [external review brief](docs/review/phase-0-3-external-review.md) list remaining controls. Phase 4 synthetic alert analysis is being developed; its [gate record](docs/phase-4/gate.md) keeps independent Wazuh and outage proof open. This baseline does not authorise vessel access, production data, procurement or deployment.
 
 ## Product milestones
 
@@ -73,6 +73,7 @@ Development/
 │   ├── phase-1/              Runbook, inventory, controls and gate evidence
 │   ├── phase-2/              Core/Console runbook, model card and G1 evidence
 │   ├── phase-3/              Ingestion, identity, retrieval and gate evidence
+│   ├── phase-4/              Security intelligence runbook and open gate
 │   └── approval/2026-11-14-g0.md
 └── fixtures/                 Synthetic generators, manifests and local generated data
     ├── generate.py
@@ -81,6 +82,7 @@ Development/
     ├── roles.json
     ├── negative-prompt-injection.txt
     ├── phase-1/              Mixed formats, negative cases and events
+    ├── phase-4/              Synthetic security alerts and asset mapping
     └── sources/              100 generated fictional text documents (Git ignored)
 ```
 
