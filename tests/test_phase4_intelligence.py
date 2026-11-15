@@ -29,12 +29,14 @@ class FakeModel:
     def __init__(self) -> None:
         self.offline = False
         self.calls = []
+        self.answer = "The alert reported a synthetic event that requires verification."
 
-    async def complete(self, question, context, *, general=False):
+    async def complete(self, question, context, *, general=False, system_instruction=None, max_tokens=320):
         if self.offline:
             raise ModelUnavailable("model offline")
-        self.calls.append(question)
-        return "Check the cited alert in Wazuh before investigation."
+        self.calls.append({"question": question, "system_instruction": system_instruction,
+                           "max_tokens": max_tokens})
+        return self.answer
 
 
 class IntelligenceTests(unittest.TestCase):
@@ -184,7 +186,8 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(alert_id, f"{detail.json()['evidence'][0]['index_name']}:{detail.json()['evidence'][0]['index_id']}")
         explanation = await self.client.post(f"/api/security/incidents/{alert_id}/explain", headers=admin)
         self.assertEqual(explanation.status_code, 200, explanation.text)
-        self.assertIn(alert_id, self.model.calls[0])
+        self.assertIn("lab-wazuh-forti-001", self.model.calls[0]["question"])
+        self.assertEqual(self.model.calls[0]["max_tokens"], 96)
         self.model.offline = True
         self.assertEqual((await self.client.post(f"/api/security/incidents/{alert_id}/explain", headers=admin)).status_code, 503)
         self.assertEqual((await self.client.get("/api/security/incidents", headers=admin)).status_code, 200)
@@ -218,3 +221,13 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["method"], "evidence-only")
         self.assertIn("ambiguous", response.json()["confidence"])
         self.assertEqual(self.model.calls, [])
+
+    async def test_unstructured_model_output_falls_back_to_evidence(self):
+        admin = await self.login("lab-avit_admin-1")
+        self.model.answer = "**Unsupported steps**\n1. Change firewall rules"
+        response = await self.client.post(
+            "/api/security/incidents/wazuh-alerts-4.x-2026.11.15:doc-forti-001/explain",
+            headers=admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["method"], "evidence-only")
+        self.assertNotIn("Change firewall rules", response.text)
