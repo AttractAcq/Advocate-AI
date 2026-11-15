@@ -5,6 +5,8 @@ software controls that can be tested before target hardware or vessel access.
 The requester selected an external reviewer on 15 November 2026. The reviewer
 has not been appointed or signed off. No vessel documents, credentials or logs
 are included in this package.
+The [closure audit](phase-0-3-closure-audit.md) maps each plan task and gate
+to its present evidence and outstanding work.
 
 ## Review scope
 
@@ -12,7 +14,7 @@ are included in this package.
 |---|---|---|
 | Phase 0 design | [Scope](../01-scope-and-requirements.md), [architecture](../02-architecture.md), [threat model](../03-threat-model-and-data-policy.md), [stack](../04-stack-and-provenance.md), [acceptance matrix](../05-acceptance-tests.md), [G0 approval](../approval/2026-11-14-g0.md) | Confirm threat coverage, data classes, exclusion boundaries and proposed AT-09/AT-18 thresholds; record changes |
 | Phase 1 repo and fixtures | [G0A record](../phase-1/gate.md), [runbook](../phase-1/lab-runbook.md), `.github/workflows/ci.yml`, `fixtures/` | Review fixture safety, source integrity, public-repository exposure and active branch protection |
-| Phase 2 Core and Console | [G1 record](../phase-2/gate.md), [runbook](../phase-2/runbook.md), `apps/api/`, `apps/console/web/` | Review API auth, model boundary, citations, error handling and browser accessibility; separate hardware/offline items remain deferred |
+| Phase 2 Core and Console | [G1 record](../phase-2/gate.md), [runbook](../phase-2/runbook.md), `apps/api/`, `apps/console/web/` | Review API auth, model boundary, citations, optional persistent history and source-revocation redaction, error handling and browser accessibility; separate hardware/offline items remain deferred |
 | Phase 3 Knowledge and Policy | [gate record](../phase-3/gate.md), [ingestion register](../phase-3/supported-formats.md), [identity operations design](../phase-3/identity-operations.md), [retrieval evaluation](../phase-3/evaluation.json), [generated answers](../phase-3/answer-evaluation.json), `services/knowledge/`, `services/policy/`, `tests/` | Attempt cross-role access, stale ACL, deletion, injection, source spoofing, audit tamper and token replay; judge identity controls, answer claim support, parser limits and residual risk |
 
 ## Reproduction commands

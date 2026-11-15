@@ -55,6 +55,7 @@ or credential should be placed in this lab.
    SOVEREIGN_KNOWLEDGE_MANIFEST=fixtures/phase-3/approved-sources.json \
    SOVEREIGN_KNOWLEDGE_DB=infrastructure/lab/runtime/phase3-knowledge/index.sqlite3 \
    SOVEREIGN_AUDIT_PATH=infrastructure/lab/runtime/phase3-audit/events.jsonl \
+   SOVEREIGN_HISTORY_DB=infrastructure/lab/runtime/phase3-history/conversations.sqlite3 \
    SOVEREIGN_OIDC_ISSUER=http://127.0.0.1:18086/realms/sovereign-lab \
    .venv/bin/uvicorn apps.api.main:app --host 127.0.0.1 --port 18100
    ```
@@ -77,6 +78,12 @@ or credential should be placed in this lab.
    resource, decision, policy hash, timestamp and correlation ID, without the
    prompt or passage body. Its hash-chain verifier is
    `services.policy.audit.verify`.
+
+   `SOVEREIGN_HISTORY_DB` enables optional restart-persistent **synthetic**
+   conversations. The local SQLite file is restricted to the process account
+   and each read rechecks current source permissions. It contains prompt and
+   answer text and is not encrypted; do not place vessel data in it. Vessel
+   retention, encryption and backup key custody require separate approval.
 
 ## Boundaries
 

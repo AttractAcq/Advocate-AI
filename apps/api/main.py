@@ -42,6 +42,7 @@ class Settings:
     embedding_endpoint: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma:300m"
     oidc_revocations: Path | None = None
+    history_db: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -56,6 +57,7 @@ class Settings:
             embedding_endpoint=os.environ.get("SOVEREIGN_EMBEDDING_ENDPOINT", cls.embedding_endpoint),
             embedding_model=os.environ.get("SOVEREIGN_EMBEDDING_MODEL", cls.embedding_model),
             oidc_revocations=Path(os.environ["SOVEREIGN_OIDC_REVOCATIONS"]) if os.environ.get("SOVEREIGN_OIDC_REVOCATIONS") else None,
+            history_db=Path(os.environ["SOVEREIGN_HISTORY_DB"]) if os.environ.get("SOVEREIGN_HISTORY_DB") else None,
         )
 
 
@@ -86,7 +88,7 @@ class SearchRequest(BaseModel):
 def create_app(settings: Settings | None = None, model: LocalModel | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     model = model or LocalModel(settings.inference_endpoint, settings.model_name)
-    sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password)
+    sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password, settings.history_db)
     oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json",
                         revocations_path=settings.oidc_revocations or
                         ROOT / "infrastructure/lab/runtime/phase3-identity/revoked-tokens.jsonl") if settings.oidc_issuer else None
