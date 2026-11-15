@@ -6,6 +6,9 @@ macOS or CI behavior; it does not certify the intended vessel appliance.
 Hardware, site access and owner decisions remain deferred by the requester.
 An external security/QA reviewer was selected in principle but has not been
 named or completed a review. No independent sign-off is claimed here.
+The requester directed a [one-time PR #9 review exception](../approval/2026-11-15-pr9-review-exception.md)
+to merge the synthetic work without a second GitHub account's approval. This
+does not close the external security/QA review task.
 The requester separately [approved Phase 0 and reviewed/approved Phase 1](../approval/2026-11-15-phase0-phase1.md)
 on 15 November 2026. That decision closes requester acceptance of their
 synthetic deliverables; it does not replace the target G0A test or an
