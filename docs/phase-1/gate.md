@@ -27,3 +27,24 @@ This proves local source reproducibility on macOS. It does not prove GPU inferen
 At commit `2ecc15e`, `make check` passed the code archive build, four unit tests, all 100 source hashes, 12 mixed-format fixture hashes and structural checks, and four normalised event cases. `make lab-smoke` passed six HTTPS health and metrics probes, the dashboard, event feed, local no-forwarding DNS answers and rejection of an untrusted certificate. The code archive excluded generated certificates, private keys and runtime state.
 
 A second fresh-clone checkout was attempted for this commit but did not finish while reading the Desktop-backed Git objects. The earlier fresh-clone result above remains valid for `f4ef748`; fresh-clone reproduction of `2ecc15e` is **not claimed**. G0A remains open for the target Ubuntu lab and an attributable independent review of the latest baseline.
+
+## Current branch reproduction — 15 November 2026
+
+A new public-repository clone under `/private/tmp/sovereign-phase3-repro`
+checked out the Phase 3 hardening branch. It installed the locked Phase 3
+Python set and Console npm lock, regenerated the 100 text and 12 mixed-format
+fixtures, and built the Console. The first `make check` failed because one
+otherwise valid source missed the parser worker's 45-second cold conversion
+budget. A second ingestion indexed all 109 expected sources and quarantined
+the three expected negative cases. The worker now allows 120 seconds for its
+first conversion and 45 seconds thereafter, without removing the timeout.
+
+After a fast-forward to commit `151e014`, the clone passed `make check` with
+33 tests and the repository fixture checks. `make lab-smoke` passed the
+dashboard, six HTTPS service health/metrics probes, synthetic event feed,
+local DNS and untrusted-certificate rejection. The sandbox denied loopback
+binds initially; the smoke run succeeded with explicit local bind permission.
+The source archive SHA-256 matched the active worktree at the same commit:
+`7b4e8d36e2e2fb0e0ca8616cc786628a8da2d31699a723e378904597eb3ad47d`.
+Both Git worktrees were clean after the run. This is a macOS synthetic
+reproduction, not the G0A Ubuntu/GPU/segmented-network exit test.
