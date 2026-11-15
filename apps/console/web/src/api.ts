@@ -1,0 +1,37 @@
+export type Identity = { id: string; role: string }
+export type Source = { document_id: string; collection: string; version: string }
+export type Citation = Source & { sha256: string }
+export type Turn = {
+  message: string
+  answer: string
+  citations: Citation[]
+  mode: string
+  workspace: string | null
+}
+export type ChatResult = Turn & { conversation_id: string; model: string; tool_route: string }
+export type AdminStatus = {
+  mode: string
+  identity: string
+  model: string
+  read_only_tools: string[]
+  write_tools: string[]
+}
+
+export async function api<T>(path: string, token: string | null, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init.headers,
+    },
+    cache: 'no-store',
+  })
+  let body: Record<string, unknown> = {}
+  try { body = await response.json() as Record<string, unknown> } catch { /* offline or invalid response */ }
+  if (!response.ok) {
+    const detail = typeof body.detail === 'string' ? body.detail : `Request failed (${response.status})`
+    throw new Error(detail)
+  }
+  return body as T
+}

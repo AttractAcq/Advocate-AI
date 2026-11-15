@@ -13,6 +13,24 @@ FIXTURES = ROOT / "fixtures"
 
 
 class SyntheticRetrievalTests(unittest.TestCase):
+    def test_fixed_question_set_retrieval_and_denials(self) -> None:
+        with (ROOT / "fixtures/evaluation.csv").open(newline="") as stream:
+            cases = list(csv.DictReader(stream))
+        users = {"captain": "lab-captain-1", "deckhand": "lab-deckhand-1"}
+        self.assertEqual(len(cases), 50)
+        for case in cases:
+            hits = search_fixture_documents(FIXTURES, users[case["user_role"]], case["question"])
+            if case["expected_document_id"] == "DENY":
+                self.assertEqual(hits, [], case["question_id"])
+            else:
+                self.assertTrue(hits, case["question_id"])
+                self.assertEqual(hits[0]["document_id"], case["expected_document_id"], case["question_id"])
+
+    def test_selected_source_is_filtered_before_ranking(self) -> None:
+        hits = search_fixture_documents(FIXTURES, "lab-captain-1", "verification marker",
+                                        document_ids={"ENG-001"}, collections={"engineering"})
+        self.assertEqual([hit["document_id"] for hit in hits], ["ENG-001"])
+
     def test_allowed_source_has_verifiable_citation(self) -> None:
         hits = search_fixture_documents(FIXTURES, "lab-chief_engineer-1", "generator inspection")
         self.assertTrue(hits)

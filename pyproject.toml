@@ -1,9 +1,13 @@
 [project]
 name = "sovereign-ai-lab"
 version = "0.1.0"
-description = "Sovereign AI Phase 1 synthetic lab skeleton"
+description = "Sovereign AI synthetic development lab"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "fastapi==0.162.6",
+    "httpx==0.28.1",
+    "uvicorn==0.38.0",
+]
 
 [tool.sovereign]
 data-classification = "synthetic-only"

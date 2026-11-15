@@ -2,7 +2,7 @@
 
 Sovereign AI is a private vessel assistant and read-only cybersecurity intelligence product. The [technical development and implementation plan](docs/Sovereign_AI_Technical_Development_and_Implementation_Plan.docx) is the detailed build plan for this repository. Its task IDs and gates govern delivery. The [build-plan overview](<docs/Soverign AI build plan 14_11_2026.txt>) describes the five product milestones and seven proprietary modules.
 
-**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 local simulation and GitHub CI are implemented; hardware and enforced remote controls remain open in [G0A evidence](docs/phase-1/gate.md). [Phase 2 synthetic retrieval](docs/phase-2-retrieval.md) has started. This baseline does not authorise vessel access, production data, procurement or deployment.
+**Current state:** Phase 0 is complete. G0 was approved by the requesting user on 14 November 2026 for synthetic lab development only ([approval record](docs/approval/2026-11-14-g0.md)). Phase 1 local simulation and GitHub CI are implemented; hardware and enforced remote controls remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence and open work](docs/phase-2/gate.md) keeps the hardware and offline acceptance gate open. This baseline does not authorise vessel access, production data, procurement or deployment.
 
 ## Product milestones
 
@@ -49,14 +49,16 @@ Strict Sovereign Mode is the V1 default: prompts, vessel documents, embeddings a
 ```text
 Development/
 ├── README.md                 Product roadmap and repository map
-├── apps/                     Console and Core skeletons
-├── services/                 Knowledge, Policy, Intelligence and connector skeletons
+├── apps/                     FastAPI Core and React Console; later product apps
+├── services/                 Knowledge retrieval, Policy, Intelligence and connectors
 ├── infrastructure/           Synthetic lab and release-manifest checks
 ├── scripts/                  Build, repository checks and lab control
-├── tests/                    Phase 1 and synthetic retrieval tests
+├── tests/                    Lab, retrieval and Core API tests
 ├── .github/                  CI and dependency update configuration
 ├── Makefile                  One-command build, tests and lab bring-up
-├── pyproject.toml            Dependency-free Python lab metadata
+├── pyproject.toml            Pinned Python application dependencies
+├── uv.lock                   Resolved Python dependency lock
+├── requirements.lock         Hashed Python requirements for audit
 ├── docs/                     Build plan and technical documentation
 │   ├── Sovereign_AI_Technical_Development_and_Implementation_Plan.docx
 │   ├── Soverign AI build plan 14_11_2026.txt
@@ -69,6 +71,7 @@ Development/
 │   ├── candidate-sbom.json
 │   ├── fixtures.md
 │   ├── phase-1/              Runbook, inventory, controls and gate evidence
+│   ├── phase-2/              Core/Console runbook, model card and G1 evidence
 │   └── approval/2026-11-14-g0.md
 └── fixtures/                 Synthetic generators, manifests and local generated data
     ├── generate.py
@@ -80,7 +83,7 @@ Development/
     └── sources/              100 generated fictional text documents (Git ignored)
 ```
 
-The Phase 1 code is a synthetic lab skeleton. Generated fixture payloads are reproducible with `make fixtures` and ignored by Git; their generators, expected results and manifests are versioned. The Phase 2 retrieval prototype searches only generated text fixtures; it is not an AI assistant. G0A hardware and network checks remain open.
+Generated fixture payloads are reproducible with `make fixtures` and ignored by Git; their generators, expected results and manifests are versioned. The Phase 2 local app uses only synthetic text fixtures and a preinstalled loopback model. Its authentication and storage are lab-only. G0A hardware/network checks and G1 offline proof remain open. See the [Phase 2 runbook](docs/phase-2/runbook.md) to reproduce the app.
 
 ## Phase 0 evidence
 
