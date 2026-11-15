@@ -1,6 +1,6 @@
 # Phase 0 decision log and G0 sign-off
 
-**Status:** **G0 approved for synthetic lab development** by the requesting user at 12:41 UTC on 14 November 2026. The [electronic approval record](approval/2026-11-14-g0.md) captures the question and response. This records the requester's approval, not an invented signature, specialist certification or vessel permission.
+**Status:** **G0 approved for synthetic lab development** by the requesting user at 12:41 UTC on 14 November 2026. The [original electronic approval record](approval/2026-11-14-g0.md) captures the question and response. On 15 November the requester reconfirmed “0 - passes and approved” in a [Phase 0/1 review record](approval/2026-11-15-phase0-phase1.md). These are requester approvals, not an invented specialist certification or vessel permission.
 
 ## Baseline decisions proposed for approval
 

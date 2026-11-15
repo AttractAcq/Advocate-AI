@@ -95,6 +95,35 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
         (self.fixtures / "roles.json").write_text(json.dumps(policy))
         self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code, 401)
 
+    async def test_optional_history_survives_restart_and_rechecks_scope(self) -> None:
+        settings = Settings(fixture_root=self.fixtures, lab_password="synthetic-test-passphrase",
+                            history_db=self.fixtures / "runtime/history.sqlite3")
+        first = create_app(settings, self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=first), base_url="http://history") as client:
+            login = await client.post("/api/login", json={"user_id": "lab-chief_engineer-1",
+                                                      "password": "synthetic-test-passphrase"})
+            engineer = {"Authorization": "Bearer " + login.json()["access_token"]}
+            reply = await client.post("/api/chat", headers=engineer, json={"message": "generator inspection"})
+            conversation_id = reply.json()["conversation_id"]
+        restarted = create_app(settings, self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=restarted), base_url="http://history") as client:
+            login = await client.post("/api/login", json={"user_id": "lab-chief_engineer-1",
+                                                      "password": "synthetic-test-passphrase"})
+            engineer = {"Authorization": "Bearer " + login.json()["access_token"]}
+            self.assertIn(conversation_id, (await client.get("/api/conversations", headers=engineer)).json()["conversation_ids"])
+            history = await client.get(f"/api/conversations/{conversation_id}", headers=engineer)
+            self.assertEqual(history.json()["turns"][0]["citations"][0]["document_id"], "ENG-001")
+            login = await client.post("/api/login", json={"user_id": "lab-deckhand-1",
+                                                      "password": "synthetic-test-passphrase"})
+            deckhand = {"Authorization": "Bearer " + login.json()["access_token"]}
+            self.assertEqual((await client.get(f"/api/conversations/{conversation_id}", headers=deckhand)).status_code, 404)
+            policy = json.loads((self.fixtures / "roles.json").read_text())
+            policy["allow"]["chief_engineer"] = ["deck"]
+            (self.fixtures / "roles.json").write_text(json.dumps(policy))
+            redacted = await client.get(f"/api/conversations/{conversation_id}", headers=engineer)
+            self.assertEqual(redacted.json()["turns"][0]["mode"], "redacted")
+            self.assertNotIn("Synthetic answer", redacted.text)
+
     async def test_source_tamper_redacts_history_and_hides_source_list(self) -> None:
         engineer = await self.login("lab-chief_engineer-1")
         reply = await self.client.post("/api/chat", headers=engineer, json={"message": "generator inspection"})

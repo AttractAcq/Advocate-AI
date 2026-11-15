@@ -16,6 +16,10 @@ _STOP = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "f
          "tell", "please", "there", "their", "your"}
 
 
+class SourceManifestError(ValueError):
+    """An approved-source manifest is unusable; no indexed row may be exposed."""
+
+
 def _terms(text: str) -> set[str]:
     return set(_WORDS.findall(text.casefold())) - _STOP
 
@@ -23,11 +27,26 @@ def _terms(text: str) -> set[str]:
 def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> list[dict[str, str]]:
     """Recheck current manifest, policy and source bytes before exposing metadata."""
     base = root.resolve(strict=True)
-    policy = json.loads((base / "roles.json").read_text(encoding="utf-8"))
-    current = json.loads(manifest.read_text(encoding="utf-8"))
-    if current.get("schema") != 1 or not isinstance(current.get("sources"), list):
-        raise ValueError("source manifest unavailable")
-    listed = {item.get("document_id"): item for item in current["sources"] if isinstance(item, dict)}
+    try:
+        policy = json.loads((base / "roles.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SourceManifestError("source policy unavailable") from exc
+    if not isinstance(policy, dict):
+        raise SourceManifestError("source policy unavailable")
+    try:
+        current = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SourceManifestError("source manifest unavailable") from exc
+    if not isinstance(current, dict) or current.get("schema") != 1 or not isinstance(current.get("sources"), list):
+        raise SourceManifestError("source manifest unavailable")
+    listed = {}
+    for item in current["sources"]:
+        if not isinstance(item, dict):
+            raise SourceManifestError("source manifest malformed")
+        document_id = item.get("document_id")
+        if not isinstance(document_id, str) or not document_id or document_id in listed:
+            raise SourceManifestError("source manifest has invalid or duplicate IDs")
+        listed[document_id] = item
     approved = []
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
         db.row_factory = sqlite3.Row

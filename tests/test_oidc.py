@@ -49,10 +49,27 @@ class OidcTests(unittest.TestCase):
         self.policy["users"][0]["status"] = "revoked"
         self.roles.write_text(json.dumps(self.policy))
         self.assertIsNone(self.verifier.user_for(valid))
+        self.roles.write_text("[]")
+        self.assertIsNone(self.verifier.user_for(valid))
 
     def test_nonlocal_issuer_rejected(self) -> None:
         with self.assertRaises(ValueError):
             OidcVerifier("https://example.com/realms/lab", self.roles)
+
+    def test_logout_revocation_survives_verifier_restart(self) -> None:
+        path = Path(self.temporary.name) / "revoked.jsonl"
+        original = self.verifier
+        original.revocations_path = path
+        token = self.token()
+        self.assertIsNotNone(original.user_for(token))
+        original.revoke(token)
+        self.assertIsNone(original.user_for(token))
+        restarted = OidcVerifier(self.issuer, self.roles, transport=original.transport,
+                                 revocations_path=path)
+        self.assertIsNone(restarted.user_for(token))
+        self.assertIsNotNone(restarted.user_for(self.token(iat=int(time.time()) - 1)))
+        path.write_text('{"sha256":')
+        self.assertIsNone(restarted.user_for(self.token()))
 
 
 if __name__ == "__main__":

@@ -9,38 +9,77 @@ from __future__ import annotations
 
 import hashlib
 import json
-from functools import lru_cache
+import multiprocessing
 from pathlib import Path
 import re
 import sqlite3
+from threading import RLock
 from typing import Callable
+from zipfile import BadZipFile, ZipFile
 
 SUPPORTED = {".pdf", ".docx", ".xlsx", ".txt"}
 MAX_BYTES = 8 * 1024 * 1024
 MAX_TEXT = 2 * 1024 * 1024
 _ID = re.compile(r"[A-Z0-9][A-Z0-9_-]{2,79}\Z")
+_PARSER_LOCK = RLock()
+_PARSER_PROCESS = None
+_PARSER_PIPE = None
+_PARSER_WARM = False
+COLD_PARSE_SECONDS = 120
+WARM_PARSE_SECONDS = 45
+
+
+def _serve_parser(pipe) -> None:
+    import os
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    from services.knowledge.parse_worker import convert
+    while True:
+        try:
+            path = pipe.recv()
+        except EOFError:
+            return
+        try:
+            pipe.send((True, convert(Path(path))))
+        except Exception as exc:
+            pipe.send((False, type(exc).__name__))
+
+
+def _parser() -> object:
+    global _PARSER_PROCESS, _PARSER_PIPE, _PARSER_WARM
+    if _PARSER_PROCESS is None or not _PARSER_PROCESS.is_alive():
+        if _PARSER_PIPE is not None:
+            _PARSER_PIPE.close()
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        _PARSER_PROCESS = context.Process(target=_serve_parser, args=(child,), daemon=True)
+        _PARSER_PROCESS.start()
+        child.close()
+        _PARSER_PIPE = parent
+        _PARSER_WARM = False
+    return _PARSER_PIPE
 
 
 def parse_local(path: Path) -> str:
-    """Parse a local file with Docling; PDF uses its offline text pipeline."""
+    """Parse locally in a time-bounded subprocess for untrusted formats."""
+    global _PARSER_WARM
     if path.suffix == ".txt":
         return path.read_text(encoding="utf-8")
-    result = _converter().convert(path, max_file_size=MAX_BYTES, max_num_pages=100)
-    try:
-        return result.document.export_to_markdown()
-    finally:
-        result.input.release()
-
-
-@lru_cache(maxsize=1)
-def _converter():
-    from docling.datamodel.base_models import InputFormat
-    from docling.document_converter import DocumentConverter, NativePdfFormatOption
-
-    return DocumentConverter(
-        allowed_formats=[InputFormat.PDF, InputFormat.DOCX, InputFormat.XLSX],
-        format_options={InputFormat.PDF: NativePdfFormatOption()},
-    )
+    with _PARSER_LOCK:
+        pipe = _parser()
+        pipe.send(str(path.resolve()))
+        if not pipe.poll(WARM_PARSE_SECONDS if _PARSER_WARM else COLD_PARSE_SECONDS):
+            _PARSER_PROCESS.terminate()
+            _PARSER_PROCESS.join(timeout=2)
+            raise ValueError("parser timeout")
+        try:
+            success, value = pipe.recv()
+        except EOFError as exc:
+            raise ValueError("parser worker stopped") from exc
+        _PARSER_WARM = True
+        if not success or len(value) > MAX_TEXT:
+            raise ValueError("parser failed or exceeded output limit")
+        return value
 
 
 def chunks(text: str, size: int = 1200, overlap: int = 150) -> list[str]:
@@ -97,6 +136,18 @@ def _valid_source(root: Path, item: dict[str, object]) -> tuple[Path, str]:
     payload = path.read_bytes()
     if hashlib.sha256(payload).hexdigest() != digest:
         raise ValueError("source hash mismatch")
+    if path.suffix.casefold() in {".docx", ".xlsx"}:
+        try:
+            with ZipFile(path) as archive:
+                members = archive.infolist()
+                if len(members) > 512 or sum(member.file_size for member in members) > 16 * 1024 * 1024:
+                    raise ValueError("archive resource limit")
+                for member in members:
+                    if (Path(member.filename).is_absolute() or ".." in Path(member.filename).parts or
+                            member.file_size > 100 * max(member.compress_size, 1)):
+                        raise ValueError("unsafe archive member")
+        except BadZipFile as exc:
+            raise ValueError("malformed office archive") from exc
     for key in ("owner", "collection", "classification", "version", "source_type"):
         if not isinstance(item.get(key), str) or not item[key]:
             raise ValueError(f"missing {key}")

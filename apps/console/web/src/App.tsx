@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
-import type { AdminStatus, ChatResult, Identity, Source, Turn } from './api'
+import type { AdminStatus, ChatResult, Citation, Identity, Source, SourcePreview, Turn } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 
 type View = 'chat' | 'documents' | 'administration'
@@ -32,6 +32,7 @@ export default function App() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [admin, setAdmin] = useState<AdminStatus | null>(null)
   const [filter, setFilter] = useState('')
+  const [preview, setPreview] = useState<{ bearer: string; source: SourcePreview } | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
 
@@ -40,6 +41,10 @@ export default function App() {
     void finishOidc().then((bearer) => bearer ? loadSession(bearer) : undefined)
       .catch((cause) => setError(cause instanceof Error ? cause.message : 'Local sign-in failed'))
   }, [])
+
+  useEffect(() => {
+    if (identity) document.getElementById('view-heading')?.focus()
+  }, [identity, view])
 
   const collections = useMemo(() => [...new Set(sources.map((source) => source.collection))].sort(), [sources])
   const visibleSources = useMemo(() => sources.filter((source) =>
@@ -56,6 +61,7 @@ export default function App() {
       ])
       setToken(bearer)
       setIdentity(me)
+      setPreview(null)
       setSources(files.sources)
       setModels(modelList.models)
       setConversationIds(sessions.conversation_ids)
@@ -90,6 +96,7 @@ export default function App() {
     setSources([])
     setSelectedSources([])
     setAdmin(null)
+    setPreview(null)
     setError('')
     if (oidcEnabled()) endOidc()
   }
@@ -104,6 +111,31 @@ export default function App() {
       setView('chat')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'History unavailable')
+    }
+  }
+
+  function newConversation() {
+    setConversationId(null)
+    setTurns([])
+    setView('chat')
+    setError('')
+    setPreview(null)
+  }
+
+  async function openCitation(citation: Citation) {
+    if (!token) return
+    setError('')
+    setPreview(null)
+    try {
+      const result = await api<SourcePreview>(
+        `/sources/${encodeURIComponent(citation.document_id)}/preview?ordinal=${citation.ordinal ?? 0}`, token,
+      )
+      if (result.sha256 !== citation.sha256 || result.version !== citation.version) {
+        throw new Error('The cited source has changed. Ask again for a current answer.')
+      }
+      setPreview({ bearer: token, source: result })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Source preview unavailable')
     }
   }
 
@@ -167,7 +199,7 @@ export default function App() {
           <p className="text-sm text-[#9bb1b8]">Synthetic development lab · No vessel data</p>
         </section>
         <section className="flex flex-col justify-center p-10 sm:p-14">
-          <div className="mb-8 text-xs font-semibold uppercase tracking-[.2em] text-[#ad7650]">Crew access</div>
+          <div className="mb-8 text-xs font-semibold uppercase tracking-[.2em] text-[#895534]">Crew access</div>
           <h2 className="text-3xl font-semibold">Sign in</h2>
           <p className="mt-2 text-sm text-[#607583]">{oidcEnabled() ? 'Use your named account with the local identity provider.' : 'Use a named synthetic lab account and the local lab passphrase.'}</p>
           {oidcEnabled() ? <button className="primary-button mt-8 w-full" onClick={() => void beginOidc().catch((cause) => setError(cause instanceof Error ? cause.message : 'Sign-in unavailable'))}>Continue to local sign-in</button> : <form onSubmit={signIn} className="mt-8 space-y-5">
@@ -194,17 +226,28 @@ export default function App() {
       <aside className="flex w-full flex-col bg-[#102b3d] p-5 text-white lg:min-h-screen lg:w-72 lg:p-7">
         <div className="text-lg font-bold tracking-[.25em]">SOVEREIGN</div>
         <div className="mt-1 text-xs uppercase tracking-widest text-[#9bb1b8]">Console · Synthetic Lab</div>
-        <nav aria-label="Workspace" className="mt-9 flex gap-2 lg:flex-col">
-          <button className={`nav-button ${view === 'chat' ? 'nav-active' : ''}`} onClick={() => setView('chat')}>AI Chat</button>
-          <button className={`nav-button ${view === 'documents' ? 'nav-active' : ''}`} onClick={() => setView('documents')}>Documents</button>
+        <nav aria-label="Workspace" className="mt-9 flex flex-wrap gap-2 lg:flex-col">
+          <button className={`nav-button ${view === 'chat' ? 'nav-active' : ''}`} aria-current={view === 'chat' ? 'page' : undefined} onClick={() => setView('chat')}>AI Chat</button>
+          <button className={`nav-button ${view === 'documents' ? 'nav-active' : ''}`} aria-current={view === 'documents' ? 'page' : undefined} onClick={() => setView('documents')}>Documents</button>
           {identity.role === 'avit_admin' && <button className={`nav-button ${view === 'administration' ? 'nav-active' : ''}`}
-            onClick={openAdmin}>Administration</button>}
+            aria-current={view === 'administration' ? 'page' : undefined} onClick={openAdmin}>Administration</button>}
         </nav>
+        <div className="mt-4 lg:hidden">
+          <button className="secondary-button w-full" onClick={newConversation}>+ New conversation</button>
+          {conversationIds.length > 0 && <details className="mt-3">
+            <summary className="cursor-pointer py-2 text-sm font-semibold">Conversations ({conversationIds.length})</summary>
+            <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+              {conversationIds.map((id, index) => <button key={id} className="nav-button block w-full text-left text-sm" onClick={() => void openConversation(id)}>
+                Conversation {conversationIds.length - index}
+              </button>)}
+            </div>
+          </details>}
+        </div>
         <div className="mt-9 hidden lg:block">
           <div className="mb-3 text-xs uppercase tracking-widest text-[#9bb1b8]">Conversations</div>
-          <button className="secondary-button w-full" onClick={() => { setConversationId(null); setTurns([]); setView('chat') }}>+ New conversation</button>
+          <button className="secondary-button w-full" onClick={newConversation}>+ New conversation</button>
           <div className="mt-3 space-y-1">
-            {conversationIds.map((id, index) => <button key={id} className="nav-button w-full text-left text-sm" onClick={() => openConversation(id)}>
+            {conversationIds.map((id, index) => <button key={id} className="nav-button w-full text-left text-sm" onClick={() => void openConversation(id)}>
               Conversation {conversationIds.length - index}
             </button>)}
           </div>
@@ -219,8 +262,8 @@ export default function App() {
       <main className="mx-auto w-full max-w-6xl px-5 py-7 sm:px-10 lg:py-10">
         <header className="mb-8 flex flex-wrap items-start justify-between gap-4 border-b border-[#dce5e5] pb-6">
           <div>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[.2em] text-[#ad7650]">{roleName[identity.role] || identity.role} workspace</div>
-            <h1 className="text-3xl font-semibold sm:text-4xl">{view === 'chat' ? 'Private Vessel Assistant' : view === 'documents' ? 'Approved documents' : 'Lab administration'}</h1>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[.2em] text-[#895534]">{roleName[identity.role] || identity.role} workspace</div>
+            <h1 id="view-heading" tabIndex={-1} className="text-3xl font-semibold outline-none sm:text-4xl">{view === 'chat' ? 'Private Vessel Assistant' : view === 'documents' ? 'Approved documents' : 'Lab administration'}</h1>
             <p className="mt-2 text-sm text-[#637985]">Local AI · Synthetic documents only · Read-only tools</p>
           </div>
           <button className="secondary-button lg:hidden" onClick={signOut}>Sign out</button>
@@ -231,23 +274,23 @@ export default function App() {
         {view === 'chat' && <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
           <section className="flex min-h-[600px] flex-col rounded-2xl border border-[#e0e7e5] bg-white shadow-sm">
             <div className="flex flex-wrap items-center gap-3 border-b border-[#e8eeee] p-5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-[#657b85]">Mode
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#5d7380]">Mode
                 <select className="field mt-1 w-auto min-w-44" value={mode} onChange={(event) => setMode(event.target.value as 'documents' | 'general')}>
                   <option value="documents">Vessel documents</option><option value="general">General chat</option>
                 </select>
               </label>
-              <label className="text-xs font-semibold uppercase tracking-wider text-[#657b85]">Department
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#5d7380]">Department
                 <select className="field mt-1 w-auto min-w-44" value={workspace} disabled={mode === 'general'} onChange={(event) => setWorkspace(event.target.value)}>
                   <option value="">All permitted</option>{collections.map((collection) => <option key={collection} value={collection}>{collection}</option>)}
                 </select>
               </label>
               <span className="ml-auto self-end rounded-full bg-[#e7f1ed] px-3 py-2 text-xs font-medium text-[#2e6d5a]">{models[0] || 'Local model'}</span>
             </div>
-            <div className="flex-1 space-y-6 p-5 sm:p-7" aria-live="polite">
+            <div className="flex-1 space-y-6 p-5 sm:p-7" aria-label="Conversation transcript">
               {turns.length === 0 && <div className="mx-auto max-w-md py-20 text-center">
                 <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#e7f1ed] text-2xl text-[#2e6d5a]">✦</div>
                 <h2 className="text-xl font-semibold">Ask a question</h2>
-                <p className="mt-3 text-sm leading-6 text-[#657b85]">Try “generator inspection” as a permitted engineer. Answers based on documents include source references.</p>
+                <p className="mt-3 text-sm leading-6 text-[#5d7380]">Try “generator inspection” as a permitted engineer. Answers based on documents include source references.</p>
               </div>}
               {turns.map((turn, index) => <article key={index} className="space-y-3">
                 <div className="ml-auto max-w-[85%] rounded-2xl rounded-tr-sm bg-[#173b51] px-5 py-3 text-sm text-white">{turn.message}</div>
@@ -256,13 +299,22 @@ export default function App() {
                   {turn.citations.length > 0 && <div className="mt-4 border-t border-[#d8e3df] pt-3">
                     <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#617b77]">Sources</div>
                     <div className="flex flex-wrap gap-2">{turn.citations.map((citation) =>
-                      <span key={citation.document_id} className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-[#285e56]">
+                      <button key={`${citation.document_id}-${citation.ordinal ?? 0}`} type="button" onClick={() => void openCitation(citation)}
+                        aria-label={`Preview source ${citation.document_id}, version ${citation.version}`}
+                        className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-[#285e56] underline">
                         {citation.document_id} · v{citation.version} · {citation.collection}
-                      </span>)}</div>
+                      </button>)}</div>
                   </div>}
                 </div>
               </article>)}
-              {pending && <p className="text-sm text-[#607583]">The local model is preparing an answer…</p>}
+              {preview?.bearer === token && <section aria-label={`Source preview ${preview.source.document_id}`} className="rounded-xl border border-[#b9d3cb] bg-[#f6faf8] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="font-semibold">{preview.source.document_id} · v{preview.source.version} · passage {preview.source.ordinal + 1}</h2>
+                  <button type="button" className="text-sm font-semibold underline" onClick={() => setPreview(null)}>Close preview</button>
+                </div>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{preview.source.excerpt}</p>
+              </section>}
+              {pending && <p role="status" className="text-sm text-[#607583]">The local model is preparing an answer…</p>}
             </div>
             <form onSubmit={sendQuestion} className="border-t border-[#e8eeee] p-5">
               {selectedSources.length > 0 && mode === 'documents' && <p className="mb-3 text-xs text-[#53766d]">Selected: {selectedSources.join(', ')}</p>}
@@ -270,16 +322,16 @@ export default function App() {
               <textarea id="question" className="field min-h-24 resize-y" maxLength={2000} value={question}
                 onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about approved vessel documents…" />
               <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-xs text-[#7c9098]">Answers may be uncertain. Check the cited source.</span>
+                <span className="text-xs text-[#607583]">Answers may be uncertain. Check the cited source.</span>
                 <button className="primary-button" disabled={pending || !question.trim()}>{pending ? 'Working…' : 'Send question'}</button>
               </div>
             </form>
           </section>
           <aside className="rounded-2xl border border-[#e0e7e5] bg-white p-5 shadow-sm">
             <h2 className="font-semibold">Current scope</h2>
-            <p className="mt-2 text-sm leading-6 text-[#657b85]">Search is limited to documents allowed for your lab role.</p>
+            <p className="mt-2 text-sm leading-6 text-[#5d7380]">Search is limited to documents allowed for your lab role.</p>
             <div className="mt-5 text-3xl font-semibold text-[#2e6d5a]">{sources.length}</div>
-            <div className="text-xs text-[#657b85]">permitted source records</div>
+            <div className="text-xs text-[#5d7380]">permitted source records</div>
             <button className="mt-6 text-sm font-semibold text-[#2e6d5a] underline" onClick={() => setView('documents')}>Choose source files</button>
             <div className="mt-8 rounded-xl bg-[#f3f6f4] p-4 text-xs leading-5 text-[#607583]">A missing source yields a clear no-answer. No equipment control tools are available in this lab.</div>
           </aside>
@@ -287,7 +339,7 @@ export default function App() {
 
         {view === 'documents' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-5 shadow-sm sm:p-7">
           <div className="flex flex-wrap items-end justify-between gap-4">
-            <div><h2 className="text-xl font-semibold">Source library</h2><p className="mt-1 text-sm text-[#657b85]">Select up to five documents to narrow the next chat question.</p></div>
+            <div><h2 className="text-xl font-semibold">Source library</h2><p className="mt-1 text-sm text-[#5d7380]">Select up to five documents to narrow the next chat question.</p></div>
             <button className="primary-button" onClick={() => setView('chat')}>Return to chat</button>
           </div>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -304,15 +356,15 @@ export default function App() {
             {visibleSources.map((source) => <label key={source.document_id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-[#e3ebea] p-4 hover:bg-[#f7faf8]">
               <input type="checkbox" checked={selectedSources.includes(source.document_id)} onChange={() => toggleSource(source.document_id)}
                 className="h-4 w-4 accent-[#2e6d5a]" />
-              <span><strong className="block text-sm">{source.document_id}</strong><span className="text-xs text-[#657b85]">{source.collection} · version {source.version}</span></span>
+              <span><strong className="block text-sm">{source.document_id}</strong><span className="text-xs text-[#5d7380]">{source.collection} · version {source.version}</span></span>
             </label>)}
-            {visibleSources.length === 0 && <p className="text-sm text-[#657b85]">No permitted sources match this filter.</p>}
+            {visibleSources.length === 0 && <p className="text-sm text-[#5d7380]">No permitted sources match this filter.</p>}
           </div>
         </section>}
 
         {view === 'administration' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-7 shadow-sm">
           <h2 className="text-xl font-semibold">Read-only lab status</h2>
-          <p className="mt-2 text-sm text-[#657b85]">This view reports the synthetic Core configuration. Vessel administration is not enabled.</p>
+          <p className="mt-2 text-sm text-[#5d7380]">This view reports the synthetic Core configuration. Vessel administration is not enabled.</p>
           {admin && <dl className="mt-7 grid gap-4 sm:grid-cols-2">
             <div className="status-card"><dt>Operating mode</dt><dd>{admin.mode}</dd></div>
             <div className="status-card"><dt>Identity</dt><dd>{admin.identity}</dd></div>

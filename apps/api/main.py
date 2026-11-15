@@ -21,7 +21,7 @@ from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable
 from apps.api.oidc import OidcVerifier
 from services.knowledge.acl import source_access
 from services.knowledge.retrieval import search_fixture_documents
-from services.knowledge.indexed_retrieval import approved_rows, preview_index, search_index
+from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows, preview_index, search_index
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
 from services.policy.audit import AuditLog, verify as verify_audit
@@ -41,6 +41,8 @@ class Settings:
     oidc_issuer: str | None = None
     embedding_endpoint: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma:300m"
+    oidc_revocations: Path | None = None
+    history_db: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -54,6 +56,8 @@ class Settings:
             oidc_issuer=os.environ.get("SOVEREIGN_OIDC_ISSUER"),
             embedding_endpoint=os.environ.get("SOVEREIGN_EMBEDDING_ENDPOINT", cls.embedding_endpoint),
             embedding_model=os.environ.get("SOVEREIGN_EMBEDDING_MODEL", cls.embedding_model),
+            oidc_revocations=Path(os.environ["SOVEREIGN_OIDC_REVOCATIONS"]) if os.environ.get("SOVEREIGN_OIDC_REVOCATIONS") else None,
+            history_db=Path(os.environ["SOVEREIGN_HISTORY_DB"]) if os.environ.get("SOVEREIGN_HISTORY_DB") else None,
         )
 
 
@@ -84,8 +88,10 @@ class SearchRequest(BaseModel):
 def create_app(settings: Settings | None = None, model: LocalModel | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     model = model or LocalModel(settings.inference_endpoint, settings.model_name)
-    sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password)
-    oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json") if settings.oidc_issuer else None
+    sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password, settings.history_db)
+    oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json",
+                        revocations_path=settings.oidc_revocations or
+                        ROOT / "infrastructure/lab/runtime/phase3-identity/revoked-tokens.jsonl") if settings.oidc_issuer else None
     limiter = LabRateLimiter()
     app = FastAPI(title="Sovereign Core synthetic lab", docs_url=None, redoc_url=None)
     app.state.sessions = sessions
@@ -155,7 +161,10 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     def permitted_sources(user_id: str) -> list[dict[str, str]]:
         if settings.knowledge_manifest and settings.knowledge_db:
-            return approved_rows(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db, user_id)
+            try:
+                return approved_rows(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db, user_id)
+            except (SourceManifestError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         policy = json.loads((settings.fixture_root / "roles.json").read_text(encoding="utf-8"))
         base = settings.fixture_root.resolve()
         permitted: list[dict[str, str]] = []
@@ -190,7 +199,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.post("/api/logout")
     def logout(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, bool]:
-        if not oidc:
+        if oidc:
+            oidc.revoke(identity[0])
+        else:
             sessions.logout(identity[0])
         return {"ok": True}
 
@@ -225,13 +236,22 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                        identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
         if not settings.knowledge_manifest or not settings.knowledge_db:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "preview not available")
-        preview = preview_index(settings.fixture_root, settings.knowledge_manifest,
-                                settings.knowledge_db, identity[1]["id"], document_id, ordinal)
+        try:
+            preview = preview_index(settings.fixture_root, settings.knowledge_manifest,
+                                    settings.knowledge_db, identity[1]["id"], document_id, ordinal)
+        except (SourceManifestError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         if preview is None:
             record_decision(identity[1]["id"], "preview", document_id, "deny")
             raise HTTPException(status.HTTP_404_NOT_FOUND, "source not found")
         record_decision(identity[1]["id"], "preview", document_id, "allow")
         return preview
+
+    @app.get("/api/sources/{document_id}/download")
+    def source_download(document_id: str,
+                        identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> None:
+        record_decision(identity[1]["id"], "download", document_id, "deny")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "source downloads are disabled in this lab")
 
     @app.post("/api/search")
     def search(request: SearchRequest,
@@ -249,9 +269,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             else:
                 hits = search_index(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db,
                                     identity[1]["id"], request.query, **options)
+        except SourceManifestError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        except (OSError, httpx.HTTPError, KeyError, sqlite3.Error) as exc:
+        except (OSError, httpx.HTTPError, KeyError, sqlite3.Error, json.JSONDecodeError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "knowledge search unavailable") from exc
         current = {row["document_id"]: row for row in permitted_sources(identity[1]["id"])}
         results = [hit for hit in hits if hit["document_id"] in current and
@@ -287,6 +309,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 turns.append(turn)
         return {"conversation_id": conversation_id, "turns": turns}
 
+    @app.get("/api/conversations/{conversation_id}/export")
+    def conversation_export(conversation_id: str,
+                            identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> None:
+        record_decision(identity[1]["id"], "export", conversation_id, "deny")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "conversation export is disabled in this lab")
+
     @app.post("/api/chat")
     async def chat(request: ChatRequest, identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
         user_id = identity[1]["id"]
@@ -320,8 +348,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                                            settings.knowledge_db, user_id, request.message, **options)
                 else:
                     context = search_fixture_documents(settings.fixture_root, user_id, request.message, **options)
+            except SourceManifestError as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
             except ValueError as exc:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         if request.mode == "documents" and not context:
             record_decision(user_id, "retrieve", ",".join(request.selected_documents) or "-", "deny")
             answer = "No matching permitted source was found. I cannot answer from vessel documents."
@@ -339,7 +371,8 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             except ModelUnavailable as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         citations = [{"document_id": item["document_id"], "version": item["version"],
-                      "collection": item["collection"], "sha256": item["sha256"]} for item in context]
+                      "collection": item["collection"], "sha256": item["sha256"],
+                      "ordinal": item.get("ordinal", 0)} for item in context]
         current = {row["document_id"]: row for row in permitted_sources(user_id)}
         if any(citation["document_id"] not in current or
                citation["sha256"] != current[citation["document_id"]]["sha256"] or

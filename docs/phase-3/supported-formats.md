@@ -14,10 +14,14 @@ version and SHA-256. Missing or changed source bytes fail closed. The worker
 reads only paths listed in the manifest under the approved root. The local
 database stores parsed passages and vectors, not a copy of the source file.
 
-The current PDF path extracts an existing text layer. Scanned PDFs, OCR,
-archive-bomb limits, encrypted files, large spreadsheets and third-party NAS
-ACL semantics need separate qualification before they enter the supported
-register. Docling supports the local conversion API used here; see its
+The current PDF path extracts an existing text layer. Office files now have
+ZIP member-count, expanded-byte, compression-ratio and path checks before
+conversion. PDF and Office conversion runs in a persistent offline worker with
+a 120-second first-request budget for Docling cold initialization, a 45-second
+subsequent request timeout and a parsed-text size limit. This is a bounded
+lab parser, not an OS-level memory/CPU sandbox. Scanned PDFs, OCR, encrypted
+files, large spreadsheets and third-party NAS ACL semantics need separate
+qualification before they enter the supported register. Docling supports the local conversion API used here; see its
 [usage guide](https://docling-project.github.io/docling/usage/) and
 [supported formats](https://docling-project.github.io/docling/usage/supported_formats/).
 
