@@ -49,6 +49,8 @@ class OidcTests(unittest.TestCase):
         self.policy["users"][0]["status"] = "revoked"
         self.roles.write_text(json.dumps(self.policy))
         self.assertIsNone(self.verifier.user_for(valid))
+        self.roles.write_text("[]")
+        self.assertIsNone(self.verifier.user_for(valid))
 
     def test_nonlocal_issuer_rejected(self) -> None:
         with self.assertRaises(ValueError):

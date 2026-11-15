@@ -21,7 +21,7 @@ from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable
 from apps.api.oidc import OidcVerifier
 from services.knowledge.acl import source_access
 from services.knowledge.retrieval import search_fixture_documents
-from services.knowledge.indexed_retrieval import approved_rows, preview_index, search_index
+from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows, preview_index, search_index
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
 from services.policy.audit import AuditLog, verify as verify_audit
@@ -159,7 +159,10 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     def permitted_sources(user_id: str) -> list[dict[str, str]]:
         if settings.knowledge_manifest and settings.knowledge_db:
-            return approved_rows(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db, user_id)
+            try:
+                return approved_rows(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db, user_id)
+            except (SourceManifestError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         policy = json.loads((settings.fixture_root / "roles.json").read_text(encoding="utf-8"))
         base = settings.fixture_root.resolve()
         permitted: list[dict[str, str]] = []
@@ -231,8 +234,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                        identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
         if not settings.knowledge_manifest or not settings.knowledge_db:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "preview not available")
-        preview = preview_index(settings.fixture_root, settings.knowledge_manifest,
-                                settings.knowledge_db, identity[1]["id"], document_id, ordinal)
+        try:
+            preview = preview_index(settings.fixture_root, settings.knowledge_manifest,
+                                    settings.knowledge_db, identity[1]["id"], document_id, ordinal)
+        except (SourceManifestError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         if preview is None:
             record_decision(identity[1]["id"], "preview", document_id, "deny")
             raise HTTPException(status.HTTP_404_NOT_FOUND, "source not found")
@@ -261,9 +267,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             else:
                 hits = search_index(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db,
                                     identity[1]["id"], request.query, **options)
+        except SourceManifestError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-        except (OSError, httpx.HTTPError, KeyError, sqlite3.Error) as exc:
+        except (OSError, httpx.HTTPError, KeyError, sqlite3.Error, json.JSONDecodeError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "knowledge search unavailable") from exc
         current = {row["document_id"]: row for row in permitted_sources(identity[1]["id"])}
         results = [hit for hit in hits if hit["document_id"] in current and
@@ -338,8 +346,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                                            settings.knowledge_db, user_id, request.message, **options)
                 else:
                     context = search_fixture_documents(settings.fixture_root, user_id, request.message, **options)
+            except SourceManifestError as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
             except ValueError as exc:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
         if request.mode == "documents" and not context:
             record_decision(user_id, "retrieve", ",".join(request.selected_documents) or "-", "deny")
             answer = "No matching permitted source was found. I cannot answer from vessel documents."

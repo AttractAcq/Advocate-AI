@@ -36,9 +36,14 @@ class LabSessions:
         self._lock = RLock()
 
     def _active_user(self, user_id: str) -> dict[str, str] | None:
-        policy = json.loads(self.roles_path.read_text(encoding="utf-8"))
-        return next((user for user in policy.get("users", [])
-                     if user.get("id") == user_id and user.get("status") == "active"), None)
+        try:
+            policy = json.loads(self.roles_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
+            return None
+        return next((user for user in policy["users"] if isinstance(user, dict)
+                     and user.get("id") == user_id and user.get("status") == "active"), None)
 
     def login(self, user_id: str, password: str) -> str | None:
         if not self.password or len(self.password) < 12:

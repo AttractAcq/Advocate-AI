@@ -101,6 +101,8 @@ class OidcVerifier:
             if not isinstance(username, str):
                 return None
             policy = json.loads(self.roles_path.read_text(encoding="utf-8"))
+            if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
+                return None
             user = next((item for item in policy.get("users", []) if isinstance(item, dict)
                          and item.get("id") == username and item.get("status") == "active"), None)
             roles = claims.get("realm_access", {}).get("roles", [])
