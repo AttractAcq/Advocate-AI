@@ -3,7 +3,8 @@ FROM docker.io/library/python:3.14-alpine@sha256:5862d971d1f0ae26b258cefa4e89355
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /opt/sovereign
 COPY requirements.lock ./
-RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock \
+    && python -m pip uninstall -y pip
 COPY apps/api ./apps/api
 COPY services ./services
 COPY fixtures ./fixtures

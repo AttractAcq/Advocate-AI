@@ -28,6 +28,8 @@ Python dependencies use the hashed `requirements.lock`; Console uses
 `npm ci --ignore-scripts` against its lockfile. The runtime Console image has
 neither Node nor the source tree. Its `/console-config.json` must be mounted
 separately and is served with `Cache-Control: no-store`.
+Core removes pip after installing the locked dependencies; pip and its bundled
+packages are build inputs, not runtime dependencies.
 
 The local rehearsal does not establish a production TLS endpoint, approve base
 image vulnerability findings or licences, attest a resolved release image, or
