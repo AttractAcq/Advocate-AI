@@ -18,8 +18,8 @@ bash infrastructure/containers/smoke.sh
 ```
 
 The three base image references are pinned to OCI index digests, resolved on 16
-November 2026: Python `3.14-slim` at
-`sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f`,
+November 2026: Python `3.14-alpine` at
+`sha256:5862d971d1f0ae26b258cefa4e893556b1d3aba81bd2ff30888704ad378bab67`,
 Node `22-alpine` at
 `sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a`,
 and Caddy `2-alpine` at
