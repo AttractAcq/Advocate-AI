@@ -1,13 +1,16 @@
-const issuer = import.meta.env.VITE_OIDC_ISSUER as string | undefined
+import { runtimeConfig } from './runtime-config'
+
+function configuredIssuer(): string | null { return runtimeConfig().oidc_issuer }
 const clientId = 'sovereign-console'
 
 function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
 }
 
-export function oidcEnabled(): boolean { return Boolean(issuer) }
+export function oidcEnabled(): boolean { return Boolean(configuredIssuer()) }
 
 export async function beginOidc(): Promise<void> {
+  const issuer = configuredIssuer()
   if (!issuer) throw new Error('Local identity provider is not configured')
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)))
   const state = base64url(crypto.getRandomValues(new Uint8Array(24)))
@@ -23,6 +26,7 @@ export async function beginOidc(): Promise<void> {
 }
 
 export async function finishOidc(): Promise<string | null> {
+  const issuer = configuredIssuer()
   if (!issuer) return null
   const url = new URL(window.location.href)
   const code = url.searchParams.get('code')
@@ -46,6 +50,7 @@ export async function finishOidc(): Promise<string | null> {
 }
 
 export function endOidc(): void {
+  const issuer = configuredIssuer()
   if (!issuer) return
   const target = new URL(`${issuer}/protocol/openid-connect/logout`)
   target.search = new URLSearchParams({ client_id: clientId, post_logout_redirect_uri: window.location.origin + '/' }).toString()
