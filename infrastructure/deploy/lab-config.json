@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "mode": "synthetic-loopback",
+  "node_id": "lab-node-01",
+  "bind": "127.0.0.1",
+  "public_egress": false,
+  "services": {
+    "console": 18080,
+    "core": 18081,
+    "knowledge": 18082,
+    "policy": 18083,
+    "intelligence": 18084,
+    "wazuh-simulator": 18085
+  }
+}

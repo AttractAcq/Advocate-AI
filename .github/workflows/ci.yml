@@ -28,6 +28,7 @@ jobs:
           uv sync --locked --extra phase3
           make fixtures
           make check
+          make recovery-rehearsal
           make lab-smoke
       - name: Build Console
         working-directory: apps/console/web
