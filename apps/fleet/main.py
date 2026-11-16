@@ -8,12 +8,17 @@ from pathlib import Path
 import secrets
 import stat
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
 
 from services.fleet.catalog import (
-    Customer, Deployment, DeploymentReceipt, FleetCatalog, FleetError,
+    Customer, Deployment, FleetCatalog, FleetError,
     FleetIntegrityError, Licence, LicenceStatus, Maintenance, MaintenanceStatus,
     Release, Ticket, TicketStatus,
+)
+from services.fleet.offline_import import (
+    SignedDeploymentReceipt, load_import_key, verify_signed_receipt,
 )
 
 
@@ -21,6 +26,7 @@ from services.fleet.catalog import (
 class FleetSettings:
     db_path: Path
     admin_token: str
+    import_public_key: Ed25519PublicKey | None = None
 
     @classmethod
     def from_env(cls) -> "FleetSettings":
@@ -37,7 +43,9 @@ class FleetSettings:
         token = path.read_text(encoding="utf-8").rstrip("\n")
         if not 32 <= len(token) <= 200 or "\n" in token or "\r" in token:
             raise ValueError("invalid Fleet lab token")
-        return cls(Path(database), token)
+        import_path = os.environ.get("SOVEREIGN_FLEET_IMPORT_KEY_FILE")
+        import_key = load_import_key(Path(import_path)) if import_path else None
+        return cls(Path(database), token, import_key)
 
 
 def create_app(settings: FleetSettings | None = None) -> FastAPI:
@@ -141,8 +149,21 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
         return transition("maintenance", code, change.status)
 
     @router.post("/import/deployment-receipts", status_code=201)
-    def import_receipt(record: DeploymentReceipt):
-        return add("receipt", record)
+    def import_receipt(envelope: SignedDeploymentReceipt):
+        if settings.import_public_key is None:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "offline receipt import is not configured")
+        try:
+            record = verify_signed_receipt(envelope, settings.import_public_key)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        try:
+            return catalog.add_signed_receipt(record, envelope.key_id)
+        except FleetIntegrityError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Fleet store integrity check failed") from exc
+        except FleetError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     @router.get("/import/deployment-receipts")
     def receipts():
