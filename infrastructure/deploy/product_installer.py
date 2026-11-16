@@ -19,7 +19,7 @@ import tempfile
 
 from infrastructure.deploy.container_runtime import (
     RuntimeError as ContainerRuntimeError, RuntimeHandle, _validate_console_config,
-    probe_runtime, start_verified_bundle, stop_runtime,
+    probe_runtime, start_verified_bundle, stop_runtime, verify_runtime_identity,
 )
 from infrastructure.release.bundle import BundleError, verify_bundle
 
@@ -225,6 +225,12 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
         else:
             return {"result": "already_healthy", "active": identifier,
                     "previous": current["previous"]}
+        try:
+            verify_runtime_identity(_handle(current))
+        except ContainerRuntimeError:
+            old_owned = False
+        else:
+            old_owned = True
         candidate = start_verified_bundle(stage / "bundle", trusted_key, crane,
                                           stage / "console-config.json")
         try:
@@ -232,6 +238,8 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
         except Exception:
             stop_runtime(candidate)
             raise
+        if old_owned:
+            stop_runtime(_handle(current))
         return {"result": "recovered", "active": identifier,
                 "previous": current["previous"]}
 

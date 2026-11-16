@@ -205,8 +205,8 @@ def stop_runtime(handle: RuntimeHandle) -> None:
             pass
 
 
-def probe_runtime(handle: RuntimeHandle) -> None:
-    """Fail if the current Core and Console no longer satisfy lab health checks."""
+def verify_runtime_identity(handle: RuntimeHandle) -> None:
+    """Bind persisted Docker IDs to one labelled internal synthetic network."""
     run_name = _docker("network", "inspect", handle.network_id, "--format",
                        '{{index .Labels "sovereign.synthetic.run"}}')
     if (not re.fullmatch(r"sovereign-synthetic-[0-9a-f]{12}", run_name) or
@@ -214,8 +214,6 @@ def probe_runtime(handle: RuntimeHandle) -> None:
                     "{{.Internal}}") != "true"):
         raise RuntimeError("synthetic runtime network identity mismatch")
     for identifier in (handle.core_id, handle.console_id):
-        if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
-            raise RuntimeError("synthetic runtime is stopped")
         if _docker("inspect", identifier, "--format",
                    '{{index .Config.Labels "sovereign.synthetic.run"}}') != run_name:
             raise RuntimeError("synthetic runtime container identity mismatch")
@@ -225,6 +223,14 @@ def probe_runtime(handle: RuntimeHandle) -> None:
                 run_name not in networks or not isinstance(networks[run_name], dict) or
                 networks[run_name].get("NetworkID") != handle.network_id):
             raise RuntimeError("synthetic runtime network attachment mismatch")
+
+
+def probe_runtime(handle: RuntimeHandle) -> None:
+    """Fail if the current Core and Console no longer satisfy lab health checks."""
+    verify_runtime_identity(handle)
+    for identifier in (handle.core_id, handle.console_id):
+        if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
+            raise RuntimeError("synthetic runtime is stopped")
     _health(handle.core_id)
 
 

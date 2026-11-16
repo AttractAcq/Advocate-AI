@@ -100,6 +100,7 @@ class ProductInstallerTests(unittest.TestCase):
              patch("infrastructure.deploy.product_installer.start_verified_bundle",
                    side_effect=[self.old, self.new]) as start, \
              patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.verify_runtime_identity"), \
              patch("infrastructure.deploy.product_installer.stop_runtime") as stop:
             first = install_product(self.first, self.key, self.crane, self.config,
                                     self.root)
@@ -113,7 +114,7 @@ class ProductInstallerTests(unittest.TestCase):
             self.assertEqual(start.call_count, 2)
             self.assertEqual(json.loads((self.root / "product-state.json").read_text())
                              ["runtime"]["core_id"], self.new.core_id)
-            stop.assert_not_called()
+            stop.assert_called_once_with(self.old)
 
     def test_failed_recovery_keeps_original_record(self) -> None:
         with patch("infrastructure.deploy.product_installer.verify_bundle",
@@ -126,6 +127,7 @@ class ProductInstallerTests(unittest.TestCase):
                    return_value={"schema": 4}), \
              patch("infrastructure.deploy.product_installer.probe_runtime",
                    side_effect=ContainerRuntimeError("stopped")), \
+             patch("infrastructure.deploy.product_installer.verify_runtime_identity"), \
              patch("infrastructure.deploy.product_installer.start_verified_bundle",
                    side_effect=ContainerRuntimeError("candidate failed")), \
              patch("infrastructure.deploy.product_installer.stop_runtime") as stop:

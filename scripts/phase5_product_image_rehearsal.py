@@ -213,7 +213,12 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         if recovery["result"] != "recovered" or \
                                 product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("stopped runtime did not recover from staged bundle")
-                        stop_runtime(stopped_runtime)
+                        try:
+                            _docker("inspect", stopped_runtime.core_id)
+                        except subprocess.CalledProcessError:
+                            pass
+                        else:
+                            raise AssertionError("recovered old runtime was not retired")
                         result["recovery"] = "staged-release-restarted"
                     finally:
                         state = json.loads((install_root / "product-state.json").read_text())
