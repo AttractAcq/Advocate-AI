@@ -17,6 +17,8 @@ from infrastructure.backup import BackupError, _name, _snapshot, _unique_object
 
 RESTIC_VERSION = "0.19.1"
 MANIFEST = "sovereign-snapshot-manifest.json"
+SNAPSHOT_TAG = "sovereign-ai"
+SNAPSHOT_HOST = "sovereign-ai"
 
 
 class ResticError(ValueError):
@@ -89,7 +91,8 @@ def create_snapshot(spec_path: Path, repository: Path, password_file: Path,
         (stage / MANIFEST).write_text(json.dumps(manifest, sort_keys=True))
         if not repository.exists():
             _run(restic, repository, password_file, "init")
-        output = _run(restic, repository, password_file, "backup", str(stage), "--json")
+        output = _run(restic, repository, password_file, "backup", str(stage), "--json",
+                      "--tag", SNAPSHOT_TAG, "--host", SNAPSHOT_HOST)
         try:
             summaries = [json.loads(line) for line in output.splitlines() if line.strip()]
         except json.JSONDecodeError as exc:

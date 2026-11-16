@@ -5,10 +5,12 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 
 from infrastructure.restic_repository import ResticError, create_snapshot, restore_snapshot
+from infrastructure.restic_retention import apply_plan, create_plan
 
 
 class ResticRepositoryTests(unittest.TestCase):
@@ -73,6 +75,58 @@ class ResticRepositoryTests(unittest.TestCase):
             restore_snapshot(created["snapshot_id"], self.repository, self.password,
                              self.restic, "0" * 64, destination)
         self.assertFalse(destination.exists())
+
+    def test_retention_plan_applies_only_exact_sovereign_snapshots(self) -> None:
+        ids = []
+        for number in range(3):
+            (self.live / "config.json").write_text(json.dumps({"revision": number}))
+            created = create_snapshot(self.spec, self.repository, self.password,
+                                      self.restic, self.restic_sha256, self.staging)
+            ids.append(created["snapshot_id"])
+        foreign = self.root / "foreign.txt"
+        foreign.write_text("separate repository content")
+        subprocess.run([str(self.restic), "--no-cache", "-r", str(self.repository),
+                        "--password-file", str(self.password), "backup", str(foreign),
+                        "--tag", "unrelated", "--host", "other-host"],
+                       check=True, capture_output=True, timeout=60)
+        policy = self.root / "policy.json"
+        policy.write_text('{"schema":1,"keep_last":2,"keep_within_days":null}')
+        plan_path = self.root / "plan.json"
+        preview = create_plan(policy, self.repository, self.password,
+                              self.restic, self.restic_sha256, plan_path)
+        plan = json.loads(plan_path.read_text())
+        self.assertEqual(preview["remove"], 1)
+        self.assertEqual(plan["remove_ids"], [ids[0]])
+        with self.assertRaises(ResticError):
+            apply_plan(plan_path, "0" * 64, self.repository, self.password,
+                       self.restic, self.restic_sha256)
+        result = apply_plan(plan_path, preview["plan_sha256"], self.repository,
+                            self.password, self.restic, self.restic_sha256)
+        self.assertEqual(result, {"status": "applied", "removed": 1, "kept": 2})
+        all_rows = json.loads(subprocess.run(
+            [str(self.restic), "--no-cache", "-r", str(self.repository),
+             "--password-file", str(self.password), "snapshots", "--json"],
+            check=True, capture_output=True, text=True, timeout=60).stdout)
+        self.assertEqual(len(all_rows), 3)
+        self.assertIn(ids[-1], [row["id"] for row in all_rows])
+        self.assertIn("unrelated", [tag for row in all_rows for tag in row.get("tags", [])])
+
+    def test_retention_plan_rejects_changed_repository(self) -> None:
+        for number in range(3):
+            (self.live / "config.json").write_text(json.dumps({"revision": number}))
+            create_snapshot(self.spec, self.repository, self.password,
+                            self.restic, self.restic_sha256, self.staging)
+        policy = self.root / "policy.json"
+        policy.write_text('{"schema":1,"keep_last":2,"keep_within_days":null}')
+        plan_path = self.root / "plan.json"
+        preview = create_plan(policy, self.repository, self.password,
+                              self.restic, self.restic_sha256, plan_path)
+        (self.live / "config.json").write_text('{"revision":3}')
+        create_snapshot(self.spec, self.repository, self.password,
+                        self.restic, self.restic_sha256, self.staging)
+        with self.assertRaises(ResticError):
+            apply_plan(plan_path, preview["plan_sha256"], self.repository,
+                       self.password, self.restic, self.restic_sha256)
 
 
 if __name__ == "__main__":
