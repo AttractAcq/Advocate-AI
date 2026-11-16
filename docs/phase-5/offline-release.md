@@ -13,6 +13,11 @@ must never be included in the payload or carried onboard. Release-key
 generation, storage, rotation and revocation need the approved custodian design
 before a real release.
 
+The [offline release evidence preflight](release-intake.md) rejects stale or
+mismatched scan/SBOM inputs and unresolved high-severity findings for a
+proposed container image. It is a separate local check, not yet enforced by
+`pack`; its success does not approve or authenticate an artifact.
+
 ```sh
 .venv/bin/python -m infrastructure.release.bundle pack /path/to/approved-payload /path/to/new-bundle --signing-key /secure/offline/signing-key.pem --version 0.1.0
 .venv/bin/python -m infrastructure.release.bundle verify /path/to/new-bundle --trusted-key /path/to/pinned-release-public-key.pem
