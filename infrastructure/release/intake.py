@@ -187,7 +187,7 @@ def verify_intake(scan_path: Path, sbom_path: Path, image_ref: str,
             kind = component.get("type")
             if kind == "file":
                 resolved = bool(_sha256_hashes(component))
-            elif kind == "library":
+            elif kind in {"library", "application"}:
                 resolved = (isinstance(component.get("version"), str) and
                             bool(component["version"]) and
                             isinstance(component.get("purl"), str) and
