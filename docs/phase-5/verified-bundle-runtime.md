@@ -11,11 +11,18 @@ issuer is mounted read-only. Core health, Console static serving, configuration
 and unauthenticated API denial are checked before the runtime handle is
 returned. Failed starts remove the resources created by that attempt.
 
+The rehearsal also tests a runtime switchover: a bad candidate is rejected
+while the previous runtime still passes health checks; a verified candidate
+starts and passes those checks before the previous containers are retired.
+This operation is in-memory and uses disposable synthetic images. It is not
+a persistent installer transaction or a crash-safe rollback procedure.
+
 The [product-image CI rehearsal](product-image-release-rehearsal.md) invokes
 this launcher only after both image intakes pass and the ephemeral-key product
-bundle verifies. It stops the runtime after the check. This is a local
+bundle verifies. It exercises the rejected candidate and healthy switchover,
+then stops the runtime. This is a local
 software and Docker exercise; it does not install a persistent service,
 provision TLS or Keycloak, attach a model, connect to Wazuh/NAS, configure a
 vessel firewall, or prove target hardware behavior. Activation and rollback
-through the staged installer are the next local task; full clean-host and
+through the staged installer remain open; full clean-host and
 site recovery remain [open gates](../blockers-and-build-queue.md).
