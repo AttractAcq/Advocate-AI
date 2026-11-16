@@ -30,6 +30,7 @@ class BackupServiceTests(unittest.TestCase):
         self.assertLess(service.index("restic_repository create"),
                         service.index("restic_repository verify"))
         self.assertIn("--max-age-hours 24", service)
+        self.assertIn("--verification-staging /srv/sovereign/staging", service)
         self.assertIn("OnCalendar=*-*-* 02:00:00 UTC", timer)
         self.assertIn("Persistent=true", timer)
         service_output = self.root / "sovereign-backup.service"

@@ -27,7 +27,8 @@ accepts only local absolute repository paths.
 .venv/bin/python -m infrastructure.restic_repository verify \
   --repository /path/to/encrypted-repository \
   --password-file /secure/password-file --restic /path/to/approved/restic \
-  --restic-sha256 '<approved-binary-sha256>' --max-age-hours 24
+  --restic-sha256 '<approved-binary-sha256>' --max-age-hours 24 \
+  --verification-staging /path/to/private-encrypted-staging
 ```
 
 The spec format is the one in [backup and recovery](backup-recovery.md).
@@ -37,11 +38,15 @@ wrong password and unapproved binary hashes leave no restore directory. CI
 downloads the pinned Linux binary and checks its official release SHA-256
 before rerunning the tests.
 
-The `verify` command checks every encrypted pack and requires a recent
-snapshot bearing the exact Sovereign tag and host. A healthy but empty or
-stale repository fails. It returns snapshot metadata only; it does not restore
-files or establish a recovery time objective. The age threshold is supplied
-by the operator and is not an approved vessel backup policy. A
+The `verify` command requires a recent snapshot bearing the exact Sovereign
+tag and host, then checks every encrypted pack and performs a clean restore
+of that snapshot into a temporary owner-only staging directory. The existing
+restore validator checks the manifest, exact file inventory and hashes. A
+healthy but empty or stale repository fails. Temporary plaintext files are
+deleted after verification. The command returns metadata only and does not
+establish a recovery time objective or prove a running service can use the
+restored files. The age threshold is supplied by the operator and is not an
+approved vessel backup policy. A
 [daily service and timer renderer](scheduled-backup-verification.md) can run a
 synthetic backup followed by this check.
 

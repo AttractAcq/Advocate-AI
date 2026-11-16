@@ -84,21 +84,26 @@ class ResticRepositoryTests(unittest.TestCase):
                        check=True, capture_output=True, timeout=60)
         with self.assertRaisesRegex(ResticError, "no Sovereign snapshot"):
             verify_repository(self.repository, self.password, self.restic,
-                              self.restic_sha256, 24)
+                              self.restic_sha256, 24, self.staging)
         created = create_snapshot(self.spec, self.repository, self.password,
                                   self.restic, self.restic_sha256, self.staging)
         checked = verify_repository(self.repository, self.password, self.restic,
-                                    self.restic_sha256, 24)
+                                    self.restic_sha256, 24, self.staging)
         self.assertEqual(checked["status"], "verified")
         self.assertEqual(checked["latest_snapshot_id"], created["snapshot_id"])
         self.assertEqual(checked["snapshot_count"], 1)
+        self.assertEqual(checked["restored_files"], 2)
+        self.assertEqual(list(self.staging.iterdir()), [])
         later = datetime.now(timezone.utc) + timedelta(hours=25)
         with self.assertRaisesRegex(ResticError, "stale"):
             verify_repository(self.repository, self.password, self.restic,
-                              self.restic_sha256, 24, now=later)
+                              self.restic_sha256, 24, self.staging, now=later)
         with self.assertRaises(ResticError):
             verify_repository(self.repository, self.password, self.restic,
-                              "0" * 64, 24)
+                              "0" * 64, 24, self.staging)
+        with self.assertRaisesRegex(ResticError, "owner-only"):
+            verify_repository(self.repository, self.password, self.restic,
+                              self.restic_sha256, 24, self.live)
 
     def test_retention_plan_applies_only_exact_sovereign_snapshots(self) -> None:
         ids = []

@@ -64,7 +64,7 @@ def render_backup_units(spec: Path, repository: Path, password_source: Path,
         f"ExecStart={executable} -m infrastructure.restic_repository create "
         f"--spec {spec_path} {shared} --staging-parent {stage}\n"
         f"ExecStart={executable} -m infrastructure.restic_repository verify "
-        f"{shared} --max-age-hours {max_age_hours}\n"
+        f"{shared} --max-age-hours {max_age_hours} --verification-staging {stage}\n"
     )
     timer = (
         "[Unit]\n"
