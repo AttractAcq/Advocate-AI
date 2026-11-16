@@ -10,6 +10,15 @@ The only container currently declared by this repository is the **synthetic Keyc
 
 The lab still uses Keycloak `start-dev` and a Docker bridge that may have egress. The added flags do not qualify production identity, network isolation, image provenance or container runtime hardening. Those are [B-03, B-06, B-08 and B-11](../blockers-and-build-queue.md).
 
+The first [CI scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/43850286761)
+found **six HIGH and zero CRITICAL** advisories in the lab image. The
+[summary record](keycloak-lab-image-scan.json) lists the IDs, package names,
+scanner status and the retained report hash. One finding has a listed fixed
+Guava version; four SQLite findings had no fixed version in this report, and
+one Java finding was marked `will_not_fix`. No finding has been accepted for a
+release. The raw `keycloak-lab-trivy` artifact in that CI run is the evidence
+source; the committed summary contains no vessel data.
+
 ## Parser regression corpus
 
 The [fictional corpus](../../fixtures/phase-5/parser-cases.json) now checks malformed PDF envelopes; recognizable active, encrypted or compressed-object PDF names, including a `#hh` encoded name; duplicate and case-folded Office ZIP members; ZIP symlink/traversal entries; and compression ratio and expanded-size limits. Each malicious case must be quarantined **before** the Docling parser stub is called. A simple non-active PDF envelope must still reach the parser. Existing generated PDF/DOCX/XLSX acceptance tests continue to run through Docling.
