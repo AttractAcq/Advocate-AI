@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +14,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import BundleError, create_candidate_bundle, verify_bundle
+from infrastructure.release.intake import IntakeError
+from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import UpstreamError, generate_resolved_sbom, validate_image_archive
 
 
@@ -28,7 +29,8 @@ def _docker(*argv: str) -> str:
     return result.stdout.strip()
 
 
-def rehearse(crane: Path, crane_sha256: str, syft: Path, syft_sha256: str) -> dict[str, object]:
+def rehearse(crane: Path, crane_sha256: str, syft: Path, syft_sha256: str,
+             trivy: Path, trivy_sha256: str, trivy_cache: Path) -> dict[str, object]:
     tag = f"sovereign-synthetic-release:{uuid.uuid4().hex[:12]}"
     try:
         with tempfile.TemporaryDirectory() as directory:
@@ -57,12 +59,8 @@ def rehearse(crane: Path, crane_sha256: str, syft: Path, syft_sha256: str) -> di
             generated = generate_resolved_sbom(archive, image_ref, sbom,
                                                crane, crane_sha256, syft, syft_sha256)
             scan = payload / "evidence" / "scan.json"
-            scan.write_text(json.dumps({
-                "SchemaVersion": 2, "ArtifactType": "container_image",
-                "ArtifactName": image_ref, "CreatedAt": datetime.now(timezone.utc).isoformat(),
-                "Trivy": {"Version": "0.76.2"}, "Metadata": {"RepoDigests": [image_ref]},
-                "Results": [{"Target": "fictional", "Vulnerabilities": []}],
-            }))
+            scanned = generate_archive_scan(archive, image_ref, scan, crane, crane_sha256,
+                                            trivy, trivy_sha256, trivy_cache)
             key = Ed25519PrivateKey.generate()
             private = root / "signing-key.pem"
             trusted = root / "trusted-key.pem"
@@ -75,6 +73,19 @@ def rehearse(crane: Path, crane_sha256: str, syft: Path, syft_sha256: str) -> di
                         "scan_sha256": _hash(scan), "sbom_path": "evidence/sbom.json",
                         "sbom_sha256": _hash(sbom), "archive_path": "images/fictional.tar",
                         "archive_sha256": _hash(archive), "crane_sha256": crane_sha256}
+            original_scan = scan.read_bytes()
+            altered_scan = json.loads(original_scan)
+            altered_scan["Sovereign"]["ArchiveSHA256"] = "0" * 64
+            scan.write_text(json.dumps(altered_scan))
+            rejected = dict(evidence, scan_sha256=_hash(scan))
+            try:
+                create_candidate_bundle(payload, root / "rejected-bundle", private,
+                                        "0.1.0", rejected, crane=crane)
+            except IntakeError:
+                pass
+            else:
+                raise AssertionError("mismatched scan archive passed release preflight")
+            scan.write_bytes(original_scan)
             bundle = root / "bundle"
             create_candidate_bundle(payload, bundle, private, "0.1.0", evidence, crane=crane)
             verified = verify_bundle(bundle, trusted)
@@ -96,7 +107,8 @@ def rehearse(crane: Path, crane_sha256: str, syft: Path, syft_sha256: str) -> di
             else:
                 raise AssertionError("wrong image digest passed crane verification")
             return {"status": "pass", "source": "fictional-offline-docker-archive",
-                    "components": generated["components"], "archive_sha256": generated["archive_sha256"]}
+                    "components": generated["components"], "archive_sha256": generated["archive_sha256"],
+                    "database_sha256": scanned["database_sha256"]}
     finally:
         subprocess.run(["docker", "image", "rm", "-f", tag], capture_output=True,
                        text=True, timeout=30)
@@ -108,9 +120,13 @@ def main() -> None:
     parser.add_argument("--crane-sha256", required=True)
     parser.add_argument("--syft", required=True, type=Path)
     parser.add_argument("--syft-sha256", required=True)
+    parser.add_argument("--trivy", required=True, type=Path)
+    parser.add_argument("--trivy-sha256", required=True)
+    parser.add_argument("--trivy-cache", required=True, type=Path)
     args = parser.parse_args()
     print(json.dumps(rehearse(args.crane, args.crane_sha256,
-                             args.syft, args.syft_sha256), sort_keys=True))
+                             args.syft, args.syft_sha256, args.trivy,
+                             args.trivy_sha256, args.trivy_cache), sort_keys=True))
 
 
 if __name__ == "__main__":
