@@ -23,6 +23,7 @@ bundle verifies. It exercises the rejected candidate and healthy switchover,
 then stops the runtime. This is a local
 software and Docker exercise; it does not install a persistent service,
 provision TLS or Keycloak, attach a model, connect to Wazuh/NAS, configure a
-vessel firewall, or prove target hardware behavior. Activation and rollback
-through the staged installer remain open; full clean-host and
+vessel firewall, or prove target hardware behavior. The separate
+[product installer](product-installer-activation.md) now stages releases and
+checks rollback; clean-host and
 site recovery remain [open gates](../blockers-and-build-queue.md).

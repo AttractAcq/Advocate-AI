@@ -11,7 +11,8 @@ from unittest.mock import patch
 
 from infrastructure.deploy.container_runtime import (
     RuntimeError, RuntimeHandle, _archive_image_ids, _validate_console_config,
-    start_verified_bundle, switch_verified_bundle,
+    cleanup_orphan_runtimes,
+    probe_runtime, start_verified_bundle, switch_verified_bundle,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -114,6 +115,102 @@ class ContainerRuntimeTests(unittest.TestCase):
             self.assertEqual(result, candidate)
             probe.assert_called_once_with(previous)
             stop.assert_called_once_with(previous)
+
+    def test_persisted_runtime_must_match_labelled_internal_network(self) -> None:
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        name = "sovereign-synthetic-123456abcdef"
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[0] == "network" and "sovereign.synthetic.run" in args[-1]:
+                return name
+            if args[0] == "network":
+                return "true"
+            if args[-1] == "{{.State.Running}}":
+                return "true"
+            if "sovereign.synthetic.run" in args[-1]:
+                return name
+            return json.dumps({name: {"NetworkID": handle.network_id}})
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker), \
+             patch("infrastructure.deploy.container_runtime._health") as health:
+            probe_runtime(handle)
+            health.assert_called_once_with(handle.core_id)
+
+        def wrong_network(*args: str, timeout: int = 120) -> str:
+            if args[-1] == "{{json .NetworkSettings.Networks}}":
+                return json.dumps({name: {"NetworkID": "d" * 64}})
+            return docker(*args, timeout=timeout)
+
+        with patch("infrastructure.deploy.container_runtime._docker",
+                   side_effect=wrong_network), \
+             patch("infrastructure.deploy.container_runtime._health") as health:
+            with self.assertRaises(RuntimeError):
+                probe_runtime(handle)
+            health.assert_not_called()
+
+    def test_scoped_orphan_cleanup_preserves_active_runtime(self) -> None:
+        installation = "1" * 32
+        active = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        orphan = RuntimeHandle("d" * 64, "e" * 64, "f" * 64)
+        runs = {active.network_id: "sovereign-synthetic-aaaaaaaaaaaa",
+                orphan.network_id: "sovereign-synthetic-dddddddddddd"}
+        containers = {active.core_id: (active.network_id, "core"),
+                      active.console_id: (active.network_id, "console"),
+                      orphan.core_id: (orphan.network_id, "core"),
+                      orphan.console_id: (orphan.network_id, "console")}
+        removed: list[tuple[str, ...]] = []
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[:2] == ("network", "ls"):
+                return "\n".join(runs)
+            if args[0] == "ps":
+                return "\n".join(containers)
+            if args[:2] == ("network", "inspect"):
+                network_id = args[2]
+                if args[-1] == "{{.Name}}":
+                    return runs[network_id]
+                if args[-1] == "{{.Internal}}":
+                    return "true"
+                return json.dumps({"sovereign.synthetic.run": runs[network_id],
+                                   "sovereign.synthetic.install": installation})
+            if args[0] == "inspect":
+                network_id, role = containers[args[1]]
+                run = runs[network_id]
+                if args[-1] == "{{.Name}}":
+                    return f"/{run}-{role}"
+                if args[-1] == "{{json .Config.Labels}}":
+                    return json.dumps({"sovereign.synthetic.run": run,
+                                       "sovereign.synthetic.install": installation})
+                return json.dumps({run: {"NetworkID": network_id}})
+            removed.append(args)
+            return args[-1]
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            self.assertEqual(cleanup_orphan_runtimes(installation, active),
+                             {"containers": 2, "networks": 1})
+        self.assertEqual(removed, [("rm", "-f", orphan.core_id),
+                                   ("rm", "-f", orphan.console_id),
+                                   ("network", "rm", orphan.network_id)])
+
+    def test_orphan_cleanup_fails_before_deletion_on_wrong_network_label(self) -> None:
+        active = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[:2] == ("network", "ls"):
+                return "d" * 64
+            if args[0] == "ps":
+                return ""
+            if args[-1] == "{{.Name}}":
+                return "sovereign-synthetic-dddddddddddd"
+            if args[-1] == "{{.Internal}}":
+                return "true"
+            if args[-1] == "{{json .Labels}}":
+                return json.dumps({"sovereign.synthetic.install": "other"})
+            raise AssertionError("cleanup reached deletion")
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            with self.assertRaises(RuntimeError):
+                cleanup_orphan_runtimes("1" * 32, active)
 
 
 if __name__ == "__main__":
