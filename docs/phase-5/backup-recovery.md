@@ -43,6 +43,11 @@ unrecoverable. The tool does not manage key rotation, offsite copies,
 retention, scheduling or media scanning. Those require approved owners and
 target-host evidence before production.
 
+The [local restic adapter](restic-repository.md) now offers an encrypted
+repository path for the same allowlisted SQLite and file snapshots, with a
+full data check and clean restore. It remains a synthetic workflow pending
+protected staging, key custody and full-stack target recovery.
+
 ## Local rehearsal, 16 November 2026
 
 Run `make recovery-rehearsal`. The script creates a fictional Knowledge index,

@@ -148,3 +148,29 @@ jobs:
           .venv/bin/python -m scripts.phase5_upstream_rehearsal \
             --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
             --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)"
+
+  restic-recovery-rehearsal:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Verify and install pinned restic
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2 -o "$RUNNER_TEMP/restic.bz2"
+          echo "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c  $RUNNER_TEMP/restic.bz2" | sha256sum --check
+          bzip2 -d "$RUNNER_TEMP/restic.bz2"
+          chmod +x "$RUNNER_TEMP/restic"
+      - name: Rehearse encrypted repository and clean restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository -v
