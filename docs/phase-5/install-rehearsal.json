@@ -1,0 +1,10 @@
+{
+  "health_checks_passed": 6,
+  "idempotent_reinstall": true,
+  "limitations": "Staged fictional files only; no service install, PKI provisioning, firewall change, reboot, offline media or target-host validation",
+  "mode": "synthetic-loopback",
+  "result": "pass",
+  "rollback_verified": true,
+  "schema": 1,
+  "signed_bundle_verified": true
+}

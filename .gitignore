@@ -15,6 +15,7 @@ build/
 *.p12
 *.pfx
 *.log
+*.svb
 infrastructure/lab/runtime/
 fixtures/sources/
 fixtures/phase-1/artifacts/
