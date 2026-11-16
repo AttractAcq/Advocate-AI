@@ -9,8 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tarfile
 import time
@@ -32,6 +34,42 @@ class RuntimeHandle:
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+def _core_state_options(state: Path | None, password_file: Path | None) -> list[str]:
+    """Validate and mount disposable, restored lab state outside signed images."""
+    if state is None and password_file is None:
+        return []
+    if state is None or password_file is None:
+        raise RuntimeError("Core state and lab credential must be supplied together")
+    if (not state.is_absolute() or state.is_symlink() or not state.is_dir()
+            or state.stat().st_uid != os.getuid()
+            or stat.S_IMODE(state.stat().st_mode) & 0o077):
+        raise RuntimeError("Core state directory must be owner-only")
+    for relative in ("roles.json", "manifest.csv", "history.db"):
+        item = state / relative
+        if (item.is_symlink() or not item.is_file() or
+                item.stat().st_uid != os.getuid() or
+                stat.S_IMODE(item.stat().st_mode) & 0o022):
+            raise RuntimeError("invalid restored Core state file")
+    sources = state / "sources"
+    if (sources.is_symlink() or not sources.is_dir() or
+            sources.stat().st_uid != os.getuid() or
+            stat.S_IMODE(sources.stat().st_mode) & 0o022):
+        raise RuntimeError("invalid restored Core source directory")
+    if (not password_file.is_absolute() or password_file.is_symlink() or
+            not password_file.is_file() or password_file.stat().st_uid != os.getuid()
+            or stat.S_IMODE(password_file.stat().st_mode) & 0o077
+            or password_file.stat().st_size > 4096
+            or password_file.resolve().is_relative_to(state.resolve())):
+        raise RuntimeError("invalid separate synthetic lab credential")
+    return ["--user", f"{os.getuid()}:{os.getgid()}",
+            "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign",
+            "--mount", (f"type=bind,source={password_file.resolve()},"
+                        "target=/run/secrets/lab-password,readonly"),
+            "-e", "SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
+            "-e", "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+            "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"]
 
 
 def _archive_image_ids(archive: Path, role: str) -> set[str]:
@@ -316,7 +354,9 @@ def switch_verified_bundle(current: RuntimeHandle | None, bundle: Path,
 
 def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
                           console_config: Path,
-                          installation_id: str | None = None) -> RuntimeHandle:
+                          installation_id: str | None = None,
+                          core_state: Path | None = None,
+                          lab_password_file: Path | None = None) -> RuntimeHandle:
     """Load exact signed archives, launch two isolated services and check them."""
     manifest = verify_bundle(bundle, trusted_key)
     if manifest["schema"] != 4:
@@ -324,6 +364,7 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
     _validate_console_config(console_config)
     if installation_id is not None and not re.fullmatch(r"[0-9a-f]{32}", installation_id):
         raise RuntimeError("invalid synthetic installation identifier")
+    core_options = _core_state_options(core_state, lab_password_file)
     images = manifest["images"]
     ids = {role: _image_id(bundle, role, images[role], crane)
            for role in ("core", "console")}
@@ -344,6 +385,7 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
                           "--network", name, "--network-alias", "core", "--read-only",
                           "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                           "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                          *core_options,
                           ids["core"])
         console_id = _docker("run", "-d", "--pull", "never", "--name", name + "-console",
                              *labels,

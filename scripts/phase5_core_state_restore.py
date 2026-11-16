@@ -78,37 +78,44 @@ def _probe(container: str, conversation_id: str, phase: str) -> dict[str, object
     return value
 
 
+def prepare_synthetic_state(live: Path) -> str:
+    """Create fictional policy, source and cited history for runtime rehearsals."""
+    source = ROOT / "fixtures/sources/ENG-001.txt"
+    if not source.is_file():
+        raise RuntimeError("generate synthetic fixtures before Core restore rehearsal")
+    (live / "sources").mkdir(parents=True)
+    live.chmod(0o700)
+    shutil.copyfile(ROOT / "fixtures/roles.json", live / "roles.json")
+    shutil.copyfile(source, live / "sources/ENG-001.txt")
+    with (ROOT / "fixtures/manifest.csv").open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    row = next(item for item in rows if item["document_id"] == "ENG-001")
+    with (live / "manifest.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    if hashlib.sha256(source.read_bytes()).hexdigest() != row["sha256"]:
+        raise RuntimeError("synthetic source manifest hash mismatch")
+    sessions = LabSessions(live / "roles.json", PASSPHRASE, live / "history.db")
+    conversation_id, _ = sessions.create_conversation(USER)
+    sessions.add_turn(conversation_id, USER, {"message": "fictional generator inspection",
+        "answer": "Synthetic recovered answer", "mode": "documents",
+        "citations": [{"document_id": "ENG-001", "sha256": row["sha256"],
+                       "version": row["version"], "ordinal": 0}]})
+    return conversation_id
+
+
 def rehearse(image: str, restic: Path, restic_sha256: str) -> dict[str, object]:
     if os.getuid() == 0:
         raise ValueError("synthetic Core restore must run as a non-root user")
     image_id = _docker("image", "inspect", image, "--format", "{{.Id}}")
     if not image_id.startswith("sha256:") or len(image_id) != 71:
         raise RuntimeError("synthetic Core image ID is invalid")
-    source = ROOT / "fixtures/sources/ENG-001.txt"
-    if not source.is_file():
-        raise RuntimeError("generate synthetic fixtures before Core restore rehearsal")
     container = ""
     with tempfile.TemporaryDirectory(prefix="sovereign-core-restored-") as directory:
         root = Path(directory)
         live = root / "live"
-        (live / "sources").mkdir(parents=True)
-        shutil.copyfile(ROOT / "fixtures/roles.json", live / "roles.json")
-        shutil.copyfile(source, live / "sources/ENG-001.txt")
-        with (ROOT / "fixtures/manifest.csv").open(newline="", encoding="utf-8") as stream:
-            rows = list(csv.DictReader(stream))
-        row = next(item for item in rows if item["document_id"] == "ENG-001")
-        with (live / "manifest.csv").open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.DictWriter(stream, fieldnames=list(row))
-            writer.writeheader()
-            writer.writerow(row)
-        if hashlib.sha256(source.read_bytes()).hexdigest() != row["sha256"]:
-            raise RuntimeError("synthetic source manifest hash mismatch")
-        sessions = LabSessions(live / "roles.json", PASSPHRASE, live / "history.db")
-        conversation_id, _ = sessions.create_conversation(USER)
-        sessions.add_turn(conversation_id, USER, {"message": "fictional generator inspection",
-            "answer": "Synthetic recovered answer", "mode": "documents",
-            "citations": [{"document_id": "ENG-001", "sha256": row["sha256"],
-                           "version": row["version"], "ordinal": 0}]})
+        conversation_id = prepare_synthetic_state(live)
         spec = root / "spec.json"
         spec.write_text(json.dumps({"schema": 1, "files": [
             {"name": "roles.json", "kind": "file", "source": "live/roles.json"},
