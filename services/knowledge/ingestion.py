@@ -13,6 +13,7 @@ import multiprocessing
 from pathlib import Path
 import re
 import sqlite3
+import stat
 from threading import RLock
 from typing import Callable
 from zipfile import BadZipFile, ZipFile
@@ -29,6 +30,21 @@ _PARSER_PIPE = None
 _PARSER_WARM = False
 COLD_PARSE_SECONDS = 120
 WARM_PARSE_SECONDS = 45
+_PDF_NAME = re.compile(rb"/((?:#[0-9A-Fa-f]{2}|[A-Za-z0-9])+)")
+_PDF_UNSUPPORTED = {"aa", "acroform", "embeddedfiles", "encrypt", "javascript", "js",
+                    "launch", "objstm", "openaction", "richmedia", "xfa"}
+
+
+def _pdf_preflight(payload: bytes) -> None:
+    """Reject recognizable active/encrypted PDFs before the parser worker."""
+    if not payload.startswith(b"%PDF-") or b"%%EOF" not in payload[-2048:]:
+        raise ValueError("malformed PDF envelope")
+    for match in _PDF_NAME.finditer(payload):
+        encoded = match.group(1)
+        decoded = re.sub(rb"#([0-9A-Fa-f]{2})",
+                         lambda part: bytes((int(part.group(1), 16),)), encoded)
+        if decoded.decode("latin1").casefold() in _PDF_UNSUPPORTED:
+            raise ValueError("active, compressed-object or encrypted PDF unsupported")
 
 
 def _serve_parser(pipe) -> None:
@@ -134,16 +150,24 @@ def _valid_source(root: Path, item: dict[str, object]) -> tuple[Path, str]:
     payload = path.read_bytes()
     if hashlib.sha256(payload).hexdigest() != digest:
         raise ValueError("source hash mismatch")
+    if path.suffix.casefold() == ".pdf":
+        _pdf_preflight(payload)
     if path.suffix.casefold() in {".docx", ".xlsx"}:
         try:
             with ZipFile(path) as archive:
                 members = archive.infolist()
                 if len(members) > 512 or sum(member.file_size for member in members) > 16 * 1024 * 1024:
                     raise ValueError("archive resource limit")
+                seen_members: set[str] = set()
                 for member in members:
                     name = member.filename.casefold()
+                    if name in seen_members:
+                        raise ValueError("duplicate archive member")
+                    seen_members.add(name)
                     if ("\\" in name or Path(member.filename).is_absolute() or
-                            ".." in Path(member.filename).parts or
+                            any(part in {".", ".."} for part in member.filename.split("/")) or
+                            member.flag_bits & 1 or
+                            stat.S_IFMT(member.external_attr >> 16) == stat.S_IFLNK or
                             member.file_size > 100 * max(member.compress_size, 1)):
                         raise ValueError("unsafe archive member")
                     if ("vbaproject.bin" in name or "/activex/" in f"/{name}" or

@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import stat
 import tempfile
 import unittest
-from zipfile import ZIP_DEFLATED, ZipFile
+import warnings
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from services.knowledge.ingestion import sync_manifest
 from services.intelligence.assets import AssetRegistry
@@ -17,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "fixtures/phase-4/assets.json"
 ALERTS = ROOT / "fixtures/phase-4/wazuh-alerts.json"
 CASES = json.loads((ROOT / "fixtures/phase-5/adversarial.json").read_text())
+PARSER_CASES = json.loads((ROOT / "fixtures/phase-5/parser-cases.json").read_text())
 
 
 class IngestionBoundaryTests(unittest.TestCase):
@@ -61,6 +64,58 @@ class IngestionBoundaryTests(unittest.TestCase):
                 with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
                     archive.writestr("word/document.xml", "fictional document")
                     archive.writestr(member, content)
+                result, calls = self.sync_one("sources/MAL-001.docx", path.read_bytes())
+                self.assertEqual(result["quarantined"], ["MAL-001"])
+                self.assertEqual(calls, [])
+
+    def test_pdf_envelope_and_active_name_cases_are_quarantined(self) -> None:
+        path = self.root / "sources/MAL-001.pdf"
+        invalid = [b"not a PDF", b"%PDF-1.4\nmissing trailer"]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                path.write_bytes(payload)
+                result, calls = self.sync_one("sources/MAL-001.pdf", payload)
+                self.assertEqual(result["quarantined"], ["MAL-001"])
+                self.assertEqual(calls, [])
+        for name in PARSER_CASES["pdf_names_rejected"]:
+            with self.subTest(name=name):
+                payload = f"%PDF-1.4\n1 0 obj << {name} 2 0 R >>\nendobj\n%%EOF".encode()
+                path.write_bytes(payload)
+                result, calls = self.sync_one("sources/MAL-001.pdf", payload)
+                self.assertEqual(result["quarantined"], ["MAL-001"])
+                self.assertEqual(calls, [])
+        payload = b"%PDF-1.4\n1 0 obj << /Type /Catalog >>\nendobj\n%%EOF"
+        path.write_bytes(payload)
+        result, calls = self.sync_one("sources/MAL-001.pdf", payload)
+        self.assertEqual(result["indexed"], ["MAL-001"])
+        self.assertEqual(calls, [path.resolve()])
+
+    def test_office_archive_ambiguity_and_resource_cases_are_quarantined(self) -> None:
+        path = self.root / "sources/MAL-001.docx"
+        self.assertEqual(set(PARSER_CASES["office_cases"]), {
+            "duplicate_member", "case_folded_duplicate", "symlink_member",
+            "parent_traversal", "compressed_ratio", "expanded_size"})
+        for case in PARSER_CASES["office_cases"]:
+            with self.subTest(case=case):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+                        archive.writestr("word/document.xml", "fictional document")
+                        if case == "duplicate_member":
+                            archive.writestr("word/document.xml", "different content")
+                        elif case == "case_folded_duplicate":
+                            archive.writestr("WORD/DOCUMENT.XML", "different content")
+                        elif case == "symlink_member":
+                            link = ZipInfo("word/link.xml")
+                            link.create_system = 3
+                            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+                            archive.writestr(link, "../../outside")
+                        elif case == "parent_traversal":
+                            archive.writestr("word/../outside.xml", "fictional")
+                        elif case == "compressed_ratio":
+                            archive.writestr("word/repeated.xml", "A" * 20000)
+                        elif case == "expanded_size":
+                            archive.writestr("word/large.xml", "B" * (16 * 1024 * 1024 + 1))
                 result, calls = self.sync_one("sources/MAL-001.docx", path.read_bytes())
                 self.assertEqual(result["quarantined"], ["MAL-001"])
                 self.assertEqual(calls, [])

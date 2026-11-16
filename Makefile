@@ -1,4 +1,4 @@
-.PHONY: build check test lab-up lab-check lab-diagnose lab-smoke fixtures recovery-rehearsal
+.PHONY: build check test security-config-scan lab-up lab-check lab-diagnose lab-smoke fixtures recovery-rehearsal
 
 PYTHON ?= .venv/bin/python
 
@@ -11,9 +11,13 @@ check:
 	$(PYTHON) -m py_compile fixtures/generate.py fixtures/phase-1/generate.py
 	$(PYTHON) -m unittest discover -s tests -v
 	$(PYTHON) -m scripts.check_repository
+	$(PYTHON) -m scripts.security_config_scan
 
 test:
 	$(PYTHON) -m unittest discover -s tests -v
+
+security-config-scan:
+	$(PYTHON) -m scripts.security_config_scan
 
 lab-up:
 	$(PYTHON) -m scripts.labctl up

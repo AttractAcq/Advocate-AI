@@ -41,7 +41,8 @@ or credential should be placed in this lab.
    .venv/bin/python -m scripts.phase3_identity start
    ```
 
-   The pinned container is `quay.io/keycloak/keycloak:26.8.2`, exposed only on
+   The synthetic container is Keycloak 26.8.2, pinned to the OCI index digest in
+   [container-image.json](../../infrastructure/lab/container-image.json), exposed only on
    `127.0.0.1:18086`. Its realm import has named synthetic users, five roles,
    a public Console client with PKCE and a Core audience. Keycloak's
    [container guide](https://www.keycloak.org/server/containers) documents

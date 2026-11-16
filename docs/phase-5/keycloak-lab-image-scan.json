@@ -1,0 +1,21 @@
+{
+  "status": "untriaged-lab-image-findings",
+  "scan_date_utc": "2026-11-16",
+  "ci_run": "https://github.com/AttractAcq/Advocate-AI/actions/runs/43850286761",
+  "image": "quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0",
+  "scanner": "Trivy 0.76.2",
+  "report_sha256": "ae83135d089d11da97ea616968aaaded198092e033594b6a9dc7e5a45ebe1a95",
+  "severity_counts": {
+    "HIGH": 6,
+    "CRITICAL": 0
+  },
+  "findings": [
+    {"id": "CVE-2026-91403", "package": "java-21-openjdk-headless", "status": "will_not_fix", "fixed_version": null},
+    {"id": "CVE-2026-119373", "package": "sqlite-libs", "status": "affected", "fixed_version": null},
+    {"id": "CVE-2026-119374", "package": "sqlite-libs", "status": "affected", "fixed_version": null},
+    {"id": "CVE-2026-119379", "package": "sqlite-libs", "status": "affected", "fixed_version": null},
+    {"id": "CVE-2026-119586", "package": "sqlite-libs", "status": "affected", "fixed_version": null},
+    {"id": "CVE-2026-102554", "package": "com.google.guava:guava", "status": "fixed", "fixed_version": "33.7.2"}
+  ],
+  "decision": "No production use or risk acceptance. Qualify an approved identity image and triage findings before release."
+}
