@@ -15,7 +15,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_candidate_bundle, create_product_bundle, verify_bundle
-from infrastructure.deploy.container_runtime import start_verified_bundle, stop_runtime
+from infrastructure.deploy.container_runtime import (
+    probe_runtime, start_verified_bundle, stop_runtime, switch_verified_bundle,
+)
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -165,6 +167,18 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     runtime = start_verified_bundle(product_bundle, trusted, crane, config)
                     try:
                         result["runtime"] = "healthy-isolated"
+                        try:
+                            switch_verified_bundle(runtime, root / "missing-candidate",
+                                                   trusted, crane, config)
+                        except (OSError, ValueError):
+                            probe_runtime(runtime)
+                            result["failed_candidate"] = "previous-runtime-preserved"
+                        else:
+                            raise AssertionError("missing candidate unexpectedly activated")
+                        runtime = switch_verified_bundle(runtime, product_bundle,
+                                                         trusted, crane, config)
+                        probe_runtime(runtime)
+                        result["switchover"] = "healthy-candidate-activated"
                     finally:
                         stop_runtime(runtime)
                 finally:

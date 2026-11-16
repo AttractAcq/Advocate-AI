@@ -84,10 +84,10 @@ def _archive_image_ids(archive: Path, role: str) -> set[str]:
                     not isinstance(index.get("manifests"), list) or
                     not 1 <= len(index["manifests"]) <= 10):
                 raise RuntimeError("invalid OCI image index")
-            matches: list[str] = []
+            matches: list[set[str]] = []
             seen: set[str] = set()
 
-            def walk(descriptor: object, depth: int) -> None:
+            def walk(descriptor: object, depth: int, ancestors: set[str]) -> None:
                 if not isinstance(descriptor, dict) or depth > 3:
                     raise RuntimeError("invalid OCI descriptor")
                 digest = descriptor.get("digest")
@@ -99,21 +99,21 @@ def _archive_image_ids(archive: Path, role: str) -> set[str]:
                     raise RuntimeError("invalid OCI descriptor content")
                 if isinstance(document.get("config"), dict):
                     if document["config"].get("digest") == config_digest:
-                        matches.append(digest)
+                        matches.append(ancestors | {digest})
                 elif isinstance(document.get("manifests"), list):
                     children = document["manifests"]
                     if not 1 <= len(children) <= 10:
                         raise RuntimeError("invalid nested OCI index")
                     for child in children:
-                        walk(child, depth + 1)
+                        walk(child, depth + 1, ancestors | {digest})
                 else:
                     raise RuntimeError("invalid OCI image manifest")
 
             for descriptor in index["manifests"]:
-                walk(descriptor, 0)
+                walk(descriptor, 0, set())
             if len(matches) != 1:
                 raise RuntimeError("OCI index does not identify one Docker image")
-            return {matches[0], config_digest, "sha256:" + hashlib.sha256(index_bytes).hexdigest()}
+            return matches[0] | {config_digest, "sha256:" + hashlib.sha256(index_bytes).hexdigest()}
     except (OSError, tarfile.TarError, json.JSONDecodeError, TypeError, AttributeError, KeyError) as exc:
         raise RuntimeError("invalid single-image archive metadata") from exc
 
@@ -145,7 +145,9 @@ def _image_id(bundle: Path, role: str, item: dict[str, str], crane: Path) -> str
     if (not isinstance(digests, list) or
             image_id not in expected_ids or
             not image_id.startswith("sha256:") or len(image_id) != 71):
-        raise RuntimeError("loaded image does not match signed archive")
+        raise RuntimeError(f"loaded image does not match signed archive: "
+                           f"loaded={image_id} expected={sorted(expected_ids)} "
+                           f"repo_digests={digests}")
     return image_id
 
 
@@ -201,6 +203,26 @@ def stop_runtime(handle: RuntimeHandle) -> None:
             _docker("network", "rm", handle.network_id)
         except RuntimeError:
             pass
+
+
+def probe_runtime(handle: RuntimeHandle) -> None:
+    """Fail if the current Core and Console no longer satisfy lab health checks."""
+    for identifier in (handle.core_id, handle.console_id):
+        if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
+            raise RuntimeError("synthetic runtime is stopped")
+    _health(handle.core_id)
+
+
+def switch_verified_bundle(current: RuntimeHandle | None, bundle: Path,
+                           trusted_key: Path, crane: Path,
+                           console_config: Path) -> RuntimeHandle:
+    """Start and check a candidate before retiring the previous lab runtime."""
+    if current is not None:
+        probe_runtime(current)
+    candidate = start_verified_bundle(bundle, trusted_key, crane, console_config)
+    if current is not None:
+        stop_runtime(current)
+    return candidate
 
 
 def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,

@@ -10,7 +10,8 @@ import unittest
 from unittest.mock import patch
 
 from infrastructure.deploy.container_runtime import (
-    RuntimeError, _archive_image_ids, _validate_console_config, start_verified_bundle,
+    RuntimeError, RuntimeHandle, _archive_image_ids, _validate_console_config,
+    start_verified_bundle, switch_verified_bundle,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -88,6 +89,31 @@ class ContainerRuntimeTests(unittest.TestCase):
                 start_verified_bundle(self.root / "bundle", self.root / "trusted.pem",
                                       self.root / "crane", self.config)
             docker.assert_not_called()
+
+    def test_failed_candidate_preserves_previous_runtime(self) -> None:
+        previous = RuntimeHandle("network-old", "core-old", "console-old")
+        with patch("infrastructure.deploy.container_runtime.probe_runtime") as probe, \
+             patch("infrastructure.deploy.container_runtime.start_verified_bundle",
+                   side_effect=BundleError("bad signature")), \
+             patch("infrastructure.deploy.container_runtime.stop_runtime") as stop:
+            with self.assertRaises(BundleError):
+                switch_verified_bundle(previous, self.root, self.root / "key",
+                                       self.root / "crane", self.config)
+            probe.assert_called_once_with(previous)
+            stop.assert_not_called()
+
+    def test_healthy_candidate_retires_previous_runtime(self) -> None:
+        previous = RuntimeHandle("network-old", "core-old", "console-old")
+        candidate = RuntimeHandle("network-new", "core-new", "console-new")
+        with patch("infrastructure.deploy.container_runtime.probe_runtime") as probe, \
+             patch("infrastructure.deploy.container_runtime.start_verified_bundle",
+                   return_value=candidate), \
+             patch("infrastructure.deploy.container_runtime.stop_runtime") as stop:
+            result = switch_verified_bundle(previous, self.root,
+                                            self.root / "key", self.root / "crane", self.config)
+            self.assertEqual(result, candidate)
+            probe.assert_called_once_with(previous)
+            stop.assert_called_once_with(previous)
 
 
 if __name__ == "__main__":
