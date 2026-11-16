@@ -35,9 +35,21 @@ events. Records use fixed codes and enums. Licence dates must increase,
 deployments must reference known customers and releases, and offline receipts
 must match the deployment's release.
 
+The local lifecycle candidate exposes authenticated `PATCH` routes for
+`/licences/{code}/status`, `/tickets/{code}/status` and
+`/maintenance/{code}/status`. A request body contains only a `status` enum.
+Licences may move pending → active/suspended → expired; expired is terminal.
+Tickets must be triaged before waiting or resolution; resolved is terminal.
+Maintenance may be deferred and returned to planned before completion.
+Each allowed transition replaces the record and appends a digest-bound audit
+event in one SQLite transaction. Invalid transitions and foreign body fields
+are rejected without changing the record. These rules are synthetic workflow
+defaults; vessel/customer policy owners must approve production lifecycle rules,
+operator roles and expiry automation.
+
 The [AT-24](../05-acceptance-tests.md) synthetic tests submit forbidden
 prompt, document, embedding and security-log fields and confirm 422 responses
 with no stored content. They create authorised metadata and verify audit
 events, references and tamper detection. A real company portal, customer user
-accounts, lifecycle transitions, signed offline import, support workflow,
+accounts, approved lifecycle rules and role enforcement, signed offline import, support workflow,
 retention, network route proof and independent review remain open.

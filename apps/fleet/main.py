@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
 
 from services.fleet.catalog import (
     Customer, Deployment, DeploymentReceipt, FleetCatalog, FleetError,
-    FleetIntegrityError, Licence, Maintenance, Release, Ticket,
+    FleetIntegrityError, Licence, LicenceStatus, Maintenance, MaintenanceStatus,
+    Release, Ticket, TicketStatus,
 )
 
 
@@ -70,6 +71,15 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 "Fleet store integrity check failed") from exc
 
+    def transition(kind: str, code: str, new_status: str):
+        try:
+            return catalog.transition(kind, code, new_status)
+        except FleetIntegrityError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Fleet store integrity check failed") from exc
+        except FleetError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
     @router.post("/customers", status_code=201)
     def create_customer(record: Customer):
         return add("customer", record)
@@ -102,6 +112,10 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     def licences():
         return list_records("licence")
 
+    @router.patch("/licences/{code}/status")
+    def update_licence(code: str, change: LicenceStatus):
+        return transition("licence", code, change.status)
+
     @router.post("/tickets", status_code=201)
     def create_ticket(record: Ticket):
         return add("ticket", record)
@@ -110,6 +124,10 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     def tickets():
         return list_records("ticket")
 
+    @router.patch("/tickets/{code}/status")
+    def update_ticket(code: str, change: TicketStatus):
+        return transition("ticket", code, change.status)
+
     @router.post("/maintenance", status_code=201)
     def create_maintenance(record: Maintenance):
         return add("maintenance", record)
@@ -117,6 +135,10 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     @router.get("/maintenance")
     def maintenance():
         return list_records("maintenance")
+
+    @router.patch("/maintenance/{code}/status")
+    def update_maintenance(code: str, change: MaintenanceStatus):
+        return transition("maintenance", code, change.status)
 
     @router.post("/import/deployment-receipts", status_code=201)
     def import_receipt(record: DeploymentReceipt):

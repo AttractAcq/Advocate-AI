@@ -98,6 +98,68 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/fleet/customers")
         self.assertEqual(response.status_code, 503)
 
+    async def test_lifecycle_transitions_are_audited_and_reject_skips(self) -> None:
+        await self._seed()
+        records = (
+            ("licences", "LIC-DEMO1", {"code": "LIC-DEMO1",
+              "customer_code": "CUST-ACME1", "vessel_code": "VSL-TEST1",
+              "tier": "pilot", "valid_from": "2026-11-01",
+              "valid_until": "2027-11-01", "status": "pending"}),
+            ("tickets", "TKT-DEMO1", {"code": "TKT-DEMO1",
+              "vessel_code": "VSL-TEST1", "category": "recovery",
+              "priority": "p2", "status": "open"}),
+            ("maintenance", "MNT-DEMO1", {"code": "MNT-DEMO1",
+              "vessel_code": "VSL-TEST1", "kind": "backup_rehearsal",
+              "due_on": "2026-12-01", "engineer_code": "ENGR-LAB1",
+              "status": "planned"}),
+        )
+        for endpoint, _, payload in records:
+            self.assertEqual((await self.client.post(
+                "/api/fleet/" + endpoint, json=payload)).status_code, 201)
+        for endpoint, code in (("tickets", "TKT-DEMO1"),
+                               ("maintenance", "MNT-DEMO1")):
+            response = await self.client.patch(
+                f"/api/fleet/{endpoint}/{code}/status", json={"status": "resolved"})
+            self.assertIn(response.status_code, (409, 422))
+        for endpoint, code, states in (
+            ("licences", "LIC-DEMO1", ("active", "suspended", "expired")),
+            ("tickets", "TKT-DEMO1", ("triaged", "waiting", "resolved")),
+            ("maintenance", "MNT-DEMO1", ("deferred", "planned", "completed")),
+        ):
+            for state in states:
+                response = await self.client.patch(
+                    f"/api/fleet/{endpoint}/{code}/status", json={"status": state})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["status"], state)
+            self.assertEqual((await self.client.get("/api/fleet/" + endpoint)).json()[0]
+                             ["status"], states[-1])
+        events = (await self.client.get("/api/fleet/audit")).json()
+        self.assertEqual(len(events), 15)
+        self.assertEqual(events[-1]["action"], "status:planned:completed")
+        self.assertNotIn("payload", events[-1])
+        response = await self.client.patch(
+            "/api/fleet/tickets/TKT-DEMO1/status",
+            json={"status": "triaged", "prompt": "never-store-this-vessel-content"})
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn(b"never-store-this-vessel-content", self.db.read_bytes())
+        response = await self.client.patch(
+            "/api/fleet/tickets/TKT-DEMO1/status",
+            headers={"X-Fleet-Lab-Token": "wrong"}, json={"status": "triaged"})
+        self.assertEqual(response.status_code, 401)
+
+    async def test_lifecycle_audit_tamper_fails_closed(self) -> None:
+        await self._seed()
+        self.assertEqual((await self.client.post("/api/fleet/tickets", json={
+            "code": "TKT-DEMO1", "vessel_code": "VSL-TEST1",
+            "category": "recovery", "priority": "p2", "status": "open"})).status_code, 201)
+        self.assertEqual((await self.client.patch(
+            "/api/fleet/tickets/TKT-DEMO1/status",
+            json={"status": "triaged"})).status_code, 200)
+        with sqlite3.connect(self.db) as connection:
+            connection.execute("UPDATE audit SET action='status:open:resolved' "
+                               "WHERE kind='ticket' AND action='status:open:triaged'")
+        self.assertEqual((await self.client.get("/api/fleet/tickets")).status_code, 503)
+
 
 if __name__ == "__main__":
     unittest.main()
