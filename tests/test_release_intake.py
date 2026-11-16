@@ -109,6 +109,30 @@ class ReleaseIntakeTests(unittest.TestCase):
         with self.assertRaises(IntakeError):
             verify_intake(scan_path, sbom_path, IMAGE, digest, sbom_digest, now=NOW)
 
+    def test_generated_syft_inventory_accepts_distinct_package_and_file_evidence(self) -> None:
+        sbom = copy.deepcopy(self.sbom)
+        sbom["metadata"]["tools"] = {"components": [{"name": "syft", "version": "1.57.1"}]}
+        sbom["metadata"]["properties"] = [
+            {"name": "sovereign-ai:inventory-status", "value": "generated-from-validated-archive"},
+            {"name": "sovereign-ai:archive-sha256", "value": "c" * 64},
+            {"name": "sovereign-ai:crane-version", "value": "0.22.1"},
+        ]
+        sbom["components"] = [
+            {"type": "library", "bom-ref": "pkg:npm/fictional@1.0.0", "name": "fictional",
+             "version": "1.0.0", "purl": "pkg:npm/fictional@1.0.0"},
+            {"type": "file", "bom-ref": "file-1", "name": "/app/package.json",
+             "hashes": [{"alg": "SHA-256", "content": "d" * 64}]},
+        ]
+        self.assertEqual(self.verify(sbom=sbom)["archive_sha256"], "c" * 64)
+        sbom["components"][0].pop("purl")
+        with self.assertRaises(IntakeError):
+            self.verify(sbom=sbom)
+        sbom["components"][0]["purl"] = "pkg:npm/fictional@1.0.0"
+        sbom["metadata"]["properties"].append(
+            {"name": "sovereign-ai:archive-sha256", "value": "e" * 64})
+        with self.assertRaises(IntakeError):
+            self.verify(sbom=sbom)
+
 
 if __name__ == "__main__":
     unittest.main()
