@@ -70,6 +70,19 @@ class SyntheticRetrievalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             search_fixture_documents(FIXTURES, "lab-captain-1", "x" * 1001)
 
+    def test_symlinked_fixture_is_not_retrieved_even_with_matching_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            shutil.copy(FIXTURES / "roles.json", base / "roles.json")
+            shutil.copy(FIXTURES / "manifest.csv", base / "manifest.csv")
+            shutil.copytree(FIXTURES / "sources", base / "sources")
+            original = base / "sources/ENG-001.txt"
+            target = base / "sources/ENG-001-copy.txt"
+            original.rename(target)
+            original.symlink_to(target)
+            hits = search_fixture_documents(base, "lab-chief_engineer-1", "generator inspection")
+            self.assertNotIn("ENG-001", [hit["document_id"] for hit in hits])
+
 
 if __name__ == "__main__":
     unittest.main()

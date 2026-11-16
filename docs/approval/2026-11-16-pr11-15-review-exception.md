@@ -10,3 +10,16 @@ This decision does not complete independent product security/QA review, Phase 4
 Wazuh evidence, G2 or G3. It does not authorise vessel data, hardware
 deployment or production release. Those remain open in the
 [blocker tracker](../blockers-and-build-queue.md).
+
+## Execution record
+
+PRs #15, #14, #13 and #12 were merged into their stacked feature bases in that
+order. The final aggregated PR #11 head was `6cf26c56d800a40adaf1d03e91bd1fe2c7feb4ce`;
+its [quality, secrets and dependency checks](https://github.com/AttractAcq/Advocate-AI/actions/runs/43833974500)
+all passed. PR #11 was squash-merged into `main` as
+`ed18eb3a4081a65080297b9c2f2a7798ff1d77a3` on 16 November 2026.
+The review requirement was temporarily reduced only around that final merge.
+The immediately subsequent GitHub protection read confirmed
+`required_approving_review_count: 1`, `require_last_push_approval: true` and
+`dismiss_stale_reviews: true`. Required status checks and linear history were
+not altered.

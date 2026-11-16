@@ -204,6 +204,22 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.model.contexts, [])
         self.assertNotIn("ENG-001", [item["document_id"] for context in self.model.contexts for item in context])
 
+    async def test_post_index_symlink_revokes_retrieval(self) -> None:
+        engineer = await self.login("engineer")
+        original = self.root / "sources/ENG-001.txt"
+        target = self.root / "sources/ENG-001-copy.txt"
+        original.rename(target)
+        original.symlink_to(target)
+        self.assertEqual(search_index(self.root, self.manifest, self.database,
+                                      "engineer", "generator inspection"), [])
+        self.assertEqual((await self.client.post("/api/search", headers=engineer,
+                                                json={"query": "generator inspection"})).json()["results"], [])
+        answer = await self.client.post("/api/chat", headers=engineer,
+                                        json={"message": "generator inspection"})
+        self.assertEqual(answer.status_code, 200)
+        self.assertEqual(answer.json()["citations"], [])
+        self.assertEqual(self.model.contexts, [])
+
     async def test_audit_records_omit_prompt_and_detect_tamper(self) -> None:
         audit_path = self.root / "audit/events.jsonl"
         app = create_app(Settings(fixture_root=self.root, lab_password="synthetic-test-passphrase",

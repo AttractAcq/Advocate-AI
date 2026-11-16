@@ -17,6 +17,8 @@ from threading import RLock
 from typing import Callable
 from zipfile import BadZipFile, ZipFile
 
+from services.knowledge.paths import source_path
+
 SUPPORTED = {".pdf", ".docx", ".xlsx", ".txt"}
 MAX_BYTES = 8 * 1024 * 1024
 MAX_TEXT = 2 * 1024 * 1024
@@ -122,11 +124,7 @@ def _valid_source(root: Path, item: dict[str, object]) -> tuple[Path, str]:
     digest = item.get("sha256")
     if not isinstance(document_id, str) or not _ID.fullmatch(document_id):
         raise ValueError("invalid source id")
-    if not isinstance(relative, str) or Path(relative).is_absolute() or ".." in Path(relative).parts:
-        raise ValueError("invalid source path")
-    path = (root / relative).resolve(strict=True)
-    if not path.is_relative_to(root) or not path.is_file() or path.is_symlink():
-        raise ValueError("source escapes approved root")
+    path = source_path(root, relative)
     if path.suffix.casefold() not in SUPPORTED:
         raise ValueError("unsupported format")
     if path.stat().st_size > MAX_BYTES:
@@ -143,9 +141,20 @@ def _valid_source(root: Path, item: dict[str, object]) -> tuple[Path, str]:
                 if len(members) > 512 or sum(member.file_size for member in members) > 16 * 1024 * 1024:
                     raise ValueError("archive resource limit")
                 for member in members:
-                    if (Path(member.filename).is_absolute() or ".." in Path(member.filename).parts or
+                    name = member.filename.casefold()
+                    if ("\\" in name or Path(member.filename).is_absolute() or
+                            ".." in Path(member.filename).parts or
                             member.file_size > 100 * max(member.compress_size, 1)):
                         raise ValueError("unsafe archive member")
+                    if ("vbaproject.bin" in name or "/activex/" in f"/{name}" or
+                            "/externallinks/" in f"/{name}" or "/embeddings/" in f"/{name}"):
+                        raise ValueError("active or external office content")
+                    if name.endswith(".rels"):
+                        if member.file_size > 256 * 1024:
+                            raise ValueError("oversized relationship file")
+                        relations = archive.read(member)
+                        if re.search(rb"\bTargetMode\s*=\s*['\"]External['\"]", relations, re.I):
+                            raise ValueError("external office relationship")
         except BadZipFile as exc:
             raise ValueError("malformed office archive") from exc
     for key in ("owner", "collection", "classification", "version", "source_type"):
