@@ -1,7 +1,7 @@
 """Ephemeral credentials for the synthetic Phase 2 lab only.
 
-The vessel product will use the approved local identity provider. No lab token
-or conversation survives a Core restart.
+The vessel product will use the approved local identity provider. Lab tokens
+do not survive a Core restart; optional SQLite conversation history can.
 """
 
 from __future__ import annotations
