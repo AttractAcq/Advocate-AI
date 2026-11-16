@@ -4,7 +4,7 @@ Sovereign AI is a private vessel assistant and read-only cybersecurity intellige
 
 **Current state:** Phase 0 G0 was approved by the requester on 14 November 2026 and reconfirmed on 15 November for synthetic lab development ([approval records](docs/approval/2026-11-15-phase0-phase1.md)). The requester also reviewed and approved completed Phase 1 local work; the public repository has enforced `main` protection, while target hardware/network checks and independent review remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence](docs/phase-2/gate.md) keeps the target hardware and disconnected-WAN gate open. Phase 3 local ingestion, indexed retrieval, Keycloak identity and audit work remains under test; its [gate record](docs/phase-3/gate.md) and [external review brief](docs/review/phase-0-3-external-review.md) list remaining controls. Phase 4 synthetic alert analysis is merged; its [gate record](docs/phase-4/gate.md) keeps independent Wazuh and outage proof open. This baseline does not authorise vessel access, production data, procurement or deployment.
 
-**Unfinished work:** [Blockers and build queue](docs/blockers-and-build-queue.md) is the current index of deferred gate evidence and software we can build locally. Phase 5 signed offline bundle, [health diagnostics](docs/phase-5/diagnostics.md), [synthetic encrypted recovery](docs/phase-5/backup-recovery.md), [synthetic installer](docs/phase-5/installer.md) and [adversarial hardening](docs/phase-5/security-hardening.md) are local software slices; they do not close G2 or certify a release.
+**Unfinished work:** [Blockers and build queue](docs/blockers-and-build-queue.md) is the current index of deferred gate evidence and software we can build locally. Phase 5 signed offline bundle, [health diagnostics](docs/phase-5/diagnostics.md), [synthetic encrypted recovery](docs/phase-5/backup-recovery.md), [synthetic installer](docs/phase-5/installer.md) and [adversarial hardening](docs/phase-5/security-hardening.md) are local software slices. The [Phase 6 operator and engineer pack](docs/phase-6/operator-engineer-pack.md) documents those flows and open handover evidence. They do not close G2/G3 or certify a release.
 
 ## Product milestones
 
@@ -77,6 +77,7 @@ Development/
 │   ├── phase-3/              Ingestion, identity, retrieval and gate evidence
 │   ├── phase-4/              Security intelligence runbook, host worksheet and open gate
 │   ├── phase-5/              Offline release procedure and future G2 evidence
+│   ├── phase-6/              Synthetic operator and engineer SOP draft
 │   ├── blockers-and-build-queue.md
 │   └── approval/2026-11-14-g0.md
 └── fixtures/                 Synthetic generators, manifests and local generated data
