@@ -105,9 +105,9 @@ def prepare_synthetic_state(live: Path) -> str:
     return conversation_id
 
 
-def restore_synthetic_state(root: Path, restic: Path,
-                            restic_sha256: str) -> tuple[Path, str, str]:
-    """Delete fictional live state and clean-restore its checked restic snapshot."""
+def snapshot_synthetic_state(root: Path, restic: Path,
+                             restic_sha256: str) -> tuple[Path, Path, str, str]:
+    """Snapshot fictional Core state, then remove its live copy."""
     live = root / "live"
     conversation_id = prepare_synthetic_state(live)
     spec = root / "spec.json"
@@ -124,10 +124,18 @@ def restore_synthetic_state(root: Path, restic: Path,
     repository = root / "repository"
     saved = create_snapshot(spec, repository, password, restic, restic_sha256, stage)
     shutil.rmtree(live)
+    return repository, password, str(saved["snapshot_id"]), conversation_id
+
+
+def restore_synthetic_state(root: Path, restic: Path,
+                            restic_sha256: str) -> tuple[Path, str, str]:
+    """Delete fictional live state and clean-restore its checked restic snapshot."""
+    repository, password, snapshot_id, conversation_id = snapshot_synthetic_state(
+        root, restic, restic_sha256)
     restored = root / "restored"
-    restore_snapshot(saved["snapshot_id"], repository, password, restic,
+    restore_snapshot(snapshot_id, repository, password, restic,
                      restic_sha256, restored)
-    return restored, conversation_id, str(saved["snapshot_id"])
+    return restored, conversation_id, snapshot_id
 
 
 def rehearse(image: str, restic: Path, restic_sha256: str) -> dict[str, object]:
