@@ -21,7 +21,11 @@ empty scan; malformed findings; any HIGH, CRITICAL or UNKNOWN vulnerability;
 or an unresolved or candidate-only SBOM. For a [Syft-generated inventory](upstream-release-tools.md),
 file entries require SHA-256 hashes and library entries require a package URL
 and version. The earlier fictional test format requires a version and SHA-256
-for each component.
+for each component. A generated archive candidate also requires a scan that
+binds the matching archive hash and manifest digest, scanner binary hash,
+vulnerability database hash and dates, and offline archive mode. The database
+must cover the scan time and have been updated within seven days. The
+[archive scan adapter](../../infrastructure/release/scan.py) produces these fields.
 A pass prints the image and evidence hashes so the reviewer can attach them to
 the controlled release record. The local synthetic tests exercise both the
 pass and denial paths. The [candidate bundle command](offline-release.md)
@@ -30,7 +34,8 @@ inventory. The bundle verifier reruns it against the signed creation time;
 the signed timestamp is an assertion by the release signer, not a trusted
 external timestamp.
 
-This check reads supplied files. It does not authenticate the scanner, prove
+This check reads supplied files. It does not authenticate the scanner or its
+vulnerability database publisher, prove
 that the scan covered every package, establish image or dependency provenance,
 verify licence rights or triage findings. A `sovereign-ai:inventory-status`
 property is a release process assertion that must be independently checked.

@@ -110,6 +110,14 @@ class ReleaseIntakeTests(unittest.TestCase):
             verify_intake(scan_path, sbom_path, IMAGE, digest, sbom_digest, now=NOW)
 
     def test_generated_syft_inventory_accepts_distinct_package_and_file_evidence(self) -> None:
+        scan = copy.deepcopy(self.scan)
+        scan["Sovereign"] = {
+            "Source": "offline-local-docker-archive", "ArchiveSHA256": "c" * 64,
+            "ManifestDigest": "sha256:" + DIGEST, "ScannerBinarySHA256": "e" * 64,
+            "DatabaseSHA256": "f" * 64,
+            "DatabaseUpdatedAt": "2026-11-16T10:00:00Z",
+            "DatabaseNextUpdate": "2026-11-16T13:00:00Z",
+        }
         sbom = copy.deepcopy(self.sbom)
         sbom["metadata"]["tools"] = {"components": [{"name": "syft", "version": "1.57.1"}]}
         sbom["metadata"]["properties"] = [
@@ -123,15 +131,26 @@ class ReleaseIntakeTests(unittest.TestCase):
             {"type": "file", "bom-ref": "file-1", "name": "/app/package.json",
              "hashes": [{"alg": "SHA-256", "content": "d" * 64}]},
         ]
-        self.assertEqual(self.verify(sbom=sbom)["archive_sha256"], "c" * 64)
+        self.assertEqual(self.verify(scan=scan, sbom=sbom)["archive_sha256"], "c" * 64)
         sbom["components"][0].pop("purl")
         with self.assertRaises(IntakeError):
-            self.verify(sbom=sbom)
+            self.verify(scan=scan, sbom=sbom)
         sbom["components"][0]["purl"] = "pkg:npm/fictional@1.0.0"
         sbom["metadata"]["properties"].append(
             {"name": "sovereign-ai:archive-sha256", "value": "e" * 64})
         with self.assertRaises(IntakeError):
-            self.verify(sbom=sbom)
+            self.verify(scan=scan, sbom=sbom)
+        sbom["metadata"]["properties"].pop()
+        scan["Sovereign"]["ArchiveSHA256"] = "0" * 64
+        with self.assertRaises(IntakeError):
+            self.verify(scan=scan, sbom=sbom)
+        scan["Sovereign"]["ArchiveSHA256"] = "c" * 64
+        scan["Sovereign"]["DatabaseUpdatedAt"] = "2026-11-01T10:00:00Z"
+        with self.assertRaises(IntakeError):
+            self.verify(scan=scan, sbom=sbom)
+        del scan["Sovereign"]
+        with self.assertRaises(IntakeError):
+            self.verify(scan=scan, sbom=sbom)
 
 
 if __name__ == "__main__":

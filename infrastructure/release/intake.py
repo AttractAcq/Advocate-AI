@@ -63,6 +63,31 @@ def _recent(value: object, now: datetime) -> None:
         raise IntakeError("evidence timestamp is stale or in the future")
 
 
+def _archive_scan_provenance(scan: dict[str, object], archive_sha256: str,
+                             image_digest: str) -> None:
+    provenance = scan.get("Sovereign")
+    required = {"Source", "ArchiveSHA256", "ManifestDigest", "ScannerBinarySHA256",
+                "DatabaseSHA256", "DatabaseUpdatedAt", "DatabaseNextUpdate"}
+    if (not isinstance(provenance, dict) or set(provenance) != required or
+            provenance["Source"] != "offline-local-docker-archive" or
+            provenance["ArchiveSHA256"] != archive_sha256 or
+            provenance["ManifestDigest"] != f"sha256:{image_digest}" or
+            any(not isinstance(provenance[name], str) or
+                    not _DIGEST.fullmatch(provenance[name])
+                    for name in ("ScannerBinarySHA256", "DatabaseSHA256"))):
+        raise IntakeError("scan lacks matching local archive provenance")
+    try:
+        scanned = datetime.fromisoformat(scan["CreatedAt"].replace("Z", "+00:00"))
+        updated = datetime.fromisoformat(provenance["DatabaseUpdatedAt"].replace("Z", "+00:00"))
+        next_update = datetime.fromisoformat(provenance["DatabaseNextUpdate"].replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise IntakeError("invalid vulnerability database date") from exc
+    if (scanned.tzinfo is None or updated.tzinfo is None or next_update.tzinfo is None or
+            updated > scanned or scanned > next_update or
+            scanned - updated > timedelta(days=7)):
+        raise IntakeError("vulnerability database does not cover the scan")
+
+
 def _sha256_hashes(component: object) -> set[str]:
     if not isinstance(component, dict) or not isinstance(component.get("hashes"), list):
         return set()
@@ -143,6 +168,7 @@ def verify_intake(scan_path: Path, sbom_path: Path, image_ref: str,
                 not isinstance(values.get("sovereign-ai:archive-sha256"), str) or
                 not _DIGEST.fullmatch(values["sovereign-ai:archive-sha256"])):
             raise IntakeError("missing approved image inventory provenance")
+        _archive_scan_provenance(scan, values["sovereign-ai:archive-sha256"], match.group(1))
     image_component = metadata.get("component")
     repository = image_ref.split("@", 1)[0]
     if (not isinstance(image_component, dict) or image_component.get("name") != repository or
