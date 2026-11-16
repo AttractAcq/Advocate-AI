@@ -10,6 +10,20 @@ permissions:
   contents: read
 
 jobs:
+  synthetic-containers:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned Core and Console images
+        run: |
+          docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
+          docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
+      - name: Exercise isolated synthetic stack
+        run: bash infrastructure/containers/smoke.sh
+
   quality:
     runs-on: ubuntu-latest
     steps:
