@@ -30,7 +30,7 @@ from independent product security review.
 
 | ID | Work | Next locally verifiable result | State |
 |---|---|---|---|
-| W-01 | Signed offline release directory (T-024) | Ed25519 signed manifest, detached signature, exact inventory and tamper rejection; [runbook](phase-5/offline-release.md). Then approved artifact intake, SBOM, media scan and staged rollback remain | In progress |
+| W-01 | Signed offline release directory (T-024) | [PR #12](https://github.com/AttractAcq/Advocate-AI/pull/12) contains Ed25519 signing, exact inventory and tamper rejection; [runbook](phase-5/offline-release.md). Approved artifact intake, SBOM, media scan and staged rollback remain | Signing slice locally complete; T-024 open |
 | W-02 | Health and diagnostic checks (T-025/T-028) | Local service/database/model/Wazuh checks with no private payloads or egress | Open |
 | W-03 | Backup/restore software (T-025) | Encrypted synthetic backup format, integrity check and automated local restore rehearsal; actual key custody and clean-host timing remain B-07 | Open |
 | W-04 | Installer/configuration validation (T-028) | Idempotent synthetic install, local PKI/config checks and post-install probes | Open |
