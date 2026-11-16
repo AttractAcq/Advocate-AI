@@ -127,6 +127,8 @@ class ContainerRuntimeTests(unittest.TestCase):
                 return "true"
             if args[-1] == "{{.State.Running}}":
                 return "true"
+            if args[-1] in ("{{json .Mounts}}", "{{json .Config.Env}}"):
+                return "[]"
             if "sovereign.synthetic.run" in args[-1]:
                 return name
             return json.dumps({name: {"NetworkID": handle.network_id}})

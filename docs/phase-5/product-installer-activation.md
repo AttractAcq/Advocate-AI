@@ -32,12 +32,25 @@ checks it, changes the active record, and retires the replaced runtime.
   --root /path/to/new-synthetic-product-install
 ```
 
+For a synthetic Core state restored from restic, the first `install` can also
+specify `--core-state /path/to/restored` and
+`--lab-password-file /path/to/owner-only-lab-password`. The installer validates
+both paths and writes only their canonical paths to an owner-only mount record.
+It does not copy the credential into the signed release or backup. Later
+installs, rollback and `recover` reuse those paths automatically. `status`
+checks the running Core's bind sources, read/write flags, user and environment;
+a missing or changed mount fails the check. This mount record is fixed for the
+synthetic installation, so changing state locations requires a separate
+reviewed migration instead of an implicit install option.
+
 The [CI product image rehearsal](product-image-release-rehearsal.md) creates
 two distinct ephemeral signed product versions, installs the first, rejects a
 missing candidate while preserving the first, installs the second, and rolls
 back to the first. It then stops the Console, restarts the signed active
 release through `recover`, checks health, and verifies that the previous
-labelled runtime was retired. The rehearsal removes the disposable containers
+labelled runtime was retired. It also starts the first release with cleanly
+restored fictional Core state and verifies that its permissions and history
+persist through update, rollback and recovery. The rehearsal removes the disposable containers
 when finished.
 
 Each new install root gets an owner-only random installation identifier. New
