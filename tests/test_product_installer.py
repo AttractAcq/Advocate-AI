@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from infrastructure.deploy.container_runtime import RuntimeHandle
+from infrastructure.deploy.product_installer import (
+    ProductInstallError, install_product, product_status, rollback_product,
+)
+
+
+class ProductInstallerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.root = self.base / "install"
+        self.key = self.base / "trusted.pem"
+        self.crane = self.base / "crane"
+        self.config = self.base / "console-config.json"
+        self.config.write_text('{"schema":1,"oidc_issuer":null}')
+        self.first = self.base / "first"
+        self.second = self.base / "second"
+        for bundle, version in ((self.first, b"first"), (self.second, b"second")):
+            bundle.mkdir()
+            (bundle / "release-manifest.json").write_bytes(version)
+        self.old = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        self.new = RuntimeHandle("d" * 64, "e" * 64, "f" * 64)
+
+    def test_activate_then_rollback_and_idempotence(self) -> None:
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=[self.old, self.new, self.old]) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.stop_runtime") as stop:
+            first = install_product(self.first, self.key, self.crane, self.config, self.root)
+            self.assertEqual(first["result"], "activated")
+            self.assertEqual(product_status(self.root, self.key)["active"], first["active"])
+            self.assertEqual(install_product(self.first, self.key, self.crane,
+                                             self.config, self.root)["result"], "unchanged")
+            second = install_product(self.second, self.key, self.crane,
+                                     self.config, self.root)
+            self.assertEqual(second["previous"], first["active"])
+            self.assertEqual(stop.call_args.args[0], self.old)
+            rolled = rollback_product(self.root, self.key, self.crane)
+            self.assertEqual(rolled["active"], first["active"])
+            self.assertEqual(rolled["previous"], second["active"])
+            self.assertEqual(stop.call_args.args[0], self.new)
+            self.assertEqual(start.call_count, 3)
+            self.assertGreaterEqual(probe.call_count, 3)
+
+    def test_failed_candidate_and_state_write_preserve_previous(self) -> None:
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.probe_runtime"), \
+             patch("infrastructure.deploy.product_installer.stop_runtime") as stop:
+            with patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                       return_value=self.old):
+                first = install_product(self.first, self.key, self.crane,
+                                        self.config, self.root)
+            with patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                       side_effect=ValueError("candidate failed")):
+                with self.assertRaises(ValueError):
+                    install_product(self.second, self.key, self.crane,
+                                    self.config, self.root)
+            self.assertEqual(product_status(self.root, self.key)["active"], first["active"])
+            stop.assert_not_called()
+            with patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                       return_value=self.new), \
+                 patch("infrastructure.deploy.product_installer._write_state",
+                       side_effect=OSError("state write failed")):
+                with self.assertRaises(OSError):
+                    install_product(self.second, self.key, self.crane,
+                                    self.config, self.root)
+            self.assertEqual(product_status(self.root, self.key)["active"], first["active"])
+            stop.assert_called_once_with(self.new)
+
+    def test_rejects_tampered_state_before_using_docker_ids(self) -> None:
+        self.root.mkdir(mode=0o700)
+        state = self.root / "product-state.json"
+        state.write_text(json.dumps({"schema": 1, "active": "a" * 24,
+                                     "previous": None,
+                                     "runtime": {"network_id": "../other",
+                                                 "core_id": "b" * 64,
+                                                 "console_id": "c" * 64}}))
+        state.chmod(0o600)
+        with patch("infrastructure.deploy.product_installer.probe_runtime") as probe:
+            with self.assertRaises(ProductInstallError):
+                product_status(self.root, self.key)
+            probe.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

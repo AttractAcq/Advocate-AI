@@ -16,7 +16,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_candidate_bundle, create_product_bundle, verify_bundle
 from infrastructure.deploy.container_runtime import (
-    probe_runtime, start_verified_bundle, stop_runtime, switch_verified_bundle,
+    RuntimeHandle, stop_runtime,
+)
+from infrastructure.deploy.product_installer import (
+    install_product, product_status, rollback_product,
 )
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
@@ -157,30 +160,49 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 if verify_bundle(product_bundle, trusted) != created:
                     raise AssertionError("signed product trial did not verify")
                 result["product_bundle"] = "verified"
+                second_bundle = root / "signed-product-trial-2"
+                create_product_bundle(payload, second_bundle, private,
+                                      "synthetic-product-trial-2", descriptors,
+                                      crane=crane)
                 descriptor, config_name = tempfile.mkstemp(prefix=".sovereign-console-config-",
                                                            dir=Path.home())
                 config = Path(config_name)
+                install_root = root / "product-install"
                 try:
                     with os.fdopen(descriptor, "wb") as stream:
                         stream.write(b'{"schema":1,"oidc_issuer":null}\n')
                     config.chmod(0o644)
-                    runtime = start_verified_bundle(product_bundle, trusted, crane, config)
+                    first = install_product(product_bundle, trusted, crane, config,
+                                            install_root)
                     try:
+                        if product_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("installed product status mismatch")
                         result["runtime"] = "healthy-isolated"
                         try:
-                            switch_verified_bundle(runtime, root / "missing-candidate",
-                                                   trusted, crane, config)
+                            install_product(root / "missing-candidate", trusted,
+                                            crane, config, install_root)
                         except (OSError, ValueError):
-                            probe_runtime(runtime)
+                            if product_status(install_root, trusted)["active"] != first["active"]:
+                                raise AssertionError("rejected candidate changed active release")
                             result["failed_candidate"] = "previous-runtime-preserved"
                         else:
                             raise AssertionError("missing candidate unexpectedly activated")
-                        runtime = switch_verified_bundle(runtime, product_bundle,
-                                                         trusted, crane, config)
-                        probe_runtime(runtime)
+                        second = install_product(second_bundle, trusted, crane,
+                                                 config, install_root)
+                        if second["previous"] != first["active"]:
+                            raise AssertionError("previous product release was not retained")
+                        if product_status(install_root, trusted)["active"] != second["active"]:
+                            raise AssertionError("replacement product status mismatch")
                         result["switchover"] = "healthy-candidate-activated"
+                        restored = rollback_product(install_root, trusted, crane)
+                        if restored["active"] != first["active"]:
+                            raise AssertionError("product rollback did not restore prior release")
+                        if product_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("rolled back product is unhealthy")
+                        result["rollback"] = "previous-release-restored"
                     finally:
-                        stop_runtime(runtime)
+                        state = json.loads((install_root / "product-state.json").read_text())
+                        stop_runtime(RuntimeHandle(**state["runtime"]))
                 finally:
                     config.unlink(missing_ok=True)
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
