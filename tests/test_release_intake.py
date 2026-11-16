@@ -128,10 +128,16 @@ class ReleaseIntakeTests(unittest.TestCase):
         sbom["components"] = [
             {"type": "library", "bom-ref": "pkg:npm/fictional@1.0.0", "name": "fictional",
              "version": "1.0.0", "purl": "pkg:npm/fictional@1.0.0"},
+            {"type": "application", "bom-ref": "pkg:generic/python@3.14.10", "name": "python",
+             "version": "3.14.10", "purl": "pkg:generic/python@3.14.10"},
             {"type": "file", "bom-ref": "file-1", "name": "/app/package.json",
              "hashes": [{"alg": "SHA-256", "content": "d" * 64}]},
         ]
         self.assertEqual(self.verify(scan=scan, sbom=sbom)["archive_sha256"], "c" * 64)
+        sbom["components"][1].pop("purl")
+        with self.assertRaises(IntakeError):
+            self.verify(scan=scan, sbom=sbom)
+        sbom["components"][1]["purl"] = "pkg:generic/python@3.14.10"
         sbom["components"][0].pop("purl")
         with self.assertRaises(IntakeError):
             self.verify(scan=scan, sbom=sbom)

@@ -67,6 +67,10 @@ or credential should be placed in this lab.
    npm run dev -- --host 127.0.0.1 --port 18101
    ```
 
+   Vite serves the [runtime Console configuration](../phase-5/console-runtime-config.md)
+   from this environment variable for the loopback lab. The production build
+   does not bake in the issuer; its web server must supply the reviewed JSON.
+
    Open `http://127.0.0.1:18101/`. The browser uses Keycloak's authorization
    code flow with PKCE. The local container's generated credentials are in
    ignored `infrastructure/lab/runtime/phase3-identity/test-credentials.json`.
