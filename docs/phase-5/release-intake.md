@@ -19,7 +19,7 @@ The command exits nonzero for missing, oversized, linked, altered or stale
 evidence; a mismatched image digest; an unsupported/old scanner report; an
 empty scan; malformed findings; any HIGH, CRITICAL or UNKNOWN vulnerability;
 or an unresolved or candidate-only SBOM. For a [Syft-generated inventory](upstream-release-tools.md),
-file entries require SHA-256 hashes and library entries require a package URL
+file entries require SHA-256 hashes and library or application entries require a package URL
 and version. The earlier fictional test format requires a version and SHA-256
 for each component. A generated archive candidate also requires a scan that
 binds the matching archive hash and manifest digest, scanner binary hash,
