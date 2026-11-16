@@ -9,12 +9,22 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_candidate_bundle, create_product_bundle, verify_bundle
+from infrastructure.deploy.container_runtime import (
+    RuntimeError as ContainerRuntimeError, RuntimeHandle, start_verified_bundle,
+    stop_runtime,
+)
+from infrastructure.deploy.product_installer import (
+    cleanup_product_orphans, install_product, product_status, recover_product,
+    rollback_product,
+)
+from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -154,6 +164,98 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 if verify_bundle(product_bundle, trusted) != created:
                     raise AssertionError("signed product trial did not verify")
                 result["product_bundle"] = "verified"
+                second_bundle = root / "signed-product-trial-2"
+                create_product_bundle(payload, second_bundle, private,
+                                      "synthetic-product-trial-2", descriptors,
+                                      crane=crane)
+                descriptor, config_name = tempfile.mkstemp(prefix=".sovereign-console-config-",
+                                                           dir=Path.home())
+                config = Path(config_name)
+                install_root = root / "product-install"
+                try:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(b'{"schema":1,"oidc_issuer":null}\n')
+                    config.chmod(0o644)
+                    first = install_product(product_bundle, trusted, crane, config,
+                                            install_root)
+                    try:
+                        unit = root / "sovereign-synthetic-recover.service"
+                        write_recovery_unit(unit, install_root, trusted, crane,
+                                            Path(sys.executable), Path.cwd())
+                        checked = subprocess.run(["systemd-analyze", "verify", str(unit)],
+                                                 capture_output=True, text=True, timeout=30)
+                        if checked.returncode:
+                            raise AssertionError("boot recovery unit failed systemd verification: "
+                                                 + checked.stderr[-2000:])
+                        result["boot_unit"] = "syntax-verified"
+                        if product_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("installed product status mismatch")
+                        result["runtime"] = "healthy-isolated"
+                        installation_id = (install_root / "installation-id").read_text().strip()
+                        orphan = start_verified_bundle(product_bundle, trusted, crane,
+                                                       config, installation_id=installation_id)
+                        try:
+                            cleaned = cleanup_product_orphans(install_root, trusted)
+                            if (cleaned["containers"], cleaned["networks"]) != (2, 1):
+                                raise AssertionError("orphan cleanup did not remove exactly one runtime")
+                            if product_status(install_root, trusted)["active"] != first["active"]:
+                                raise AssertionError("orphan cleanup changed the active runtime")
+                            try:
+                                _docker("inspect", orphan.core_id)
+                            except subprocess.CalledProcessError:
+                                pass
+                            else:
+                                raise AssertionError("orphan Core container survived cleanup")
+                            result["orphan_cleanup"] = "scoped-runtime-retired"
+                        finally:
+                            stop_runtime(orphan)
+                        try:
+                            install_product(root / "missing-candidate", trusted,
+                                            crane, config, install_root)
+                        except (OSError, ValueError):
+                            if product_status(install_root, trusted)["active"] != first["active"]:
+                                raise AssertionError("rejected candidate changed active release")
+                            result["failed_candidate"] = "previous-runtime-preserved"
+                        else:
+                            raise AssertionError("missing candidate unexpectedly activated")
+                        second = install_product(second_bundle, trusted, crane,
+                                                 config, install_root)
+                        if second["previous"] != first["active"]:
+                            raise AssertionError("previous product release was not retained")
+                        if product_status(install_root, trusted)["active"] != second["active"]:
+                            raise AssertionError("replacement product status mismatch")
+                        result["switchover"] = "healthy-candidate-activated"
+                        restored = rollback_product(install_root, trusted, crane)
+                        if restored["active"] != first["active"]:
+                            raise AssertionError("product rollback did not restore prior release")
+                        if product_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("rolled back product is unhealthy")
+                        result["rollback"] = "previous-release-restored"
+                        stopped_state = json.loads((install_root / "product-state.json").read_text())
+                        stopped_runtime = RuntimeHandle(**stopped_state["runtime"])
+                        _docker("stop", stopped_runtime.console_id)
+                        try:
+                            product_status(install_root, trusted)
+                        except ContainerRuntimeError:
+                            pass
+                        else:
+                            raise AssertionError("stopped Console unexpectedly passed health")
+                        recovery = recover_product(install_root, trusted, crane)
+                        if recovery["result"] != "recovered" or \
+                                product_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("stopped runtime did not recover from staged bundle")
+                        try:
+                            _docker("inspect", stopped_runtime.core_id)
+                        except subprocess.CalledProcessError:
+                            pass
+                        else:
+                            raise AssertionError("recovered old runtime was not retired")
+                        result["recovery"] = "staged-release-restarted"
+                    finally:
+                        state = json.loads((install_root / "product-state.json").read_text())
+                        stop_runtime(RuntimeHandle(**state["runtime"]))
+                finally:
+                    config.unlink(missing_ok=True)
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
         return result
     except Exception:

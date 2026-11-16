@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -19,6 +20,7 @@ RESTIC_VERSION = "0.19.1"
 MANIFEST = "sovereign-snapshot-manifest.json"
 SNAPSHOT_TAG = "sovereign-ai"
 SNAPSHOT_HOST = "sovereign-ai"
+_SNAPSHOT_ID = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class ResticError(ValueError):
@@ -162,10 +164,70 @@ def restore_snapshot(snapshot_id: str, repository: Path, password_file: Path,
                 "files": len(names), "restic_version": RESTIC_VERSION}
 
 
+def verify_repository(repository: Path, password_file: Path, restic: Path,
+                      restic_sha256: str, max_age_hours: int,
+                      verification_staging: Path,
+                      now: datetime | None = None) -> dict[str, object]:
+    """Require a recent Sovereign snapshot and prove a clean private restore."""
+    if type(max_age_hours) is not int or not 1 <= max_age_hours <= 168:
+        raise ResticError("snapshot maximum age must be 1–168 hours")
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ResticError("verification clock must have a timezone")
+    current = current.astimezone(timezone.utc)
+    if (verification_staging.is_symlink() or not verification_staging.is_dir()
+            or stat.S_IMODE(verification_staging.stat().st_mode) & 0o077
+            or verification_staging.resolve().is_relative_to(repository.resolve())
+            or repository.resolve().is_relative_to(verification_staging.resolve())):
+        raise ResticError("verification staging must be a separate owner-only directory")
+    _preflight(restic, restic_sha256, repository, password_file)
+    try:
+        rows = json.loads(_run(restic, repository, password_file, "snapshots", "--json",
+                               "--tag", SNAPSHOT_TAG, "--host", SNAPSHOT_HOST),
+                          object_pairs_hook=_unique_object)
+    except (ValueError, UnicodeError) as exc:
+        raise ResticError("invalid restic snapshot inventory") from exc
+    if not isinstance(rows, list) or not rows:
+        raise ResticError("no Sovereign snapshot available")
+    seen: set[str] = set()
+    latest: tuple[datetime, str] | None = None
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("id"), str)
+                or not _SNAPSHOT_ID.fullmatch(row["id"]) or row["id"] in seen
+                or row.get("hostname") != SNAPSHOT_HOST
+                or not isinstance(row.get("tags"), list)
+                or SNAPSHOT_TAG not in row["tags"]
+                or not isinstance(row.get("time"), str)):
+            raise ResticError("invalid or out-of-scope snapshot")
+        seen.add(row["id"])
+        try:
+            created = datetime.fromisoformat(row["time"].replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ResticError("invalid snapshot timestamp") from exc
+        if created.tzinfo is None or created > current + timedelta(minutes=5):
+            raise ResticError("snapshot timestamp is missing a zone or in the future")
+        created = created.astimezone(timezone.utc)
+        if latest is None or created > latest[0]:
+            latest = (created, row["id"])
+    if latest is None:
+        raise ResticError("no Sovereign snapshot available")
+    age = max(timedelta(), current - latest[0])
+    if age > timedelta(hours=max_age_hours):
+        raise ResticError("latest Sovereign snapshot is stale")
+    with tempfile.TemporaryDirectory(prefix=".sovereign-verify-",
+                                     dir=verification_staging) as temporary:
+        restored = restore_snapshot(latest[1], repository, password_file, restic,
+                                    restic_sha256, Path(temporary) / "restored")
+    return {"status": "verified", "snapshot_count": len(rows),
+            "latest_snapshot_id": latest[1], "age_seconds": int(age.total_seconds()),
+            "max_age_hours": max_age_hours, "restored_files": restored["files"],
+            "restic_version": RESTIC_VERSION}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local encrypted restic snapshot adapter")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("create", "restore"):
+    for name in ("create", "restore", "verify"):
         command = commands.add_parser(name)
         command.add_argument("--repository", required=True, type=Path)
         command.add_argument("--password-file", required=True, type=Path)
@@ -174,17 +236,24 @@ def main() -> None:
         if name == "create":
             command.add_argument("--spec", required=True, type=Path)
             command.add_argument("--staging-parent", required=True, type=Path)
-        else:
+        elif name == "restore":
             command.add_argument("--snapshot-id", required=True)
             command.add_argument("--destination", required=True, type=Path)
+        else:
+            command.add_argument("--max-age-hours", required=True, type=int)
+            command.add_argument("--verification-staging", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "create":
             result = create_snapshot(args.spec, args.repository, args.password_file,
                                      args.restic, args.restic_sha256, args.staging_parent)
-        else:
+        elif args.command == "restore":
             result = restore_snapshot(args.snapshot_id, args.repository, args.password_file,
                                       args.restic, args.restic_sha256, args.destination)
+        else:
+            result = verify_repository(args.repository, args.password_file,
+                                       args.restic, args.restic_sha256, args.max_age_hours,
+                                       args.verification_staging)
     except (ResticError, BackupError, OSError, ValueError) as exc:
         parser.exit(1, f"restic repository: {exc}\n")
     print(json.dumps(result, sort_keys=True))
