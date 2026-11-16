@@ -1,4 +1,7 @@
-"""Validate a synthetic release manifest before Phase 5 signing exists."""
+"""Validate the original Phase 1 synthetic fixture manifest.
+
+New signed release directories use :mod:`infrastructure.release.bundle`.
+"""
 
 from __future__ import annotations
 
