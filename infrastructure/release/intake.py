@@ -16,6 +16,8 @@ import re
 MAX_EVIDENCE_BYTES = 20 * 1024 * 1024
 MAX_AGE = timedelta(days=30)
 MIN_SCANNER_VERSION = (0, 76, 2)
+APPROVED_SYFT_VERSION = "1.57.1"
+APPROVED_CRANE_VERSION = "0.22.1"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _IMAGE = re.compile(r"[a-z0-9][a-z0-9./_:-]*@sha256:([0-9a-f]{64})\Z")
 
@@ -59,6 +61,31 @@ def _recent(value: object, now: datetime) -> None:
         raise IntakeError("invalid evidence timestamp") from exc
     if stamped.tzinfo is None or stamped > now + timedelta(minutes=5) or now - stamped > MAX_AGE:
         raise IntakeError("evidence timestamp is stale or in the future")
+
+
+def _archive_scan_provenance(scan: dict[str, object], archive_sha256: str,
+                             image_digest: str) -> None:
+    provenance = scan.get("Sovereign")
+    required = {"Source", "ArchiveSHA256", "ManifestDigest", "ScannerBinarySHA256",
+                "DatabaseSHA256", "DatabaseUpdatedAt", "DatabaseNextUpdate"}
+    if (not isinstance(provenance, dict) or set(provenance) != required or
+            provenance["Source"] != "offline-local-docker-archive" or
+            provenance["ArchiveSHA256"] != archive_sha256 or
+            provenance["ManifestDigest"] != f"sha256:{image_digest}" or
+            any(not isinstance(provenance[name], str) or
+                    not _DIGEST.fullmatch(provenance[name])
+                    for name in ("ScannerBinarySHA256", "DatabaseSHA256"))):
+        raise IntakeError("scan lacks matching local archive provenance")
+    try:
+        scanned = datetime.fromisoformat(scan["CreatedAt"].replace("Z", "+00:00"))
+        updated = datetime.fromisoformat(provenance["DatabaseUpdatedAt"].replace("Z", "+00:00"))
+        next_update = datetime.fromisoformat(provenance["DatabaseNextUpdate"].replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise IntakeError("invalid vulnerability database date") from exc
+    if (scanned.tzinfo is None or updated.tzinfo is None or next_update.tzinfo is None or
+            updated > scanned or scanned > next_update or
+            scanned - updated > timedelta(days=7)):
+        raise IntakeError("vulnerability database does not cover the scan")
 
 
 def _sha256_hashes(component: object) -> set[str]:
@@ -119,10 +146,29 @@ def verify_intake(scan_path: Path, sbom_path: Path, image_ref: str,
         raise IntakeError("missing SBOM metadata")
     _recent(metadata.get("timestamp"), now)
     properties = metadata.get("properties")
-    if (not isinstance(properties, list) or
-            not any(isinstance(item, dict) and item.get("name") == "sovereign-ai:inventory-status" and
-                    item.get("value") == "resolved-release-candidate" for item in properties)):
+    if not isinstance(properties, list):
         raise IntakeError("candidate-only or unresolved SBOM")
+    values: dict[str, object] = {}
+    for item in properties:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            name = item["name"]
+            if name.startswith("sovereign-ai:") and name in values:
+                raise IntakeError("duplicate release provenance property")
+            values[name] = item.get("value")
+    status = values.get("sovereign-ai:inventory-status")
+    if status not in {"resolved-release-candidate", "generated-from-validated-archive"}:
+        raise IntakeError("candidate-only or unresolved SBOM")
+    if status == "generated-from-validated-archive":
+        tools = metadata.get("tools")
+        generated_by = tools.get("components") if isinstance(tools, dict) else None
+        if (not isinstance(generated_by, list) or
+                not any(isinstance(item, dict) and item.get("name") == "syft" and
+                        item.get("version") == APPROVED_SYFT_VERSION for item in generated_by) or
+                values.get("sovereign-ai:crane-version") != APPROVED_CRANE_VERSION or
+                not isinstance(values.get("sovereign-ai:archive-sha256"), str) or
+                not _DIGEST.fullmatch(values["sovereign-ai:archive-sha256"])):
+            raise IntakeError("missing approved image inventory provenance")
+        _archive_scan_provenance(scan, values["sovereign-ai:archive-sha256"], match.group(1))
     image_component = metadata.get("component")
     repository = image_ref.split("@", 1)[0]
     if (not isinstance(image_component, dict) or image_component.get("name") != repository or
@@ -134,13 +180,34 @@ def verify_intake(scan_path: Path, sbom_path: Path, image_ref: str,
     references: set[str] = set()
     for component in components:
         if (not isinstance(component, dict) or not isinstance(component.get("bom-ref"), str) or
-                not isinstance(component.get("name"), str) or not isinstance(component.get("version"), str) or
-                not component["name"] or not component["version"] or
-                not _sha256_hashes(component) or component["bom-ref"] in references):
+                not component["bom-ref"] or not isinstance(component.get("name"), str) or
+                not component["name"] or component["bom-ref"] in references):
             raise IntakeError("unresolved or duplicate SBOM component")
+        if status == "generated-from-validated-archive":
+            kind = component.get("type")
+            if kind == "file":
+                resolved = bool(_sha256_hashes(component))
+            elif kind in {"library", "application"}:
+                resolved = (isinstance(component.get("version"), str) and
+                            bool(component["version"]) and
+                            isinstance(component.get("purl"), str) and
+                            component["purl"].startswith("pkg:"))
+            elif kind == "operating-system":
+                resolved = isinstance(component.get("version"), str) and bool(component["version"])
+            else:
+                resolved = (isinstance(component.get("version"), str) and
+                            bool(component["version"]) and bool(_sha256_hashes(component)))
+            if not resolved:
+                raise IntakeError("unresolved SBOM component")
+        elif (not isinstance(component.get("version"), str) or not component["version"] or
+              not _sha256_hashes(component)):
+            raise IntakeError("unresolved SBOM component")
         references.add(component["bom-ref"])
-    return {"status": "preflight-pass", "image": image_ref, "components": len(components),
-            "scan_sha256": scan_sha256, "sbom_sha256": sbom_sha256}
+    result = {"status": "preflight-pass", "image": image_ref, "components": len(components),
+              "scan_sha256": scan_sha256, "sbom_sha256": sbom_sha256}
+    if status == "generated-from-validated-archive":
+        result["archive_sha256"] = values["sovereign-ai:archive-sha256"]
+    return result
 
 
 def main() -> None:

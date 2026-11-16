@@ -8,8 +8,10 @@ AES-256-GCM using a new random nonce per backup. The key is a separate
 inventory before placing anything in a new destination directory. Wrong keys,
 changed bytes, unsafe paths and duplicate entries fail closed.
 
-This format has a **synthetic 1 GiB total / 256 MiB per-file limit**. It does
-not yet back up PostgreSQL, Keycloak, model files, Wazuh or vessel NAS data.
+This format has a **synthetic 1 GiB total / 256 MiB per-file limit**. This
+archive workflow does not back up PostgreSQL, Keycloak, model files, Wazuh or
+vessel NAS data. A separate [PostgreSQL and restic rehearsal](postgres-restic-recovery.md)
+exercises a fictional database; it is not a coordinated product backup.
 Only the named application state is included; backup key material must have
 separate custody. Plaintext snapshots and the authenticated restore staging
 file use private temporary directories on the local filesystem. Real data
@@ -42,6 +44,11 @@ Keep the key on separately protected media. A lost key makes the backup
 unrecoverable. The tool does not manage key rotation, offsite copies,
 retention, scheduling or media scanning. Those require approved owners and
 target-host evidence before production.
+
+The [local restic adapter](restic-repository.md) now offers an encrypted
+repository path for the same allowlisted SQLite and file snapshots, with a
+full data check and clean restore. It remains a synthetic workflow pending
+protected staging, key custody and full-stack target recovery.
 
 ## Local rehearsal, 16 November 2026
 
