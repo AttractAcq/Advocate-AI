@@ -89,11 +89,32 @@ class DeploymentReceipt(Metadata):
     health: Literal["healthy", "degraded", "offline"]
 
 
+class LicenceStatus(Metadata):
+    status: Literal["active", "suspended", "expired"]
+
+
+class TicketStatus(Metadata):
+    status: Literal["triaged", "waiting", "resolved"]
+
+
+class MaintenanceStatus(Metadata):
+    status: Literal["planned", "completed", "deferred"]
+
+
 KIND_MODELS = {"customer": Customer, "release": Release,
                "deployment": Deployment, "licence": Licence,
                "ticket": Ticket, "maintenance": Maintenance,
                "receipt": DeploymentReceipt}
 KINDS = set(KIND_MODELS)
+STATUS_TRANSITIONS = {
+    "licence": {"pending": {"active", "expired"},
+                "active": {"suspended", "expired"},
+                "suspended": {"active", "expired"}, "expired": set()},
+    "ticket": {"open": {"triaged"}, "triaged": {"waiting", "resolved"},
+               "waiting": {"triaged", "resolved"}, "resolved": set()},
+    "maintenance": {"planned": {"completed", "deferred"},
+                    "completed": set(), "deferred": {"planned"}},
+}
 
 
 def _canonical(value: object) -> bytes:
@@ -191,6 +212,20 @@ class FleetCatalog:
             raise FleetError(f"missing {kind} reference")
         return json.loads(row["payload"])
 
+    @staticmethod
+    def _append_audit(connection: sqlite3.Connection, action: str, kind: str,
+                      code: str, payload: str) -> None:
+        last = connection.execute("SELECT chain_hash FROM audit ORDER BY seq DESC "
+                                  "LIMIT 1").fetchone()
+        previous = last["chain_hash"] if last else "0" * 64
+        at = datetime.now(timezone.utc).isoformat()
+        event = {"at": at, "action": action, "kind": kind,
+                 "code": code, "digest": _digest(payload)}
+        chain = hashlib.sha256(previous.encode() + _canonical(event)).hexdigest()
+        connection.execute("INSERT INTO audit(at, action, kind, code, digest, "
+                           "prev_hash, chain_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                           (at, action, kind, code, event["digest"], previous, chain))
+
     def add(self, kind: str, record: Metadata) -> dict[str, object]:
         if kind not in KIND_MODELS or type(record) is not KIND_MODELS[kind]:
             raise FleetError("unknown Fleet record type")
@@ -220,17 +255,27 @@ class FleetCatalog:
                                    (kind, code, payload))
             except sqlite3.IntegrityError as exc:
                 raise FleetError("duplicate Fleet record code") from exc
-            last = connection.execute("SELECT chain_hash FROM audit ORDER BY seq DESC "
-                                      "LIMIT 1").fetchone()
-            previous = last["chain_hash"] if last else "0" * 64
-            at = datetime.now(timezone.utc).isoformat()
-            event = {"at": at, "action": "create", "kind": kind,
-                     "code": code, "digest": _digest(payload)}
-            chain = hashlib.sha256(previous.encode() + _canonical(event)).hexdigest()
-            connection.execute("INSERT INTO audit(at, action, kind, code, digest, "
-                               "prev_hash, chain_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                               (at, "create", kind, code, event["digest"], previous, chain))
+            self._append_audit(connection, "create", kind, code, payload)
         return data
+
+    def transition(self, kind: str, code: str, status: str) -> dict[str, object]:
+        if kind not in STATUS_TRANSITIONS:
+            raise FleetError("unsupported Fleet lifecycle")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify(connection)
+            data = self._require(connection, kind, code)
+            previous = data["status"]
+            if status not in STATUS_TRANSITIONS[kind][previous]:
+                raise FleetError("invalid Fleet status transition")
+            data["status"] = status
+            validated = KIND_MODELS[kind].model_validate(data)
+            payload = _canonical(validated.model_dump(mode="json")).decode()
+            connection.execute("UPDATE records SET payload=? WHERE kind=? AND code=?",
+                               (payload, kind, code))
+            self._append_audit(connection, f"status:{previous}:{status}", kind,
+                               code, payload)
+        return validated.model_dump(mode="json")
 
     def list(self, kind: str) -> list[dict[str, object]]:
         if kind not in KINDS:
