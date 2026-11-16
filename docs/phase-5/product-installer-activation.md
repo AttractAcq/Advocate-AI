@@ -43,7 +43,9 @@ staged release. Recovery retires the previous containers only when their
 labels and network attachment still match the saved record. It does not
 enable boot-time restart or automatically remove orphaned candidates after
 a host crash, provision TLS or a real identity issuer, load a model, configure
-the vessel network, or prove clean-host disaster recovery. The older
+the vessel network, or prove clean-host disaster recovery. The
+[synthetic boot unit renderer](boot-recovery-service.md) prepares a systemd
+recovery unit for later target-host validation. The older
 [six-service staging installer](installer.md) remains a separate loopback
 configuration exercise. Target installation and recovery gates remain in the
 [blocker tracker](../blockers-and-build-queue.md).

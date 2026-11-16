@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from cryptography.hazmat.primitives import serialization
@@ -21,6 +22,7 @@ from infrastructure.deploy.container_runtime import (
 from infrastructure.deploy.product_installer import (
     install_product, product_status, recover_product, rollback_product,
 )
+from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -175,6 +177,15 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     first = install_product(product_bundle, trusted, crane, config,
                                             install_root)
                     try:
+                        unit = root / "sovereign-synthetic-recover.service"
+                        write_recovery_unit(unit, install_root, trusted, crane,
+                                            Path(sys.executable), Path.cwd())
+                        checked = subprocess.run(["systemd-analyze", "verify", str(unit)],
+                                                 capture_output=True, text=True, timeout=30)
+                        if checked.returncode:
+                            raise AssertionError("boot recovery unit failed systemd verification: "
+                                                 + checked.stderr[-2000:])
+                        result["boot_unit"] = "syntax-verified"
                         if product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("installed product status mismatch")
                         result["runtime"] = "healthy-isolated"
