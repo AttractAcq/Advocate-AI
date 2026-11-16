@@ -35,7 +35,8 @@ class Customer(Metadata):
 class Release(Metadata):
     code: str = Field(pattern=r"^REL-[A-Z0-9]{4,16}$")
     version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
-    bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    signing_key_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: Literal["candidate", "approved", "retired"]
 
 
@@ -93,6 +94,10 @@ class LicenceStatus(Metadata):
     status: Literal["active", "suspended", "expired"]
 
 
+class ReleaseStatus(Metadata):
+    status: Literal["approved", "retired"]
+
+
 class TicketStatus(Metadata):
     status: Literal["triaged", "waiting", "resolved"]
 
@@ -107,6 +112,8 @@ KIND_MODELS = {"customer": Customer, "release": Release,
                "receipt": DeploymentReceipt}
 KINDS = set(KIND_MODELS)
 STATUS_TRANSITIONS = {
+    "release": {"candidate": {"approved"}, "approved": {"retired"},
+                "retired": set()},
     "licence": {"pending": {"active", "expired"},
                 "active": {"suspended", "expired"},
                 "suspended": {"active", "expired"}, "expired": set()},
@@ -236,6 +243,12 @@ class FleetCatalog:
             raise FleetError("invalid offline receipt issuer")
         return self._add("receipt", record, f"import-signed:{issuer_key_id}")
 
+    def add_verified_release(self, record: Release) -> dict[str, object]:
+        if record.status != "candidate":
+            raise FleetError("signed release import must start as candidate")
+        return self._add("release", record,
+                         f"import-signed-release:{record.signing_key_id}")
+
     def _add(self, kind: str, record: Metadata, action: str) -> dict[str, object]:
         if kind not in KIND_MODELS or type(record) is not KIND_MODELS[kind]:
             raise FleetError("unknown Fleet record type")
@@ -247,7 +260,9 @@ class FleetCatalog:
             self._verify(connection)
             if kind == "deployment":
                 self._require(connection, "customer", data["customer_code"])
-                self._require(connection, "release", data["release_code"])
+                release = self._require(connection, "release", data["release_code"])
+                if release["status"] != "approved":
+                    raise FleetError("deployment requires an approved release")
             elif kind == "licence":
                 self._require(connection, "customer", data["customer_code"])
                 vessel = self._require(connection, "deployment", data["vessel_code"])
@@ -278,6 +293,13 @@ class FleetCatalog:
             previous = data["status"]
             if status not in STATUS_TRANSITIONS[kind][previous]:
                 raise FleetError("invalid Fleet status transition")
+            if kind == "release":
+                first = connection.execute(
+                    "SELECT action FROM audit WHERE kind='release' AND code=? "
+                    "ORDER BY seq LIMIT 1", (code,)).fetchone()
+                expected = f"import-signed-release:{data['signing_key_id']}"
+                if first is None or first["action"] != expected:
+                    raise FleetError("release lacks verified import provenance")
             data["status"] = status
             validated = KIND_MODELS[kind].model_validate(data)
             payload = _canonical(validated.model_dump(mode="json")).decode()

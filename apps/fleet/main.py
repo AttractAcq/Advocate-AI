@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
 from services.fleet.catalog import (
     Customer, Deployment, FleetCatalog, FleetError,
     FleetIntegrityError, Licence, LicenceStatus, Maintenance, MaintenanceStatus,
-    Release, Ticket, TicketStatus,
+    ReleaseStatus, Ticket, TicketStatus,
 )
 from services.fleet.offline_import import (
     SignedDeploymentReceipt, load_import_key, verify_signed_receipt,
@@ -96,13 +96,13 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     def customers():
         return list_records("customer")
 
-    @router.post("/releases", status_code=201)
-    def create_release(record: Release):
-        return add("release", record)
-
     @router.get("/releases")
     def releases():
         return list_records("release")
+
+    @router.patch("/releases/{code}/status")
+    def update_release(code: str, change: ReleaseStatus):
+        return transition("release", code, change.status)
 
     @router.post("/deployments", status_code=201)
     def create_deployment(record: Deployment):
