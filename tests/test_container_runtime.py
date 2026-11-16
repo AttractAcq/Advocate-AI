@@ -54,6 +54,32 @@ class ContainerRuntimeTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _archive_image_ids(archive, "core")
 
+    def test_nested_oci_index_selects_matching_docker_configuration(self) -> None:
+        config = b'{"architecture":"amd64","os":"linux"}'
+        config_hash = hashlib.sha256(config).hexdigest()
+
+        def encoded(value: object) -> bytes:
+            return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+        image_manifest = encoded({"schemaVersion": 2,
+                                  "config": {"digest": "sha256:" + config_hash}})
+        image_hash = hashlib.sha256(image_manifest).hexdigest()
+        nested = encoded({"schemaVersion": 2, "manifests": [{"digest": "sha256:" + image_hash}]})
+        nested_hash = hashlib.sha256(nested).hexdigest()
+        index = encoded({"schemaVersion": 2, "manifests": [{"digest": "sha256:" + nested_hash}]})
+        docker_manifest = encoded([{"Config": "blobs/sha256/" + config_hash,
+                                    "RepoTags": ["sovereign-console:synthetic"], "Layers": []}])
+        archive = self.root / "console.tar"
+        with tarfile.open(archive, "w") as stream:
+            for name, body in (("manifest.json", docker_manifest), ("index.json", index),
+                               ("blobs/sha256/" + config_hash, config),
+                               ("blobs/sha256/" + image_hash, image_manifest),
+                               ("blobs/sha256/" + nested_hash, nested)):
+                info = tarfile.TarInfo(name)
+                info.size = len(body)
+                stream.addfile(info, io.BytesIO(body))
+        self.assertIn("sha256:" + image_hash, _archive_image_ids(archive, "console"))
+
     def test_non_product_bundle_never_reaches_docker(self) -> None:
         with patch("infrastructure.deploy.container_runtime.verify_bundle",
                    return_value={"schema": 3}), \

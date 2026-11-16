@@ -35,64 +35,86 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
 def _archive_image_ids(archive: Path, role: str) -> set[str]:
-    """Read the OCI ID and config ID from a validated single-image Docker save."""
+    """Read IDs bound to the one platform image in a validated Docker save."""
     try:
         with tarfile.open(archive, "r") as stream:
             members_by_name: dict[str, list[tarfile.TarInfo]] = {}
             for member in stream.getmembers():
                 members_by_name.setdefault(member.name, []).append(member)
 
-            def small_json(name: str) -> object:
+            def small_bytes(name: str) -> bytes:
                 members = members_by_name.get(name, [])
                 if len(members) != 1 or not members[0].isfile() or members[0].size > 1024 * 1024:
                     raise RuntimeError("invalid archive control file")
                 source = stream.extractfile(members[0])
                 if source is None:
                     raise RuntimeError("missing archive control file")
-                return json.loads(source.read())
+                return source.read()
+
+            def small_json(name: str) -> object:
+                return json.loads(small_bytes(name))
+
+            def blob(digest: str) -> object:
+                if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
+                    raise RuntimeError("invalid OCI blob digest")
+                raw = small_bytes("blobs/sha256/" + digest[7:])
+                if hashlib.sha256(raw).hexdigest() != digest[7:]:
+                    raise RuntimeError("OCI image blob hash mismatch")
+                return json.loads(raw)
 
             docker_manifest = small_json("manifest.json")
             if (not isinstance(docker_manifest, list) or len(docker_manifest) != 1 or
                     docker_manifest[0].get("RepoTags") != [f"sovereign-{role}:synthetic"]):
                 raise RuntimeError("archive is not the expected single synthetic image")
             config_path = docker_manifest[0].get("Config")
-            if "index.json" not in members_by_name:
-                if (not isinstance(config_path, str) or
-                        not re.fullmatch(r"[0-9a-f]{64}\.json", config_path)):
-                    raise RuntimeError("invalid Docker configuration path")
+            if isinstance(config_path, str) and re.fullmatch(r"[0-9a-f]{64}\.json", config_path):
                 config_digest = "sha256:" + config_path[:-5]
-                source = stream.extractfile(members_by_name[config_path][0]) if \
-                    len(members_by_name.get(config_path, [])) == 1 else None
-                if (source is None or members_by_name[config_path][0].size > 1024 * 1024 or
-                        hashlib.sha256(source.read()).hexdigest() != config_digest[7:]):
-                    raise RuntimeError("Docker image configuration hash mismatch")
+            elif isinstance(config_path, str) and re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", config_path):
+                config_digest = "sha256:" + config_path.rsplit("/", 1)[-1]
+            else:
+                raise RuntimeError("invalid Docker configuration path")
+            config_bytes = small_bytes(config_path)
+            if hashlib.sha256(config_bytes).hexdigest() != config_digest[7:]:
+                raise RuntimeError("Docker image configuration hash mismatch")
+            if "index.json" not in members_by_name:
                 return {config_digest}
-            index = small_json("index.json")
+            index_bytes = small_bytes("index.json")
+            index = json.loads(index_bytes)
             if (not isinstance(index, dict) or index.get("schemaVersion") != 2 or
-                    not isinstance(index.get("manifests"), list) or len(index["manifests"]) != 1):
-                raise RuntimeError("archive is not the expected single synthetic image")
-            manifest_digest = index["manifests"][0].get("digest")
-            if not isinstance(manifest_digest, str) or not _DIGEST.fullmatch(manifest_digest):
-                raise RuntimeError("invalid OCI manifest digest")
-            manifest_name = "blobs/sha256/" + manifest_digest[7:]
-            oci_manifest = small_json(manifest_name)
-            if not isinstance(oci_manifest, dict) or not isinstance(oci_manifest.get("config"), dict):
-                raise RuntimeError("invalid OCI image manifest")
-            config_digest = oci_manifest["config"].get("digest")
-            if not isinstance(config_digest, str) or not _DIGEST.fullmatch(config_digest):
-                raise RuntimeError("invalid OCI configuration digest")
-            if config_path != "blobs/sha256/" + config_digest[7:]:
-                raise RuntimeError("Docker and OCI image configurations differ")
-            for digest in (manifest_digest, config_digest):
-                name = "blobs/sha256/" + digest[7:]
-                members = members_by_name.get(name, [])
-                if len(members) != 1 or not members[0].isfile() or members[0].size > 1024 * 1024:
-                    raise RuntimeError("invalid OCI image blob")
-                source = stream.extractfile(members[0])
-                if source is None or hashlib.sha256(source.read()).hexdigest() != digest[7:]:
-                    raise RuntimeError("OCI image blob hash mismatch")
-            return {manifest_digest, config_digest}
-    except (OSError, tarfile.TarError, ValueError, TypeError, AttributeError, KeyError) as exc:
+                    not isinstance(index.get("manifests"), list) or
+                    not 1 <= len(index["manifests"]) <= 10):
+                raise RuntimeError("invalid OCI image index")
+            matches: list[str] = []
+            seen: set[str] = set()
+
+            def walk(descriptor: object, depth: int) -> None:
+                if not isinstance(descriptor, dict) or depth > 3:
+                    raise RuntimeError("invalid OCI descriptor")
+                digest = descriptor.get("digest")
+                if not isinstance(digest, str) or digest in seen:
+                    raise RuntimeError("duplicate OCI descriptor")
+                seen.add(digest)
+                document = blob(digest)
+                if not isinstance(document, dict):
+                    raise RuntimeError("invalid OCI descriptor content")
+                if isinstance(document.get("config"), dict):
+                    if document["config"].get("digest") == config_digest:
+                        matches.append(digest)
+                elif isinstance(document.get("manifests"), list):
+                    children = document["manifests"]
+                    if not 1 <= len(children) <= 10:
+                        raise RuntimeError("invalid nested OCI index")
+                    for child in children:
+                        walk(child, depth + 1)
+                else:
+                    raise RuntimeError("invalid OCI image manifest")
+
+            for descriptor in index["manifests"]:
+                walk(descriptor, 0)
+            if len(matches) != 1:
+                raise RuntimeError("OCI index does not identify one Docker image")
+            return {matches[0], config_digest, "sha256:" + hashlib.sha256(index_bytes).hexdigest()}
+    except (OSError, tarfile.TarError, json.JSONDecodeError, TypeError, AttributeError, KeyError) as exc:
         raise RuntimeError("invalid single-image archive metadata") from exc
 
 
