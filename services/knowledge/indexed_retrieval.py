@@ -9,6 +9,7 @@ import re
 import sqlite3
 
 from services.knowledge.acl import source_access
+from services.knowledge.paths import source_path
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
 _STOP = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
@@ -60,10 +61,11 @@ def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> l
             if not source_access(user_id, source, policy):
                 continue
             relative = source["relative_path"]
-            if Path(relative).is_absolute() or ".." in Path(relative).parts:
+            try:
+                path = source_path(base, relative)
+            except (OSError, ValueError):
                 continue
-            path = (base / relative).resolve()
-            if not path.is_relative_to(base) or not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            if path.stat().st_size > 8 * 1024 * 1024:
                 continue
             if hashlib.sha256(path.read_bytes()).hexdigest() != source["sha256"]:
                 continue

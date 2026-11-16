@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
@@ -18,6 +19,7 @@ class WazuhUnavailable(Exception):
 _INDEX_NAME = re.compile(r"wazuh-alerts-[A-Za-z0-9._-]{1,80}\Z")
 _DOCUMENT_ID = re.compile(r"[A-Za-z0-9._-]{1,80}\Z")
 SUPPORTED_DECODERS = ("fortigate", "switch-syslog", "host-agent")
+MAX_ALERT_RESPONSE = 2 * 1024 * 1024
 
 
 def parse_incident_id(incident_id: str) -> tuple[str, str]:
@@ -87,10 +89,15 @@ class WazuhIndexerReader:
         try:
             with httpx.Client(timeout=10, verify=str(self.ca_bundle) if self.ca_bundle else True,
                               trust_env=False, follow_redirects=False, transport=self.transport) as client:
-                response = client.post(f"{self.endpoint}/wazuh-alerts*/_search", json=query,
-                                       headers={"Authorization": f"Bearer {self.token}"})
-                response.raise_for_status()
-                hits = response.json()["hits"]["hits"]
+                with client.stream("POST", f"{self.endpoint}/wazuh-alerts*/_search", json=query,
+                                   headers={"Authorization": f"Bearer {self.token}"}) as response:
+                    response.raise_for_status()
+                    body = bytearray()
+                    for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                        body.extend(chunk)
+                        if len(body) > MAX_ALERT_RESPONSE:
+                            raise ValueError("oversized Wazuh alert response")
+                    hits = json.loads(body)["hits"]["hits"]
         except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
             raise WazuhUnavailable("Wazuh alert search unavailable") from exc
         if not isinstance(hits, list) or len(hits) > limit:

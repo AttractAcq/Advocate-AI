@@ -5,6 +5,12 @@ from __future__ import annotations
 import ipaddress
 import json
 from pathlib import Path
+import re
+
+
+_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
+EQUIPMENT_CLASSES = {"firewall", "network switch", "workstation", "server", "nas",
+                     "access point", "camera", "printer", "controller", "other"}
 
 
 class AssetRegistry:
@@ -17,6 +23,12 @@ class AssetRegistry:
             if not isinstance(item, dict) or not all(isinstance(item.get(key), str) and item[key] for key in
                     ("asset_id", "hostname", "owner", "equipment_class")):
                 raise ValueError("invalid asset")
+            if (not _IDENTIFIER.fullmatch(item["asset_id"])
+                    or not _IDENTIFIER.fullmatch(item["hostname"])
+                    or item["equipment_class"] not in EQUIPMENT_CLASSES
+                    or len(item["owner"]) > 80
+                    or any(ord(char) < 32 for char in item["owner"])):
+                raise ValueError("unsafe asset metadata")
             if item["asset_id"] in self.assets:
                 raise ValueError("duplicate asset id")
             addresses = item.get("addresses", [])

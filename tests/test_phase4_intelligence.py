@@ -11,7 +11,7 @@ import httpx
 
 from apps.api.main import Settings, create_app
 from apps.api.model import ModelUnavailable
-from services.connectors.wazuh import SUPPORTED_DECODERS, WazuhIndexerReader, WazuhUnavailable
+from services.connectors.wazuh import MAX_ALERT_RESPONSE, SUPPORTED_DECODERS, WazuhIndexerReader, WazuhUnavailable
 from services.connectors.fortigate import parse_fortigate_syslog
 from services.intelligence.assets import AssetRegistry
 from services.intelligence.engine import SOURCES, incident_view, load_fixture_incidents, normalize_alert, supported_incidents
@@ -19,6 +19,7 @@ from services.intelligence.engine import SOURCES, incident_view, load_fixture_in
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "fixtures/phase-4/assets.json"
 ALERTS = ROOT / "fixtures/phase-4/wazuh-alerts.json"
+ADVERSARIAL = json.loads((ROOT / "fixtures/phase-5/adversarial.json").read_text())
 
 
 def normalize_hit(hit, registry):
@@ -154,6 +155,24 @@ class IntelligenceTests(unittest.TestCase):
         with self.assertRaises(WazuhUnavailable):
             reader.alerts(incident_id=f"{sample['_index']}:different-event")
 
+    def test_indexer_rejects_oversized_response_and_external_redirect(self):
+        large = WazuhIndexerReader("https://10.40.1.10:9200", "lab-read-token",
+                                   transport=httpx.MockTransport(lambda _: httpx.Response(
+                                       200, stream=httpx.ByteStream(b"x" * (MAX_ALERT_RESPONSE + 1)))))
+        with self.assertRaises(WazuhUnavailable):
+            large.alerts()
+        requests = []
+
+        def redirect(request):
+            requests.append(request)
+            return httpx.Response(302, headers={"Location": "https://example.invalid/collect"})
+
+        redirected = WazuhIndexerReader("https://10.40.1.10:9200", "lab-read-token",
+                                        transport=httpx.MockTransport(redirect))
+        with self.assertRaises(WazuhUnavailable):
+            redirected.alerts()
+        self.assertEqual(len(requests), 1)
+
 
 class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -241,6 +260,37 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["method"], "evidence-only")
         self.assertNotIn("Change firewall rules", response.text)
+
+    async def test_actionable_one_sentence_model_output_falls_back_to_evidence(self):
+        admin = await self.login("lab-avit_admin-1")
+        self.model.answer = ADVERSARIAL["unsafe_model_responses"][0]
+        response = await self.client.post(
+            "/api/security/incidents/wazuh-alerts-4.x-2026.11.15:doc-forti-001/explain",
+            headers=admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["method"], "evidence-only")
+        self.assertNotIn("disable the firewall", response.text)
+        self.assertTrue(response.json()["evidence"])
+
+    async def test_prompt_injected_alert_is_visible_but_withheld_from_model(self):
+        fixture = json.loads(ALERTS.read_text())
+        fixture["hits"]["hits"][0]["_source"]["rule"]["description"] = (
+            ADVERSARIAL["injected_alert_description"])
+        path = Path(self.temp.name) / "injected-alerts.json"
+        path.write_text(json.dumps(fixture))
+        app = create_app(Settings(lab_password="synthetic-test-passphrase",
+                                  synthetic_alerts=path), self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            login = await client.post("/api/login", json={"user_id": "lab-avit_admin-1",
+                                                      "password": "synthetic-test-passphrase"})
+            headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+            incident_id = "wazuh-alerts-4.x-2026.11.15:doc-forti-001"
+            detail = await client.get(f"/api/security/incidents/{incident_id}", headers=headers)
+            self.assertEqual(detail.status_code, 200)
+            explanation = await client.post(f"/api/security/incidents/{incident_id}/explain",
+                                            headers=headers)
+        self.assertEqual(explanation.status_code, 422)
+        self.assertEqual(self.model.calls, [])
 
     async def test_new_indexer_alerts_arrive_while_model_is_down(self):
         fixture_hits = json.loads(ALERTS.read_text())["hits"]["hits"]

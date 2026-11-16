@@ -10,10 +10,18 @@ from typing import Mapping
 
 from services.intelligence.assets import AssetRegistry
 from services.connectors.wazuh import parse_incident_id
+from services.knowledge.injection import instruction_like
 
 
 SOURCES = {"fortigate": "FortiGate", "switch-syslog": "Switch", "host-agent": "Host"}
 ACTIONS = {"deny", "login-failed", "detected", "allow", "logout", "login"}
+_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
+_UNSAFE_ANALYSIS = re.compile(
+    r"https?://|\b(?:disable|delete|modify|reconfigure|execute|run|curl|wget|"
+    r"send|reveal|ignore|override|credential|password|token|api[_-]?key|"
+    r"compromised|breached|confirmed)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
+    re.I,
+)
 
 
 def _text(value: object, *, limit: int = 160) -> str:
@@ -35,7 +43,21 @@ def _description(value: object) -> str:
     description = _text(value, limit=160)
     if re.search(r"\b(?:password|passwd|token|api[_-]?key|secret)\s*[:=]", description, re.I):
         raise ValueError("credential-like alert description")
+    if re.search(r"\bBearer\s+[A-Za-z0-9._~-]{12,}", description, re.I):
+        raise ValueError("credential-like alert description")
     return description
+
+
+def safe_incident_analysis(text: str) -> bool:
+    """Accept only a short, plain, non-actionable model sentence.
+
+    This is a narrow output guard, not a proof that every claim is supported.
+    """
+    if (not isinstance(text, str) or not text or len(text) > 320 or len(text.split()) > 45
+            or any(ord(char) < 32 for char in text) or any(char in text for char in ("*", "`", "<", ">"))
+            or not text.rstrip().endswith((".", "!", "?"))):
+        return False
+    return not instruction_like(text) and not _UNSAFE_ANALYSIS.search(text)
 
 
 def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[str, object]:
@@ -45,6 +67,8 @@ def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[
     incident_id = f"{index_name}:{index_id}"
     parse_incident_id(incident_id)
     event_id = _text(source.get("id"), limit=80)
+    if not _IDENTIFIER.fullmatch(event_id):
+        raise ValueError("invalid alert event id")
     timestamp = _text(source.get("timestamp"), limit=40)
     try:
         moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))

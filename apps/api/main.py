@@ -28,7 +28,7 @@ from services.knowledge.injection import instruction_like
 from services.policy.audit import AuditLog, verify as verify_audit
 from services.connectors.wazuh import WazuhIndexerReader, WazuhUnavailable, parse_incident_id
 from services.intelligence.assets import AssetRegistry
-from services.intelligence.engine import load_fixture_incidents, supported_incidents
+from services.intelligence.engine import load_fixture_incidents, safe_incident_analysis, supported_incidents
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -313,7 +313,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                     "evidence": incident["evidence"], "confidence": incident["confidence"],
                     "method": "evidence-only",
                     "notice": "Asset mapping needs analyst review. No AI device attribution was generated."}
-        if any(instruction_like(str(event[key])) for key in ("description", "rule_id", "location")):
+        if any(instruction_like(str(event[key])) for key in ("description", "rule_id", "location", "event_id")):
             record_decision(identity[1]["id"], "explain", incident_id, "flagged")
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 "alert contains instruction-like text; review evidence directly")
@@ -336,8 +336,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
         except ModelUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        if (len(analysis) > 320 or "\n" in analysis or "*" in analysis or "`" in analysis
-                or not analysis.rstrip().endswith((".", "!", "?"))):
+        if not safe_incident_analysis(analysis):
             record_decision(identity[1]["id"], "explain", incident_id, "format-rejected")
             return {"incident_id": incident_id,
                     "analysis": incident["summary"] + " " + incident["confidence"],

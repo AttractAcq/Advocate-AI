@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 
 from services.knowledge.acl import source_access
+from services.knowledge.paths import source_path
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
 _STOPWORDS = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
@@ -64,8 +65,9 @@ def search_fixture_documents(
             relative = source.get("relative_path", "")
             if not relative.endswith(".txt"):
                 continue
-            path = (base / relative).resolve()
-            if not path.is_relative_to(base) or not path.is_file():
+            try:
+                path = source_path(base, relative)
+            except (OSError, ValueError):
                 continue
             if path.stat().st_size > _MAX_DOCUMENT_BYTES:
                 continue
