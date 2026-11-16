@@ -22,6 +22,7 @@ from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable
 from apps.api.oidc import OidcVerifier
 from services.knowledge.acl import source_access
 from services.knowledge.retrieval import search_fixture_documents
+from services.knowledge.paths import source_path
 from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows, preview_index, search_index
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
@@ -223,8 +224,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             for row in csv.DictReader(stream):
                 if not source_access(user_id, row, policy):
                     continue
-                path = (base / row.get("relative_path", "")).resolve()
-                if not path.is_relative_to(base) or not path.is_file() or path.stat().st_size > 64 * 1024:
+                try:
+                    path = source_path(base, row.get("relative_path", ""))
+                except (OSError, ValueError):
+                    continue
+                if path.stat().st_size > 64 * 1024:
                     continue
                 if hashlib.sha256(path.read_bytes()).hexdigest() == row["sha256"]:
                     permitted.append(row)
