@@ -6,7 +6,11 @@ COPY requirements.lock ./
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock \
     && python -m pip uninstall -y pip
 COPY apps/api ./apps/api
-COPY services ./services
+COPY services/__init__.py ./services/__init__.py
+COPY services/knowledge ./services/knowledge
+COPY services/policy ./services/policy
+COPY services/intelligence ./services/intelligence
+COPY services/connectors ./services/connectors
 COPY fixtures ./fixtures
 RUN python fixtures/generate.py && adduser -D -u 10001 sovereign
 USER 10001:10001

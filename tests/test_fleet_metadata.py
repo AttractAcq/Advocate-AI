@@ -1,0 +1,103 @@
+"""AT-24 synthetic Fleet metadata and forbidden-content import boundary."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+
+import httpx
+
+from apps.fleet.main import FleetSettings, create_app
+
+
+class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.db = Path(self.temporary.name) / "fleet.db"
+        self.token = "synthetic-fleet-admin-token-0123456789"
+        app = create_app(FleetSettings(self.db, self.token))
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                        base_url="http://fleet.invalid",
+                                        headers={"X-Fleet-Lab-Token": self.token})
+
+    async def asyncTearDown(self) -> None:
+        await self.client.aclose()
+        self.temporary.cleanup()
+
+    async def _seed(self) -> None:
+        for endpoint, payload in (
+            ("customers", {"code": "CUST-ACME1", "category": "owner_manager"}),
+            ("releases", {"code": "REL-DEMO1", "version": "1.0.0",
+                          "bundle_sha256": "a" * 64, "status": "approved"}),
+            ("deployments", {"code": "VSL-TEST1", "customer_code": "CUST-ACME1",
+                             "release_code": "REL-DEMO1", "hardware_profile": "pilot_gpu",
+                             "status": "pilot"}),
+        ):
+            response = await self.client.post("/api/fleet/" + endpoint, json=payload)
+            self.assertEqual(response.status_code, 201, response.text)
+
+    async def test_metadata_records_and_audit_without_vessel_content(self) -> None:
+        await self._seed()
+        for endpoint, payload in (
+            ("licences", {"code": "LIC-DEMO1", "customer_code": "CUST-ACME1",
+                          "vessel_code": "VSL-TEST1", "tier": "pilot",
+                          "valid_from": "2026-11-01", "valid_until": "2027-11-01",
+                          "status": "active"}),
+            ("tickets", {"code": "TKT-DEMO1", "vessel_code": "VSL-TEST1",
+                         "category": "recovery", "priority": "p2", "status": "open"}),
+            ("maintenance", {"code": "MNT-DEMO1", "vessel_code": "VSL-TEST1",
+                             "kind": "backup_rehearsal", "due_on": "2026-12-01",
+                             "engineer_code": "ENGR-LAB1", "status": "planned"}),
+            ("import/deployment-receipts", {"code": "RCP-DEMO1",
+                                             "vessel_code": "VSL-TEST1",
+                                             "release_code": "REL-DEMO1",
+                                             "source": "approved_offline_admin",
+                                             "observed_on": "2026-11-16",
+                                             "health": "healthy"}),
+        ):
+            response = await self.client.post("/api/fleet/" + endpoint, json=payload)
+            self.assertEqual(response.status_code, 201, response.text)
+        audit = (await self.client.get("/api/fleet/audit")).json()
+        self.assertEqual(len(audit), 7)
+        self.assertEqual(audit[-1]["kind"], "receipt")
+        self.assertNotIn("payload", audit[-1])
+        self.assertEqual(len((await self.client.get("/api/fleet/licences")).json()), 1)
+        self.assertEqual(self.db.stat().st_mode & 0o077, 0)
+
+    async def test_prompt_document_embedding_and_log_fields_are_rejected(self) -> None:
+        await self._seed()
+        receipt = {"code": "RCP-DEMO1", "vessel_code": "VSL-TEST1",
+                   "release_code": "REL-DEMO1", "source": "approved_offline_admin",
+                   "observed_on": "2026-11-16", "health": "healthy"}
+        for forbidden in ("prompt", "document", "embedding", "security_log"):
+            with self.subTest(forbidden=forbidden):
+                response = await self.client.post(
+                    "/api/fleet/import/deployment-receipts",
+                    json={**receipt, forbidden: "never-store-this-vessel-content"})
+                self.assertEqual(response.status_code, 422)
+        self.assertEqual((await self.client.get(
+            "/api/fleet/import/deployment-receipts")).json(), [])
+        self.assertNotIn(b"never-store-this-vessel-content", self.db.read_bytes())
+
+    async def test_auth_references_and_tamper_fail_closed(self) -> None:
+        response = await self.client.get("/api/fleet/customers",
+                                         headers={"X-Fleet-Lab-Token": "wrong"})
+        self.assertEqual(response.status_code, 401)
+        response = await self.client.post("/api/fleet/deployments", json={
+            "code": "VSL-TEST1", "customer_code": "CUST-MISS1",
+            "release_code": "REL-MISS1", "hardware_profile": "pilot_gpu",
+            "status": "planned"})
+        self.assertEqual(response.status_code, 409)
+        await self._seed()
+        with sqlite3.connect(self.db) as connection:
+            connection.execute("UPDATE records SET payload=? WHERE kind='customer'",
+                               (json.dumps({"code": "CUST-ACME1", "prompt": "steal"}),))
+        response = await self.client.get("/api/fleet/customers")
+        self.assertEqual(response.status_code, 503)
+
+
+if __name__ == "__main__":
+    unittest.main()
