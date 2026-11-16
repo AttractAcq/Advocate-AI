@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,8 @@ import subprocess
 import tempfile
 import unittest
 
-from infrastructure.restic_repository import ResticError, create_snapshot, restore_snapshot
+from infrastructure.restic_repository import (ResticError, create_snapshot,
+                                              restore_snapshot, verify_repository)
 from infrastructure.restic_retention import apply_plan, create_plan
 
 
@@ -75,6 +77,28 @@ class ResticRepositoryTests(unittest.TestCase):
             restore_snapshot(created["snapshot_id"], self.repository, self.password,
                              self.restic, "0" * 64, destination)
         self.assertFalse(destination.exists())
+
+    def test_verify_requires_recent_scoped_snapshot_and_checked_data(self) -> None:
+        subprocess.run([str(self.restic), "--no-cache", "-r", str(self.repository),
+                        "--password-file", str(self.password), "init"],
+                       check=True, capture_output=True, timeout=60)
+        with self.assertRaisesRegex(ResticError, "no Sovereign snapshot"):
+            verify_repository(self.repository, self.password, self.restic,
+                              self.restic_sha256, 24)
+        created = create_snapshot(self.spec, self.repository, self.password,
+                                  self.restic, self.restic_sha256, self.staging)
+        checked = verify_repository(self.repository, self.password, self.restic,
+                                    self.restic_sha256, 24)
+        self.assertEqual(checked["status"], "verified")
+        self.assertEqual(checked["latest_snapshot_id"], created["snapshot_id"])
+        self.assertEqual(checked["snapshot_count"], 1)
+        later = datetime.now(timezone.utc) + timedelta(hours=25)
+        with self.assertRaisesRegex(ResticError, "stale"):
+            verify_repository(self.repository, self.password, self.restic,
+                              self.restic_sha256, 24, now=later)
+        with self.assertRaises(ResticError):
+            verify_repository(self.repository, self.password, self.restic,
+                              "0" * 64, 24)
 
     def test_retention_plan_applies_only_exact_sovereign_snapshots(self) -> None:
         ids = []
