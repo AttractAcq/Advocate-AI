@@ -23,18 +23,43 @@ checks it, changes the active record, and retires the replaced runtime.
   --trusted-key /path/to/pinned-public-key.pem \
   --crane /path/to/pinned-crane \
   --root /path/to/new-synthetic-product-install
+.venv/bin/python -m infrastructure.deploy.product_installer recover \
+  --trusted-key /path/to/pinned-public-key.pem \
+  --crane /path/to/pinned-crane \
+  --root /path/to/new-synthetic-product-install
+.venv/bin/python -m infrastructure.deploy.product_installer cleanup-orphans \
+  --trusted-key /path/to/pinned-public-key.pem \
+  --root /path/to/new-synthetic-product-install
 ```
 
 The [CI product image rehearsal](product-image-release-rehearsal.md) creates
 two distinct ephemeral signed product versions, installs the first, rejects a
 missing candidate while preserving the first, installs the second, and rolls
-back to the first. It checks persisted status after each change and removes
-the disposable containers when finished.
+back to the first. It then stops the Console, restarts the signed active
+release through `recover`, checks health, and verifies that the previous
+labelled runtime was retired. The rehearsal removes the disposable containers
+when finished.
+
+Each new install root gets an owner-only random installation identifier. New
+Core, Console and internal network resources carry that identifier and a
+separate per-run label. `cleanup-orphans` verifies the signed active stage and
+healthy active runtime, checks all scoped Docker identities before deletion,
+then removes only resources outside the active pair. The CI rehearsal starts
+a second signed runtime without recording it, removes it through this command,
+and checks that the active pair remains healthy. Docker's documented
+[network](https://docs.docker.com/reference/cli/docker/network/ls/) and
+[container](https://docs.docker.com/reference/cli/docker/container/ls/) label
+filters provide the initial scope; the installer rechecks each result.
 
 This is still a synthetic lab path. Its state survives the launcher process,
-but it does not enable boot-time restart, recover orphaned containers after a
-host crash, provision TLS or a real identity issuer, load a model, configure
-the vessel network, or prove clean-host disaster recovery. The older
+and an operator can explicitly restart a stopped runtime from the signed
+staged release. Recovery retires the previous containers only when their
+labels and network attachment still match the saved record. It does not
+enable boot-time restart or automatically remove unlabelled resources created
+before this change, provision TLS or a real identity issuer, load a model, configure
+the vessel network, or prove clean-host disaster recovery. The
+[synthetic boot unit renderer](boot-recovery-service.md) prepares a systemd
+recovery unit for later target-host validation. The older
 [six-service staging installer](installer.md) remains a separate loopback
 configuration exercise. Target installation and recovery gates remain in the
 [blocker tracker](../blockers-and-build-queue.md).

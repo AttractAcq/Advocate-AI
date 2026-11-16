@@ -205,8 +205,8 @@ def stop_runtime(handle: RuntimeHandle) -> None:
             pass
 
 
-def probe_runtime(handle: RuntimeHandle) -> None:
-    """Fail if the current Core and Console no longer satisfy lab health checks."""
+def verify_runtime_identity(handle: RuntimeHandle) -> None:
+    """Bind persisted Docker IDs to one labelled internal synthetic network."""
     run_name = _docker("network", "inspect", handle.network_id, "--format",
                        '{{index .Labels "sovereign.synthetic.run"}}')
     if (not re.fullmatch(r"sovereign-synthetic-[0-9a-f]{12}", run_name) or
@@ -214,8 +214,6 @@ def probe_runtime(handle: RuntimeHandle) -> None:
                     "{{.Internal}}") != "true"):
         raise RuntimeError("synthetic runtime network identity mismatch")
     for identifier in (handle.core_id, handle.console_id):
-        if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
-            raise RuntimeError("synthetic runtime is stopped")
         if _docker("inspect", identifier, "--format",
                    '{{index .Config.Labels "sovereign.synthetic.run"}}') != run_name:
             raise RuntimeError("synthetic runtime container identity mismatch")
@@ -225,7 +223,83 @@ def probe_runtime(handle: RuntimeHandle) -> None:
                 run_name not in networks or not isinstance(networks[run_name], dict) or
                 networks[run_name].get("NetworkID") != handle.network_id):
             raise RuntimeError("synthetic runtime network attachment mismatch")
+
+
+def probe_runtime(handle: RuntimeHandle) -> None:
+    """Fail if the current Core and Console no longer satisfy lab health checks."""
+    verify_runtime_identity(handle)
+    for identifier in (handle.core_id, handle.console_id):
+        if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
+            raise RuntimeError("synthetic runtime is stopped")
     _health(handle.core_id)
+
+
+def cleanup_orphan_runtimes(installation_id: str,
+                            active: RuntimeHandle) -> dict[str, int]:
+    """Remove only labelled synthetic resources outside the verified active pair."""
+    if not re.fullmatch(r"[0-9a-f]{32}", installation_id):
+        raise RuntimeError("invalid synthetic installation identifier")
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+
+    def listed(*args: str) -> list[str]:
+        lines = [item for item in _docker(*args).splitlines() if item]
+        if len(lines) > 50 or any(not re.fullmatch(r"[0-9a-f]{64}", item)
+                               for item in lines) or len(set(lines)) != len(lines):
+            raise RuntimeError("invalid scoped Docker resource list")
+        return lines
+
+    network_ids = listed("network", "ls", "--no-trunc", "--filter", scope, "--quiet")
+    container_ids = listed("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
+    networks: dict[str, str] = {}
+    for network_id in network_ids:
+        name = _docker("network", "inspect", network_id, "--format", "{{.Name}}")
+        labels = json.loads(_docker("network", "inspect", network_id,
+                                   "--format", "{{json .Labels}}"))
+        internal = _docker("network", "inspect", network_id,
+                           "--format", "{{.Internal}}")
+        if (not re.fullmatch(r"sovereign-synthetic-[0-9a-f]{12}", name)
+                or not isinstance(labels, dict)
+                or labels.get("sovereign.synthetic.run") != name
+                or labels.get("sovereign.synthetic.install") != installation_id
+                or internal != "true" or name in networks):
+            raise RuntimeError("scoped Docker network identity mismatch")
+        networks[name] = network_id
+
+    orphan_containers: list[str] = []
+    active_ids = {active.core_id, active.console_id}
+    active_network_name = next((name for name, identifier in networks.items()
+                                if identifier == active.network_id), None)
+    for container_id in container_ids:
+        labels = json.loads(_docker("inspect", container_id, "--format",
+                                   "{{json .Config.Labels}}"))
+        name = _docker("inspect", container_id, "--format", "{{.Name}}")
+        attached = json.loads(_docker("inspect", container_id, "--format",
+                                      "{{json .NetworkSettings.Networks}}"))
+        run_name = labels.get("sovereign.synthetic.run") if isinstance(labels, dict) else None
+        if (not isinstance(run_name, str) or run_name not in networks
+                or labels.get("sovereign.synthetic.install") != installation_id
+                or name not in (f"/{run_name}-core", f"/{run_name}-console")
+                or not isinstance(attached, dict)
+                or (attached and
+                    (set(attached) != {run_name} or
+                     not isinstance(attached[run_name], dict) or
+                     attached[run_name].get("NetworkID") != networks[run_name]))):
+            raise RuntimeError("scoped Docker container identity mismatch")
+        if container_id in active_ids:
+            if run_name != active_network_name:
+                raise RuntimeError("active Docker container identity mismatch")
+        elif run_name == active_network_name:
+            raise RuntimeError("unexpected container on active Docker network")
+        else:
+            orphan_containers.append(container_id)
+
+    orphan_networks = [identifier for identifier in network_ids
+                       if identifier != active.network_id]
+    for container_id in orphan_containers:
+        _docker("rm", "-f", container_id)
+    for network_id in orphan_networks:
+        _docker("network", "rm", network_id)
+    return {"containers": len(orphan_containers), "networks": len(orphan_networks)}
 
 
 def switch_verified_bundle(current: RuntimeHandle | None, bundle: Path,
@@ -241,18 +315,23 @@ def switch_verified_bundle(current: RuntimeHandle | None, bundle: Path,
 
 
 def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
-                          console_config: Path) -> RuntimeHandle:
+                          console_config: Path,
+                          installation_id: str | None = None) -> RuntimeHandle:
     """Load exact signed archives, launch two isolated services and check them."""
     manifest = verify_bundle(bundle, trusted_key)
     if manifest["schema"] != 4:
         raise BundleError("synthetic runtime requires a two-image product bundle")
     _validate_console_config(console_config)
+    if installation_id is not None and not re.fullmatch(r"[0-9a-f]{32}", installation_id):
+        raise RuntimeError("invalid synthetic installation identifier")
     images = manifest["images"]
     ids = {role: _image_id(bundle, role, images[role], crane)
            for role in ("core", "console")}
     name = f"sovereign-synthetic-{uuid.uuid4().hex[:12]}"
-    network_id = _docker("network", "create", "--internal", "--label",
-                         f"sovereign.synthetic.run={name}", name)
+    labels = ["--label", f"sovereign.synthetic.run={name}"]
+    if installation_id is not None:
+        labels += ["--label", f"sovereign.synthetic.install={installation_id}"]
+    network_id = _docker("network", "create", "--internal", *labels, name)
     if len(network_id) != 64 or _docker("network", "inspect", network_id,
                                      "--format", "{{.Internal}}") != "true":
         stop_runtime(RuntimeHandle(network_id, "", ""))
@@ -261,13 +340,13 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
     console_id = ""
     try:
         core_id = _docker("run", "-d", "--pull", "never", "--name", name + "-core",
-                          "--label", f"sovereign.synthetic.run={name}",
+                          *labels,
                           "--network", name, "--network-alias", "core", "--read-only",
                           "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                           "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                           ids["core"])
         console_id = _docker("run", "-d", "--pull", "never", "--name", name + "-console",
-                             "--label", f"sovereign.synthetic.run={name}",
+                             *labels,
                              "--network", name, "--network-alias", "console", "--read-only",
                              "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                              "--security-opt", "no-new-privileges", "--cap-drop", "ALL",

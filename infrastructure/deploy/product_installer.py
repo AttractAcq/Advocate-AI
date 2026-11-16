@@ -14,12 +14,14 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import tempfile
 
 from infrastructure.deploy.container_runtime import (
-    RuntimeHandle, _validate_console_config, probe_runtime, start_verified_bundle,
-    stop_runtime,
+    RuntimeError as ContainerRuntimeError, RuntimeHandle, _validate_console_config,
+    cleanup_orphan_runtimes, probe_runtime, start_verified_bundle, stop_runtime,
+    verify_runtime_identity,
 )
 from infrastructure.release.bundle import BundleError, verify_bundle
 
@@ -30,6 +32,7 @@ class ProductInstallError(ValueError):
 
 _RELEASE = re.compile(r"[0-9a-f]{24}\Z")
 _DOCKER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_INSTALL_ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
 @contextmanager
@@ -93,6 +96,26 @@ def _state(root: Path) -> dict[str, object] | None:
 def _handle(state: dict[str, object]) -> RuntimeHandle:
     runtime = state["runtime"]
     return RuntimeHandle(runtime["network_id"], runtime["core_id"], runtime["console_id"])
+
+
+def _installation_id(root: Path) -> str:
+    path = root / "installation-id"
+    if path.is_symlink():
+        raise ProductInstallError("linked installation identifier")
+    if not path.exists():
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600)
+        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+            stream.write(secrets.token_hex(16) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    if (not path.is_file() or path.stat().st_mode & 0o077
+            or path.stat().st_size != 33):
+        raise ProductInstallError("invalid installation identifier file")
+    value = path.read_text(encoding="ascii").strip()
+    if not _INSTALL_ID.fullmatch(value):
+        raise ProductInstallError("invalid installation identifier")
+    return value
 
 
 def _identifier(bundle: Path, config: Path) -> str:
@@ -165,7 +188,8 @@ def _activate(root: Path, stage: Path, identifier: str,
                     "previous": current["previous"]}
     _verify_stage(stage, trusted_key, identifier)
     candidate = start_verified_bundle(stage / "bundle", trusted_key, crane,
-                                      stage / "console-config.json")
+                                      stage / "console-config.json",
+                                      installation_id=_installation_id(root))
     try:
         _write_state(root, identifier, str(current["active"]) if current else None,
                      candidate)
@@ -208,14 +232,66 @@ def rollback_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, ob
         return _activate(root, stage, identifier, trusted_key, crane)
 
 
+def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, object]:
+    """Recreate the signed active lab release when its runtime is unhealthy."""
+    _owner_directory(root, create=False)
+    with _lock(root):
+        current = _state(root)
+        if current is None:
+            raise ProductInstallError("no active product release")
+        identifier = str(current["active"])
+        stage = root / "product-releases" / identifier
+        _verify_stage(stage, trusted_key, identifier)
+        try:
+            probe_runtime(_handle(current))
+        except ContainerRuntimeError:
+            pass
+        else:
+            return {"result": "already_healthy", "active": identifier,
+                    "previous": current["previous"]}
+        try:
+            verify_runtime_identity(_handle(current))
+        except ContainerRuntimeError:
+            old_owned = False
+        else:
+            old_owned = True
+        candidate = start_verified_bundle(stage / "bundle", trusted_key, crane,
+                                          stage / "console-config.json",
+                                          installation_id=_installation_id(root))
+        try:
+            _write_state(root, identifier, current["previous"], candidate)
+        except Exception:
+            stop_runtime(candidate)
+            raise
+        if old_owned:
+            stop_runtime(_handle(current))
+        return {"result": "recovered", "active": identifier,
+                "previous": current["previous"]}
+
+
+def cleanup_product_orphans(root: Path, trusted_key: Path) -> dict[str, object]:
+    """Retire validated labelled lab runtimes not named by active state."""
+    _owner_directory(root, create=False)
+    with _lock(root):
+        current = _state(root)
+        if current is None:
+            raise ProductInstallError("no active product release")
+        identifier = str(current["active"])
+        _verify_stage(root / "product-releases" / identifier, trusted_key,
+                      identifier)
+        probe_runtime(_handle(current))
+        counts = cleanup_orphan_runtimes(_installation_id(root), _handle(current))
+        return {"result": "cleaned", "active": identifier, **counts}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic two-image product installer")
     actions = parser.add_subparsers(dest="action", required=True)
-    for action in ("install", "status", "rollback"):
+    for action in ("install", "status", "rollback", "recover", "cleanup-orphans"):
         command = actions.add_parser(action)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
-        if action in ("install", "rollback"):
+        if action in ("install", "rollback", "recover"):
             command.add_argument("--crane", required=True, type=Path)
         if action == "install":
             command.add_argument("--bundle", required=True, type=Path)
@@ -227,6 +303,10 @@ def main() -> None:
                                      args.console_config, args.root)
         elif args.action == "rollback":
             result = rollback_product(args.root, args.trusted_key, args.crane)
+        elif args.action == "recover":
+            result = recover_product(args.root, args.trusted_key, args.crane)
+        elif args.action == "cleanup-orphans":
+            result = cleanup_product_orphans(args.root, args.trusted_key)
         else:
             result = product_status(args.root, args.trusted_key)
     except (BundleError, ProductInstallError, OSError, ValueError) as exc:

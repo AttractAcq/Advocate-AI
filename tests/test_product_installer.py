@@ -6,9 +6,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from infrastructure.deploy.container_runtime import RuntimeHandle
+from infrastructure.deploy.container_runtime import RuntimeError as ContainerRuntimeError, RuntimeHandle
 from infrastructure.deploy.product_installer import (
-    ProductInstallError, install_product, product_status, rollback_product,
+    ProductInstallError, install_product, product_status, recover_product,
+    rollback_product,
 )
 
 
@@ -92,6 +93,48 @@ class ProductInstallerTests(unittest.TestCase):
             with self.assertRaises(ProductInstallError):
                 product_status(self.root, self.key)
             probe.assert_not_called()
+
+    def test_recover_unhealthy_runtime_from_signed_staged_release(self) -> None:
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=[self.old, self.new]) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.verify_runtime_identity"), \
+             patch("infrastructure.deploy.product_installer.stop_runtime") as stop:
+            first = install_product(self.first, self.key, self.crane, self.config,
+                                    self.root)
+            self.assertEqual(recover_product(self.root, self.key, self.crane)["result"],
+                             "already_healthy")
+            self.assertEqual(start.call_count, 1)
+            probe.side_effect = ContainerRuntimeError("stopped")
+            restored = recover_product(self.root, self.key, self.crane)
+            self.assertEqual(restored["result"], "recovered")
+            self.assertEqual(restored["active"], first["active"])
+            self.assertEqual(start.call_count, 2)
+            self.assertEqual(json.loads((self.root / "product-state.json").read_text())
+                             ["runtime"]["core_id"], self.new.core_id)
+            stop.assert_called_once_with(self.old)
+
+    def test_failed_recovery_keeps_original_record(self) -> None:
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old):
+            install_product(self.first, self.key, self.crane, self.config, self.root)
+        original = (self.root / "product-state.json").read_bytes()
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.probe_runtime",
+                   side_effect=ContainerRuntimeError("stopped")), \
+             patch("infrastructure.deploy.product_installer.verify_runtime_identity"), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=ContainerRuntimeError("candidate failed")), \
+             patch("infrastructure.deploy.product_installer.stop_runtime") as stop:
+            with self.assertRaises(ContainerRuntimeError):
+                recover_product(self.root, self.key, self.crane)
+            self.assertEqual((self.root / "product-state.json").read_bytes(), original)
+            stop.assert_not_called()
 
 
 if __name__ == "__main__":
