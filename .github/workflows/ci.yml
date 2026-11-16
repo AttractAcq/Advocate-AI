@@ -10,6 +10,58 @@ permissions:
   contents: read
 
 jobs:
+  synthetic-containers:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned Core and Console images
+        run: |
+          docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
+          docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
+      - name: Exercise isolated synthetic stack
+        run: bash infrastructure/containers/smoke.sh
+      - name: Scan built Core image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sovereign-core:synthetic
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL,UNKNOWN
+          format: json
+          output: core-trivy.json
+          exit-code: '0'
+          cache: 'false'
+      - name: Scan built Console image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sovereign-console:synthetic
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL,UNKNOWN
+          format: json
+          output: console-trivy.json
+          exit-code: '0'
+          cache: 'false'
+      - name: Summarize built image findings
+        run: |
+          jq -e '.SchemaVersion and .ArtifactName' core-trivy.json console-trivy.json >/dev/null
+          echo "Core high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' core-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Console high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' console-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "This is triage evidence, not release approval." >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain built image scan reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-product-image-trivy
+          path: |
+            core-trivy.json
+            console-trivy.json
+          retention-days: 30
+
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +86,7 @@ jobs:
         working-directory: apps/console/web
         run: |
           npm ci --ignore-scripts
+          npm run test
           npm run build
 
   secrets:
@@ -115,3 +168,137 @@ jobs:
           name: keycloak-lab-trivy
           path: keycloak-trivy.json
           retention-days: 30
+
+  upstream-release-rehearsal:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Prepare approved upstream tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/upstream/crane" "$RUNNER_TEMP/upstream/syft" "$RUNNER_TEMP/upstream/trivy" "$RUNNER_TEMP/upstream/docker-config"
+          curl -fsSL --retry 3 https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz -o "$RUNNER_TEMP/upstream/crane.tar.gz"
+          curl -fsSL --retry 3 https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_linux_amd64.tar.gz -o "$RUNNER_TEMP/upstream/syft.tar.gz"
+          curl -fsSL --retry 3 https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz -o "$RUNNER_TEMP/upstream/trivy.tar.gz"
+          echo "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0  $RUNNER_TEMP/upstream/crane.tar.gz" | sha256sum --check
+          echo "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c  $RUNNER_TEMP/upstream/syft.tar.gz" | sha256sum --check
+          echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  $RUNNER_TEMP/upstream/trivy.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/upstream/crane.tar.gz" -C "$RUNNER_TEMP/upstream/crane" crane
+          tar -xzf "$RUNNER_TEMP/upstream/syft.tar.gz" -C "$RUNNER_TEMP/upstream/syft" syft
+          tar -xzf "$RUNNER_TEMP/upstream/trivy.tar.gz" -C "$RUNNER_TEMP/upstream/trivy" trivy
+          DOCKER_CONFIG="$RUNNER_TEMP/upstream/docker-config" "$RUNNER_TEMP/upstream/trivy/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/upstream/trivy-cache" --quiet
+      - name: Rehearse offline image identity, scan and signed evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_upstream_rehearsal \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Build actual synthetic product images and bind release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
+          docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_product_image_rehearsal \
+            --output "$RUNNER_TEMP/product-image-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain product image evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-product-image-release-evidence
+          path: ${{ runner.temp }}/product-image-evidence
+          retention-days: 30
+
+  restic-recovery-rehearsal:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Verify and install pinned restic
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2 -o "$RUNNER_TEMP/restic.bz2"
+          echo "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c  $RUNNER_TEMP/restic.bz2" | sha256sum --check
+          bzip2 -d "$RUNNER_TEMP/restic.bz2"
+          chmod +x "$RUNNER_TEMP/restic"
+      - name: Rehearse encrypted repository and clean restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository -v
+      - name: Validate synthetic backup service and timer syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m infrastructure.deploy.backup_service \
+            --service-output "$RUNNER_TEMP/sovereign-backup.service" \
+            --timer-output "$RUNNER_TEMP/sovereign-backup.timer" \
+            --spec /srv/sovereign/spec.json --repository /srv/sovereign/repository \
+            --password-source /etc/sovereign/backup-password \
+            --restic "$RUNNER_TEMP/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)" \
+            --python /usr/bin/python3 --workdir /opt/sovereign \
+            --staging /srv/sovereign/staging --hour-utc 2 --max-age-hours 24
+          systemd-analyze verify "$RUNNER_TEMP/sovereign-backup.service" \
+            "$RUNNER_TEMP/sovereign-backup.timer"
+      - name: Rehearse encrypted PostgreSQL dump and clean restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/library/postgres@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015"
+          docker pull "$image"
+          .venv/bin/python -m scripts.phase5_postgres_rehearsal \
+            --image "$image" --restic "$RUNNER_TEMP/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
+
+  openfga-policy-probe:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify and install pinned OpenFGA
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://github.com/openfga/openfga/releases/download/v1.22.1/openfga_1.22.1_linux_amd64.tar.gz -o "$RUNNER_TEMP/openfga.tar.gz"
+          echo "80d2d4b582762c02dc86b1246f7f6f54d6854259727b36e5b5c43ba90792814a  $RUNNER_TEMP/openfga.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/openfga"
+          tar -xzf "$RUNNER_TEMP/openfga.tar.gz" -C "$RUNNER_TEMP/openfga" openfga
+      - name: Compare synthetic role matrix and revocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$RUNNER_TEMP/openfga/openfga"
+          python3 -m scripts.phase5_openfga_probe --binary "$binary" \
+            --sha256 "$(sha256sum "$binary" | cut -d' ' -f1)"
