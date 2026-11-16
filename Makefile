@@ -1,4 +1,4 @@
-.PHONY: build check test lab-up lab-check lab-diagnose lab-smoke fixtures
+.PHONY: build check test lab-up lab-check lab-diagnose lab-smoke fixtures recovery-rehearsal
 
 PYTHON ?= .venv/bin/python
 
@@ -30,3 +30,6 @@ lab-smoke:
 fixtures:
 	$(PYTHON) fixtures/generate.py
 	$(PYTHON) fixtures/phase-1/generate.py
+
+recovery-rehearsal: fixtures
+	$(PYTHON) -m scripts.phase5_recovery_rehearsal
