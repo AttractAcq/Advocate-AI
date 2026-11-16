@@ -29,3 +29,8 @@ recorded in the [scan triage](product-image-scan.md), Console findings currently
 deny the product bundle. A passing synthetic signature later would establish
 only software behavior; release key custody, licence review, target tests and
 site approvals remain open.
+
+The [PR #31 CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/43889746690)
+shows `product_bundle: denied-findings` with Core preflight passing and Console
+intake denying four findings. All eight CI jobs passed because denial is the
+required behavior for this candidate.
