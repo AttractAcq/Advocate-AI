@@ -24,6 +24,7 @@ class BootServiceTests(unittest.TestCase):
         self.assertIn("ConditionPathExists=/var/lib/sovereign-lab/product-state.json", unit)
         self.assertIn("ReadWritePaths=/var/lib/sovereign-lab", unit)
         self.assertIn("ExecStart=/opt/sovereign/bin/python -m infrastructure.deploy.product_installer recover", unit)
+        self.assertIn("ExecStart=/opt/sovereign/bin/python -m infrastructure.deploy.product_installer cleanup-orphans", unit)
         output = self.base / "sovereign-lab-recover.service"
         write_recovery_unit(output, *self.paths)
         self.assertEqual(output.read_text(), unit)
