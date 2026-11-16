@@ -263,12 +263,52 @@ def verify_runtime_identity(handle: RuntimeHandle) -> None:
             raise RuntimeError("synthetic runtime network attachment mismatch")
 
 
-def probe_runtime(handle: RuntimeHandle) -> None:
+def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
+                               lab_password_file: Path | None) -> None:
+    """Check that a running Core still uses the installation's declared mounts."""
+    _core_state_options(core_state, lab_password_file)
+    try:
+        mounts = json.loads(_docker("inspect", handle.core_id, "--format", "{{json .Mounts}}"))
+        environment = json.loads(_docker("inspect", handle.core_id, "--format",
+                                         "{{json .Config.Env}}"))
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("invalid Core runtime mount metadata") from exc
+    if not isinstance(mounts, list) or not isinstance(environment, list):
+        raise RuntimeError("invalid Core runtime mount metadata")
+    targets = {"/var/lib/sovereign", "/run/secrets/lab-password"}
+    selected = [item for item in mounts if isinstance(item, dict)
+                and item.get("Destination") in targets]
+    prefixes = ("SOVEREIGN_FIXTURE_ROOT=", "SOVEREIGN_HISTORY_DB=",
+                "SOVEREIGN_LAB_PASSWORD_FILE=")
+    relevant = [item for item in environment if isinstance(item, str)
+                and item.startswith(prefixes)]
+    if core_state is None:
+        if selected or relevant:
+            raise RuntimeError("unexpected Core state mount")
+        return
+    expected = {"/var/lib/sovereign": ("bind", str(core_state.resolve()), True),
+                "/run/secrets/lab-password": ("bind", str(lab_password_file.resolve()), False)}
+    if (len(selected) != 2 or
+            {item["Destination"]: (item.get("Type"), item.get("Source"), item.get("RW"))
+             for item in selected} != expected or
+            _docker("inspect", handle.core_id, "--format", "{{.Config.User}}") !=
+            f"{os.getuid()}:{os.getgid()}"):
+        raise RuntimeError("Core state mount identity mismatch")
+    required = {"SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
+                "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"}
+    if len(relevant) != 3 or set(relevant) != required:
+        raise RuntimeError("Core state environment mismatch")
+
+
+def probe_runtime(handle: RuntimeHandle, core_state: Path | None = None,
+                  lab_password_file: Path | None = None) -> None:
     """Fail if the current Core and Console no longer satisfy lab health checks."""
     verify_runtime_identity(handle)
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
             raise RuntimeError("synthetic runtime is stopped")
+    _verify_core_state_runtime(handle, core_state, lab_password_file)
     _health(handle.core_id)
 
 

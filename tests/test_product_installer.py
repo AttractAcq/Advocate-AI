@@ -31,6 +31,67 @@ class ProductInstallerTests(unittest.TestCase):
         self.old = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
         self.new = RuntimeHandle("d" * 64, "e" * 64, "f" * 64)
 
+    def _external_state(self) -> tuple[Path, Path]:
+        state = self.base / "restored-state"
+        state.mkdir(mode=0o700)
+        (state / "sources").mkdir()
+        for name in ("roles.json", "manifest.csv", "history.db"):
+            item = state / name
+            item.write_text("synthetic")
+            item.chmod(0o600)
+        credential = self.base / "lab-password"
+        credential.write_text("synthetic-passphrase\n")
+        credential.chmod(0o600)
+        return state, credential
+
+    def test_external_state_persists_through_upgrade_and_recovery(self) -> None:
+        state, credential = self._external_state()
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=[self.old, self.new, self.old, self.new]) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.verify_runtime_identity"), \
+             patch("infrastructure.deploy.product_installer.stop_runtime"):
+            first = install_product(self.first, self.key, self.crane, self.config,
+                                    self.root, state, credential)
+            mount_record = json.loads((self.root / "product-core-mount.json").read_text())
+            self.assertEqual(mount_record["state"], str(state.resolve()))
+            self.assertEqual(mount_record["credential"], str(credential.resolve()))
+            self.assertEqual((self.root / "product-core-mount.json").stat().st_mode & 0o077, 0)
+            install_product(self.second, self.key, self.crane, self.config, self.root)
+            self.assertEqual(rollback_product(self.root, self.key, self.crane)["active"],
+                             first["active"])
+            probe.side_effect = ContainerRuntimeError("stopped")
+            self.assertEqual(recover_product(self.root, self.key, self.crane)["result"],
+                             "recovered")
+            self.assertEqual(start.call_count, 4)
+            for call in start.call_args_list:
+                self.assertEqual(call.kwargs["core_state"], state.resolve())
+                self.assertEqual(call.kwargs["lab_password_file"], credential.resolve())
+            self.assertEqual(probe.call_args.args[1:],
+                             (state.resolve(), credential.resolve()))
+
+    def test_late_mount_change_and_tampered_mount_record_fail_closed(self) -> None:
+        state, credential = self._external_state()
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old), \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe:
+            install_product(self.first, self.key, self.crane, self.config, self.root)
+            with self.assertRaises(ProductInstallError):
+                install_product(self.second, self.key, self.crane, self.config,
+                                self.root, state, credential)
+            self.assertFalse((self.root / "product-core-mount.json").exists())
+            probe.assert_not_called()
+        record = self.root / "product-core-mount.json"
+        record.symlink_to(credential)
+        with patch("infrastructure.deploy.product_installer.probe_runtime") as probe:
+            with self.assertRaises(ProductInstallError):
+                product_status(self.root, self.key)
+            probe.assert_not_called()
+
     def test_activate_then_rollback_and_idempotence(self) -> None:
         with patch("infrastructure.deploy.product_installer.verify_bundle",
                    return_value={"schema": 4}), \

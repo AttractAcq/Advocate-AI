@@ -173,21 +173,6 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 lab_credential = root / "lab-password"
                 lab_credential.write_text(PASSPHRASE + "\n")
                 lab_credential.chmod(0o600)
-                state_console_config = root / "synthetic-console-config.json"
-                state_console_config.write_text('{"schema":1,"oidc_issuer":null}\n')
-                state_runtime = start_verified_bundle(
-                    product_bundle, trusted, crane, state_console_config,
-                    core_state=state, lab_password_file=lab_credential)
-                try:
-                    before = _probe(state_runtime.core_id, conversation_id, "before")
-                    roles = json.loads((state / "roles.json").read_text())
-                    roles["allow"]["chief_engineer"] = ["deck"]
-                    (state / "roles.json").write_text(json.dumps(roles))
-                    after = _probe(state_runtime.core_id, conversation_id, "after")
-                    result["signed_state_runtime"] = {"snapshot_id": snapshot_id,
-                                                      "before": before, "after": after}
-                finally:
-                    stop_runtime(state_runtime)
                 second_bundle = root / "signed-product-trial-2"
                 create_product_bundle(payload, second_bundle, private,
                                       "synthetic-product-trial-2", descriptors,
@@ -201,8 +186,19 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         stream.write(b'{"schema":1,"oidc_issuer":null}\n')
                     config.chmod(0o644)
                     first = install_product(product_bundle, trusted, crane, config,
-                                            install_root)
+                                            install_root, state, lab_credential)
                     try:
+                        def active_core() -> str:
+                            active = json.loads((install_root / "product-state.json").read_text())
+                            return str(active["runtime"]["core_id"])
+
+                        before = _probe(active_core(), conversation_id, "before")
+                        roles = json.loads((state / "roles.json").read_text())
+                        roles["allow"]["chief_engineer"] = ["deck"]
+                        (state / "roles.json").write_text(json.dumps(roles))
+                        after = _probe(active_core(), conversation_id, "after")
+                        result["signed_state_runtime"] = {"snapshot_id": snapshot_id,
+                                                          "before": before, "after": after}
                         unit = root / "sovereign-synthetic-recover.service"
                         write_recovery_unit(unit, install_root, trusted, crane,
                                             Path(sys.executable), Path.cwd())
@@ -248,12 +244,14 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             raise AssertionError("previous product release was not retained")
                         if product_status(install_root, trusted)["active"] != second["active"]:
                             raise AssertionError("replacement product status mismatch")
+                        _probe(active_core(), conversation_id, "after")
                         result["switchover"] = "healthy-candidate-activated"
                         restored = rollback_product(install_root, trusted, crane)
                         if restored["active"] != first["active"]:
                             raise AssertionError("product rollback did not restore prior release")
                         if product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("rolled back product is unhealthy")
+                        _probe(active_core(), conversation_id, "after")
                         result["rollback"] = "previous-release-restored"
                         stopped_state = json.loads((install_root / "product-state.json").read_text())
                         stopped_runtime = RuntimeHandle(**stopped_state["runtime"])
@@ -268,6 +266,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         if recovery["result"] != "recovered" or \
                                 product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("stopped runtime did not recover from staged bundle")
+                        _probe(active_core(), conversation_id, "after")
                         try:
                             _docker("inspect", stopped_runtime.core_id)
                         except subprocess.CalledProcessError:
@@ -275,9 +274,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         else:
                             raise AssertionError("recovered old runtime was not retired")
                         result["recovery"] = "staged-release-restarted"
+                        result["installer_state_continuity"] = "install-upgrade-rollback-recover"
                     finally:
-                        state = json.loads((install_root / "product-state.json").read_text())
-                        stop_runtime(RuntimeHandle(**state["runtime"]))
+                        active_state = json.loads((install_root / "product-state.json").read_text())
+                        stop_runtime(RuntimeHandle(**active_state["runtime"]))
                 finally:
                     config.unlink(missing_ok=True)
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")

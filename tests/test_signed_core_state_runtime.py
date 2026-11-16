@@ -1,10 +1,15 @@
 """Fail closed before Docker receives untrusted restored-state mount paths."""
 
+import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from infrastructure.deploy.container_runtime import RuntimeError, _core_state_options
+from infrastructure.deploy.container_runtime import (
+    RuntimeError, RuntimeHandle, _core_state_options, _verify_core_state_runtime,
+)
 
 
 class SignedCoreStateMountTests(unittest.TestCase):
@@ -52,6 +57,37 @@ class SignedCoreStateMountTests(unittest.TestCase):
         (self.state / "roles.json").chmod(0o666)
         with self.assertRaises(RuntimeError):
             _core_state_options(self.state, self.credential)
+
+    def test_runtime_mount_identity_catches_replaced_state(self) -> None:
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        mounts = [
+            {"Destination": "/var/lib/sovereign", "Type": "bind",
+             "Source": str(self.state.resolve()), "RW": True},
+            {"Destination": "/run/secrets/lab-password",
+             "Type": "bind", "Source": str(self.credential.resolve()), "RW": False},
+        ]
+        environment = ["SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
+                       "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                       "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"]
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[-1] == "{{json .Mounts}}":
+                return json.dumps(mounts)
+            if args[-1] == "{{json .Config.Env}}":
+                return json.dumps(environment)
+            if args[-1] == "{{.Config.User}}":
+                return f"{os.getuid()}:{os.getgid()}"
+            raise AssertionError("unexpected Docker inspection")
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            _verify_core_state_runtime(handle, self.state, self.credential)
+            mounts[0]["Source"] = str(self.root / "other")
+            with self.assertRaises(RuntimeError):
+                _verify_core_state_runtime(handle, self.state, self.credential)
+            mounts[0]["Source"] = str(self.state.resolve())
+            environment.append("SOVEREIGN_FIXTURE_ROOT=/tmp/other")
+            with self.assertRaises(RuntimeError):
+                _verify_core_state_runtime(handle, self.state, self.credential)
 
 
 if __name__ == "__main__":
