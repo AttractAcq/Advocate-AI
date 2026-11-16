@@ -31,7 +31,7 @@ from independent product security review.
 | ID | Work | Next locally verifiable result | State |
 |---|---|---|---|
 | W-01 | Signed offline release directory (T-024) | [PR #12](https://github.com/AttractAcq/Advocate-AI/pull/12) contains Ed25519 signing, exact inventory and tamper rejection; [runbook](phase-5/offline-release.md). Approved artifact intake, SBOM, media scan and staged rollback remain | Signing slice locally complete; T-024 open |
-| W-02 | Health and diagnostic checks (T-025/T-028) | Config-driven bounded HTTPS and read-only SQLite probes are implemented with a metadata-only report; [runbook](phase-5/diagnostics.md). Test real model, Wazuh, PostgreSQL, Keycloak and target-host routes when available | Local probe slice complete; target checks open |
+| W-02 | Health and diagnostic checks (T-025/T-028) | [PR #13](https://github.com/AttractAcq/Advocate-AI/pull/13) implements bounded HTTPS and read-only SQLite probes with a metadata-only report; [runbook](phase-5/diagnostics.md). Test real model, Wazuh, PostgreSQL, Keycloak and target-host routes when available | Local probe slice complete; target checks open |
 | W-03 | Backup/restore software (T-025) | Encrypted synthetic backup format, integrity check and automated local restore rehearsal; actual key custody and clean-host timing remain B-07 | Open |
 | W-04 | Installer/configuration validation (T-028) | Idempotent synthetic install, local PKI/config checks and post-install probes | Open |
 | W-05 | Security hardening and tests (T-022/T-026) | Expand role, malicious attachment, audit and container/configuration scans; host/network proof remains B-06/B-08 | Open |
