@@ -1,5 +1,14 @@
 # Synthetic product image scan triage
 
+**Current synthetic candidate:** the pinned Nginx Console and Alpine Core
+images passed exact archive preflight with zero HIGH, CRITICAL or UNKNOWN
+findings in the [PR #32 CI run](https://github.com/AttractAcq/Advocate-AI/actions/runs/43890872823).
+The combined bundle verified under an ephemeral synthetic key. The Caddy
+findings below are retained as the reason for changing the Console server;
+they do not describe the current candidate.
+
+## Earlier Caddy baseline
+
 The [CI run for PR #29](https://github.com/AttractAcq/Advocate-AI/actions/runs/43886246571)
 built the pinned Core and Console images and retained `synthetic-product-image-trivy`
 reports. Trivy 0.76.2 reported **zero HIGH/CRITICAL findings in Core** and **two
@@ -18,8 +27,8 @@ The first Debian Core build reported 54 HIGH findings. A pinned Alpine base
 reduced that to five, all in pip's vendored packages; removing build-only pip
 from the runtime image reduced the report to zero. The final Core image still
 needs exact digest, archive/SBOM/scan binding, distribution licence review and
-target validation through [release intake](release-intake.md). Neither the
-Console findings nor any other product image findings are accepted for release.
+target validation through [release intake](release-intake.md). The Caddy
+findings were not accepted for release.
 
 ## Exact archive rehearsal
 
@@ -48,3 +57,22 @@ The Core scan JSON SHA-256 is
 The registry names in the result are synthetic digest identifiers; no image
 was pushed to that registry. The signing key was temporary and is not a
 release trust anchor.
+
+## Current Nginx candidate
+
+The [PR #32 evidence artifact](https://github.com/AttractAcq/Advocate-AI/actions/runs/43890872823)
+records Core manifest
+`sha256:faa0b5ed28a23e822d2b989f4de5a3363121bce323b01bd2c5d6814bb9ba3312`
+and Console manifest
+`sha256:2b779dddec18c7e07ff9abd41608b451ab81d2b03159568a9242e77be0d95dd4`.
+Syft identified 960 Core and 724 Console components. Pinned Trivy 0.76.2
+reported zero HIGH, CRITICAL or UNKNOWN findings in each saved archive. Both
+preflights passed and the schema-4 product bundle was signed and verified with
+an ephemeral synthetic key. The Core scan SHA-256 is
+`7edb69ff286fa436b19ec44dede610ab88132fc8e403a2372a04fc2bed45500c`;
+the Console scan SHA-256 is
+`96e28a07d6a5f9afdec3a83aa7c74f96a54d0bc86c791e43a4b6e750f088bcf4`.
+The key and archives were discarded after CI; the retained scans and SBOMs
+are rehearsal evidence, not a distributable release. Production image
+provenance, publisher authentication, licence rights, protected signing keys,
+target tests and independent security approval remain open.
