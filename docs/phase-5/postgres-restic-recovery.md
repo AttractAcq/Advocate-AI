@@ -6,7 +6,8 @@ rows to the first, captures a custom-format `pg_dump` archive, stores that
 archive in the pinned restic encrypted repository, deletes the plaintext
 copy, restores the exact snapshot to a new private directory, and streams the
 archive into the second clean database with `pg_restore --single-transaction`.
-The job checks the archive hash and compares the restored rows. CI pulls the
+The exporter enforces a 16 MiB limit while streaming and removes partial dumps
+on failure. The job checks the archive hash and compares the restored rows. CI pulls the
 synthetic PostgreSQL image by the exact digest recorded during the first
 passing runner rehearsal; production image provenance remains open.
 

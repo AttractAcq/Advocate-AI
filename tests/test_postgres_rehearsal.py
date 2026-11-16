@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -23,13 +24,29 @@ class PostgresRehearsalTests(unittest.TestCase):
 
     def test_failed_dump_leaves_no_partial_archive(self) -> None:
         output = self.root / "postgres.dump"
+        original_popen = subprocess.Popen
 
-        def fail(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
-            kwargs["stdout"].write(b"partial")
-            return subprocess.CompletedProcess(args[0], 1, b"", b"synthetic failure")
+        def fail(*args: object, **kwargs: object) -> subprocess.Popen:
+            return original_popen([sys.executable, "-c",
+                                   "import os,sys; os.write(1,b'partial'); sys.exit(1)"],
+                                  **kwargs)
 
-        with patch("scripts.phase5_postgres_rehearsal.subprocess.run", side_effect=fail):
+        with patch("scripts.phase5_postgres_rehearsal.subprocess.Popen", side_effect=fail):
             with self.assertRaises(RuntimeError):
+                _dump("synthetic-container", output)
+        self.assertFalse(output.exists())
+
+    def test_oversized_dump_is_stopped_and_removed(self) -> None:
+        output = self.root / "postgres.dump"
+        original_popen = subprocess.Popen
+
+        def oversized(*args: object, **kwargs: object) -> subprocess.Popen:
+            return original_popen([sys.executable, "-c",
+                                   "import os; os.write(1,b'PGDMP'+b'x'*(17*1024*1024))"],
+                                  **kwargs)
+
+        with patch("scripts.phase5_postgres_rehearsal.subprocess.Popen", side_effect=oversized):
+            with self.assertRaisesRegex(RuntimeError, "exceeded size limit"):
                 _dump("synthetic-container", output)
         self.assertFalse(output.exists())
 

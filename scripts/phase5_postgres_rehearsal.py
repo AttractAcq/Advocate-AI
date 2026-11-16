@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import subprocess
 import tempfile
 import time
@@ -18,6 +19,7 @@ from infrastructure.restic_repository import create_snapshot, restore_snapshot
 
 _IMAGE = re.compile(r"(?:docker.io/library/)?postgres@sha256:[0-9a-f]{64}\Z")
 _EXPECTED = "1|synthetic-alpha\n2|synthetic-beta"
+_MAX_DUMP_BYTES = 16 * 1024 * 1024
 
 
 def _docker(*args: str, timeout: int = 60) -> str:
@@ -56,11 +58,36 @@ def _dump(identifier: str, output: Path) -> None:
                          0o600)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            result = subprocess.run(["docker", "exec", "-u", "postgres", identifier,
-                                     "pg_dump", "-Fc", "--no-owner", "--no-acl",
-                                     "-d", "postgres"], stdout=stream,
-                                    stderr=subprocess.PIPE, timeout=120)
-        if result.returncode or not 5 <= output.stat().st_size <= 16 * 1024 * 1024:
+            with subprocess.Popen(["docker", "exec", "-u", "postgres", identifier,
+                                   "pg_dump", "-Fc", "--no-owner", "--no-acl",
+                                   "-d", "postgres"], stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL) as process:
+                if process.stdout is None:
+                    raise RuntimeError("synthetic PostgreSQL dump stream missing")
+                deadline = time.monotonic() + 120
+                size = 0
+                try:
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("synthetic PostgreSQL dump timed out")
+                        if not select.select([process.stdout], [], [], remaining)[0]:
+                            raise TimeoutError("synthetic PostgreSQL dump timed out")
+                        block = os.read(process.stdout.fileno(), 64 * 1024)
+                        if not block:
+                            break
+                        size += len(block)
+                        if size > _MAX_DUMP_BYTES:
+                            raise RuntimeError("synthetic PostgreSQL dump exceeded size limit")
+                        stream.write(block)
+                    if process.wait(timeout=max(0.1, deadline - time.monotonic())):
+                        raise RuntimeError("synthetic PostgreSQL dump failed")
+                except Exception:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
+                    raise
+        if not 5 <= size <= _MAX_DUMP_BYTES:
             raise RuntimeError("synthetic PostgreSQL dump failed or exceeded size limit")
         with output.open("rb") as stream:
             header = stream.read(5)
