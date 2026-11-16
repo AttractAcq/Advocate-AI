@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from infrastructure.deploy.container_runtime import (
     RuntimeError, RuntimeHandle, _archive_image_ids, _validate_console_config,
-    start_verified_bundle, switch_verified_bundle,
+    probe_runtime, start_verified_bundle, switch_verified_bundle,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -114,6 +114,38 @@ class ContainerRuntimeTests(unittest.TestCase):
             self.assertEqual(result, candidate)
             probe.assert_called_once_with(previous)
             stop.assert_called_once_with(previous)
+
+    def test_persisted_runtime_must_match_labelled_internal_network(self) -> None:
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        name = "sovereign-synthetic-123456abcdef"
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[0] == "network" and "sovereign.synthetic.run" in args[-1]:
+                return name
+            if args[0] == "network":
+                return "true"
+            if args[-1] == "{{.State.Running}}":
+                return "true"
+            if "sovereign.synthetic.run" in args[-1]:
+                return name
+            return json.dumps({name: {"NetworkID": handle.network_id}})
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker), \
+             patch("infrastructure.deploy.container_runtime._health") as health:
+            probe_runtime(handle)
+            health.assert_called_once_with(handle.core_id)
+
+        def wrong_network(*args: str, timeout: int = 120) -> str:
+            if args[-1] == "{{json .NetworkSettings.Networks}}":
+                return json.dumps({name: {"NetworkID": "d" * 64}})
+            return docker(*args, timeout=timeout)
+
+        with patch("infrastructure.deploy.container_runtime._docker",
+                   side_effect=wrong_network), \
+             patch("infrastructure.deploy.container_runtime._health") as health:
+            with self.assertRaises(RuntimeError):
+                probe_runtime(handle)
+            health.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -207,9 +207,24 @@ def stop_runtime(handle: RuntimeHandle) -> None:
 
 def probe_runtime(handle: RuntimeHandle) -> None:
     """Fail if the current Core and Console no longer satisfy lab health checks."""
+    run_name = _docker("network", "inspect", handle.network_id, "--format",
+                       '{{index .Labels "sovereign.synthetic.run"}}')
+    if (not re.fullmatch(r"sovereign-synthetic-[0-9a-f]{12}", run_name) or
+            _docker("network", "inspect", handle.network_id, "--format",
+                    "{{.Internal}}") != "true"):
+        raise RuntimeError("synthetic runtime network identity mismatch")
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
             raise RuntimeError("synthetic runtime is stopped")
+        if _docker("inspect", identifier, "--format",
+                   '{{index .Config.Labels "sovereign.synthetic.run"}}') != run_name:
+            raise RuntimeError("synthetic runtime container identity mismatch")
+        networks = json.loads(_docker("inspect", identifier, "--format",
+                                    "{{json .NetworkSettings.Networks}}"))
+        if (not isinstance(networks, dict) or len(networks) != 1 or
+                run_name not in networks or not isinstance(networks[run_name], dict) or
+                networks[run_name].get("NetworkID") != handle.network_id):
+            raise RuntimeError("synthetic runtime network attachment mismatch")
     _health(handle.core_id)
 
 
@@ -236,7 +251,8 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
     ids = {role: _image_id(bundle, role, images[role], crane)
            for role in ("core", "console")}
     name = f"sovereign-synthetic-{uuid.uuid4().hex[:12]}"
-    network_id = _docker("network", "create", "--internal", name)
+    network_id = _docker("network", "create", "--internal", "--label",
+                         f"sovereign.synthetic.run={name}", name)
     if len(network_id) != 64 or _docker("network", "inspect", network_id,
                                      "--format", "{{.Internal}}") != "true":
         stop_runtime(RuntimeHandle(network_id, "", ""))
@@ -245,11 +261,13 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
     console_id = ""
     try:
         core_id = _docker("run", "-d", "--pull", "never", "--name", name + "-core",
+                          "--label", f"sovereign.synthetic.run={name}",
                           "--network", name, "--network-alias", "core", "--read-only",
                           "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                           "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                           ids["core"])
         console_id = _docker("run", "-d", "--pull", "never", "--name", name + "-console",
+                             "--label", f"sovereign.synthetic.run={name}",
                              "--network", name, "--network-alias", "console", "--read-only",
                              "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                              "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
