@@ -21,14 +21,19 @@ empty scan; malformed findings; any HIGH, CRITICAL or UNKNOWN vulnerability;
 an unresolved or candidate-only SBOM; or a component without a SHA-256 hash.
 A pass prints the image and evidence hashes so the reviewer can attach them to
 the controlled release record. The local synthetic tests exercise both the
-pass and denial paths.
+pass and denial paths. The [candidate bundle command](offline-release.md)
+runs this preflight again and includes the evidence files in its signed
+inventory. The bundle verifier reruns it against the signed creation time;
+the signed timestamp is an assertion by the release signer, not a trusted
+external timestamp.
 
 This check reads supplied files. It does not authenticate the scanner, prove
 that the scan covered every package, establish image or dependency provenance,
-verify licence rights, triage findings, or bind the evidence to a signed
-release bundle. A `sovereign-ai:inventory-status` property is a release process
-assertion that must be independently checked. The existing `bundle pack`
-command remains a synthetic signing exercise and does not invoke this
-preflight. Release owners must verify those controls and the final artifact
-set before signing. The [first lab Keycloak scan](keycloak-lab-image-scan.json)
+verify licence rights or triage findings. A `sovereign-ai:inventory-status`
+property is a release process assertion that must be independently checked.
+The evidence names an OCI image digest, but this check does not prove a
+particular image archive in the bundle contains that digest. The legacy
+`bundle pack` command remains a synthetic signing exercise without evidence
+preflight. Release owners must verify provenance, scan coverage and the final
+artifact set before signing. The [first lab Keycloak scan](keycloak-lab-image-scan.json)
 contains six HIGH findings and cannot pass this preflight.
