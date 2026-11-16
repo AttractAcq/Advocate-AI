@@ -16,10 +16,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_candidate_bundle, create_product_bundle, verify_bundle
 from infrastructure.deploy.container_runtime import (
-    RuntimeHandle, stop_runtime,
+    RuntimeError as ContainerRuntimeError, RuntimeHandle, stop_runtime,
 )
 from infrastructure.deploy.product_installer import (
-    install_product, product_status, rollback_product,
+    install_product, product_status, recover_product, rollback_product,
 )
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
@@ -200,6 +200,21 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         if product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("rolled back product is unhealthy")
                         result["rollback"] = "previous-release-restored"
+                        stopped_state = json.loads((install_root / "product-state.json").read_text())
+                        stopped_runtime = RuntimeHandle(**stopped_state["runtime"])
+                        _docker("stop", stopped_runtime.console_id)
+                        try:
+                            product_status(install_root, trusted)
+                        except ContainerRuntimeError:
+                            pass
+                        else:
+                            raise AssertionError("stopped Console unexpectedly passed health")
+                        recovery = recover_product(install_root, trusted, crane)
+                        if recovery["result"] != "recovered" or \
+                                product_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("stopped runtime did not recover from staged bundle")
+                        stop_runtime(stopped_runtime)
+                        result["recovery"] = "staged-release-restarted"
                     finally:
                         state = json.loads((install_root / "product-state.json").read_text())
                         stop_runtime(RuntimeHandle(**state["runtime"]))

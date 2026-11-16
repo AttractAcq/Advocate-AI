@@ -18,8 +18,8 @@ import shutil
 import tempfile
 
 from infrastructure.deploy.container_runtime import (
-    RuntimeHandle, _validate_console_config, probe_runtime, start_verified_bundle,
-    stop_runtime,
+    RuntimeError as ContainerRuntimeError, RuntimeHandle, _validate_console_config,
+    probe_runtime, start_verified_bundle, stop_runtime,
 )
 from infrastructure.release.bundle import BundleError, verify_bundle
 
@@ -208,14 +208,42 @@ def rollback_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, ob
         return _activate(root, stage, identifier, trusted_key, crane)
 
 
+def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, object]:
+    """Recreate the signed active lab release when its runtime is unhealthy."""
+    _owner_directory(root, create=False)
+    with _lock(root):
+        current = _state(root)
+        if current is None:
+            raise ProductInstallError("no active product release")
+        identifier = str(current["active"])
+        stage = root / "product-releases" / identifier
+        _verify_stage(stage, trusted_key, identifier)
+        try:
+            probe_runtime(_handle(current))
+        except ContainerRuntimeError:
+            pass
+        else:
+            return {"result": "already_healthy", "active": identifier,
+                    "previous": current["previous"]}
+        candidate = start_verified_bundle(stage / "bundle", trusted_key, crane,
+                                          stage / "console-config.json")
+        try:
+            _write_state(root, identifier, current["previous"], candidate)
+        except Exception:
+            stop_runtime(candidate)
+            raise
+        return {"result": "recovered", "active": identifier,
+                "previous": current["previous"]}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic two-image product installer")
     actions = parser.add_subparsers(dest="action", required=True)
-    for action in ("install", "status", "rollback"):
+    for action in ("install", "status", "rollback", "recover"):
         command = actions.add_parser(action)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
-        if action in ("install", "rollback"):
+        if action in ("install", "rollback", "recover"):
             command.add_argument("--crane", required=True, type=Path)
         if action == "install":
             command.add_argument("--bundle", required=True, type=Path)
@@ -227,6 +255,8 @@ def main() -> None:
                                      args.console_config, args.root)
         elif args.action == "rollback":
             result = rollback_product(args.root, args.trusted_key, args.crane)
+        elif args.action == "recover":
+            result = recover_product(args.root, args.trusted_key, args.crane)
         else:
             result = product_status(args.root, args.trusted_key)
     except (BundleError, ProductInstallError, OSError, ValueError) as exc:
