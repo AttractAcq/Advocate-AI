@@ -174,3 +174,26 @@ jobs:
           set -euo pipefail
           uv sync --locked
           SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository -v
+
+  openfga-policy-probe:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify and install pinned OpenFGA
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://github.com/openfga/openfga/releases/download/v1.22.1/openfga_1.22.1_linux_amd64.tar.gz -o "$RUNNER_TEMP/openfga.tar.gz"
+          echo "80d2d4b582762c02dc86b1246f7f6f54d6854259727b36e5b5c43ba90792814a  $RUNNER_TEMP/openfga.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/openfga"
+          tar -xzf "$RUNNER_TEMP/openfga.tar.gz" -C "$RUNNER_TEMP/openfga" openfga
+      - name: Compare synthetic role matrix and revocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$RUNNER_TEMP/openfga/openfga"
+          python3 -m scripts.phase5_openfga_probe --binary "$binary" \
+            --sha256 "$(sha256sum "$binary" | cut -d' ' -f1)"
