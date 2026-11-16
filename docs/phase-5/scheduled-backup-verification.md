@@ -2,8 +2,8 @@
 
 The renderer creates a `sovereign-backup.service` and matching timer for a
 daily UTC run. The one-shot service creates an allowlisted restic snapshot,
-checks all repository data, then fails if the latest tagged Sovereign snapshot
-is older than the chosen maximum age. Its dedicated `sovereign-backup` user,
+then requires a recent tagged Sovereign snapshot, checks all repository data
+and performs a clean restore into private temporary staging. Its dedicated `sovereign-backup` user,
 private network namespace, read-only system view and two allowed write paths
 are candidate controls for the Ubuntu lab. The password is loaded as a
 systemd credential; its bytes are not placed in the unit or command line.
@@ -33,7 +33,7 @@ on Ubuntu and runs a real pinned-restic snapshot, full data check, clean
 restore and stale/empty repository cases with fictional files.
 
 Site approval must set the schedule and age limit, provision the account and
-protected media, monitor timer failures, and validate write permissions and
+encrypted staging capacity and protected media, monitor timer failures, and validate write permissions and
 power-off recovery on target hardware. The synthetic unit covers allowlisted
 files and SQLite only. PostgreSQL, Keycloak, model, configuration and Wazuh
 state need a coordinated full-stack backup and clean-host recovery procedure;

@@ -166,16 +166,21 @@ def restore_snapshot(snapshot_id: str, repository: Path, password_file: Path,
 
 def verify_repository(repository: Path, password_file: Path, restic: Path,
                       restic_sha256: str, max_age_hours: int,
+                      verification_staging: Path,
                       now: datetime | None = None) -> dict[str, object]:
-    """Check all encrypted data and require a recent Sovereign snapshot."""
+    """Require a recent Sovereign snapshot and prove a clean private restore."""
     if type(max_age_hours) is not int or not 1 <= max_age_hours <= 168:
         raise ResticError("snapshot maximum age must be 1–168 hours")
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         raise ResticError("verification clock must have a timezone")
     current = current.astimezone(timezone.utc)
+    if (verification_staging.is_symlink() or not verification_staging.is_dir()
+            or stat.S_IMODE(verification_staging.stat().st_mode) & 0o077
+            or verification_staging.resolve().is_relative_to(repository.resolve())
+            or repository.resolve().is_relative_to(verification_staging.resolve())):
+        raise ResticError("verification staging must be a separate owner-only directory")
     _preflight(restic, restic_sha256, repository, password_file)
-    _run(restic, repository, password_file, "check", "--read-data")
     try:
         rows = json.loads(_run(restic, repository, password_file, "snapshots", "--json",
                                "--tag", SNAPSHOT_TAG, "--host", SNAPSHOT_HOST),
@@ -209,9 +214,14 @@ def verify_repository(repository: Path, password_file: Path, restic: Path,
     age = max(timedelta(), current - latest[0])
     if age > timedelta(hours=max_age_hours):
         raise ResticError("latest Sovereign snapshot is stale")
+    with tempfile.TemporaryDirectory(prefix=".sovereign-verify-",
+                                     dir=verification_staging) as temporary:
+        restored = restore_snapshot(latest[1], repository, password_file, restic,
+                                    restic_sha256, Path(temporary) / "restored")
     return {"status": "verified", "snapshot_count": len(rows),
             "latest_snapshot_id": latest[1], "age_seconds": int(age.total_seconds()),
-            "max_age_hours": max_age_hours, "restic_version": RESTIC_VERSION}
+            "max_age_hours": max_age_hours, "restored_files": restored["files"],
+            "restic_version": RESTIC_VERSION}
 
 
 def main() -> None:
@@ -231,6 +241,7 @@ def main() -> None:
             command.add_argument("--destination", required=True, type=Path)
         else:
             command.add_argument("--max-age-hours", required=True, type=int)
+            command.add_argument("--verification-staging", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "create":
@@ -241,7 +252,8 @@ def main() -> None:
                                       args.restic, args.restic_sha256, args.destination)
         else:
             result = verify_repository(args.repository, args.password_file,
-                                       args.restic, args.restic_sha256, args.max_age_hours)
+                                       args.restic, args.restic_sha256, args.max_age_hours,
+                                       args.verification_staging)
     except (ResticError, BackupError, OSError, ValueError) as exc:
         parser.exit(1, f"restic repository: {exc}\n")
     print(json.dumps(result, sort_keys=True))
