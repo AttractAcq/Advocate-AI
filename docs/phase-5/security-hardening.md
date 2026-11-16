@@ -20,6 +20,11 @@ defence, a sandbox for Docling, zero public egress or a pass on production
 permissions. The [blocker tracker](../blockers-and-build-queue.md) keeps the
 lab and reviewer evidence open.
 
+The subsequent [direct API role-bypass matrix](role-bypass-matrix.md) covers
+25 synthetic role/source combinations and closes a source-listing symlink gap
+in the legacy fixture path. Its local result does not close the independent
+role or target-topology assessments.
+
 **Local verification, 16 November 2026:** `make check` passed 74 tests and
 repository checks. The new output guard accepted all three previously recorded
 synthetic [local-model summaries](../phase-4/answer-evaluation.json); this is

@@ -151,6 +151,24 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.status_code, 503)
         self.assertNotIn("generator inspection", reply.text)
 
+    async def test_replaced_fixture_source_symlink_is_not_listed(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        listed = await self.client.get("/api/sources", headers=engineer)
+        self.assertIn("ENG-001", [item["document_id"] for item in listed.json()["sources"]])
+        source = self.fixtures / "sources/ENG-001.txt"
+        payload = source.read_bytes()
+        with tempfile.TemporaryDirectory() as outside:
+            replacement = Path(outside) / "ENG-001.txt"
+            replacement.write_bytes(payload)
+            source.unlink()
+            source.symlink_to(replacement)
+            listed = await self.client.get("/api/sources", headers=engineer)
+            self.assertNotIn("ENG-001", [item["document_id"] for item in listed.json()["sources"]])
+            reply = await self.client.post("/api/chat", headers=engineer,
+                                           json={"message": "generator inspection"})
+            self.assertEqual(reply.json()["citations"], [])
+            self.assertEqual(self.model.calls, [])
+
     async def test_logout(self) -> None:
         headers = await self.login("lab-deckhand-1")
         self.assertEqual((await self.client.post("/api/logout", headers=headers)).status_code, 200)
