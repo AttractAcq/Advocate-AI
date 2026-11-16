@@ -255,6 +255,21 @@ jobs:
           set -euo pipefail
           uv sync --locked
           SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository -v
+      - name: Validate synthetic backup service and timer syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m infrastructure.deploy.backup_service \
+            --service-output "$RUNNER_TEMP/sovereign-backup.service" \
+            --timer-output "$RUNNER_TEMP/sovereign-backup.timer" \
+            --spec /srv/sovereign/spec.json --repository /srv/sovereign/repository \
+            --password-source /etc/sovereign/backup-password \
+            --restic "$RUNNER_TEMP/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)" \
+            --python /usr/bin/python3 --workdir /opt/sovereign \
+            --staging /srv/sovereign/staging --hour-utc 2 --max-age-hours 24
+          systemd-analyze verify "$RUNNER_TEMP/sovereign-backup.service" \
+            "$RUNNER_TEMP/sovereign-backup.timer"
       - name: Rehearse encrypted PostgreSQL dump and clean restore
         shell: bash
         run: |
