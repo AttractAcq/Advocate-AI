@@ -7,6 +7,9 @@ network, no host-published ports, read-only filesystems, a non-root UID and no
 Linux capabilities. It checks static serving, runtime configuration, Core health
 and unauthenticated API denial. The images contain only fictional generated
 documents and alerts; they are not a production release.
+CI retains HIGH/CRITICAL Trivy reports for both built image tags for triage.
+Those reports do not supply the exact digest and signed archive evidence required
+by release intake.
 
 ```sh
 docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
