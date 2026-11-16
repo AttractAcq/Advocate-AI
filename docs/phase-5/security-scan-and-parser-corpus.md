@@ -18,6 +18,9 @@ Guava version; four SQLite findings had no fixed version in this report, and
 one Java finding was marked `will_not_fix`. No finding has been accepted for a
 release. The raw `keycloak-lab-trivy` artifact in that CI run is the evidence
 source; the committed summary contains no vessel data.
+The [follow-up package triage](keycloak-finding-triage.md) uses the latest
+retained CI report and vendor references. It does not accept any finding or
+qualify the lab image for a release.
 
 ## Parser regression corpus
 
