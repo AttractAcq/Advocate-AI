@@ -30,7 +30,7 @@ jobs:
           image-ref: sovereign-core:synthetic
           version: v0.76.2
           scanners: vuln
-          severity: HIGH,CRITICAL
+          severity: HIGH,CRITICAL,UNKNOWN
           format: json
           output: core-trivy.json
           exit-code: '0'
@@ -42,7 +42,7 @@ jobs:
           image-ref: sovereign-console:synthetic
           version: v0.76.2
           scanners: vuln
-          severity: HIGH,CRITICAL
+          severity: HIGH,CRITICAL,UNKNOWN
           format: json
           output: console-trivy.json
           exit-code: '0'
@@ -50,8 +50,8 @@ jobs:
       - name: Summarize built image findings
         run: |
           jq -e '.SchemaVersion and .ArtifactName' core-trivy.json console-trivy.json >/dev/null
-          echo "Core high/critical: $(jq '[.Results[]?.Vulnerabilities[]?] | length' core-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Console high/critical: $(jq '[.Results[]?.Vulnerabilities[]?] | length' console-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Core high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' core-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Console high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' console-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
           echo "This is triage evidence, not release approval." >> "$GITHUB_STEP_SUMMARY"
       - name: Retain built image scan reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
