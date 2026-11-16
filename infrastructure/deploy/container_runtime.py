@@ -1,0 +1,230 @@
+"""Launch a verified synthetic two-image bundle on an isolated Docker network.
+
+This is a disposable lab rehearsal. It never publishes a host port or starts
+model, identity, NAS or Wazuh services.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+import tarfile
+import time
+import uuid
+
+from infrastructure.release.bundle import BundleError, verify_bundle
+from infrastructure.release.upstream import validate_image_archive
+
+
+class RuntimeError(ValueError):
+    """A verified image could not be loaded or safely started in the lab."""
+
+
+@dataclass(frozen=True)
+class RuntimeHandle:
+    network_id: str
+    core_id: str
+    console_id: str
+
+
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+def _archive_image_ids(archive: Path, role: str) -> set[str]:
+    """Read the OCI ID and config ID from a validated single-image Docker save."""
+    try:
+        with tarfile.open(archive, "r") as stream:
+            members_by_name: dict[str, list[tarfile.TarInfo]] = {}
+            for member in stream.getmembers():
+                members_by_name.setdefault(member.name, []).append(member)
+
+            def small_json(name: str) -> object:
+                members = members_by_name.get(name, [])
+                if len(members) != 1 or not members[0].isfile() or members[0].size > 1024 * 1024:
+                    raise RuntimeError("invalid archive control file")
+                source = stream.extractfile(members[0])
+                if source is None:
+                    raise RuntimeError("missing archive control file")
+                return json.loads(source.read())
+
+            docker_manifest = small_json("manifest.json")
+            if (not isinstance(docker_manifest, list) or len(docker_manifest) != 1 or
+                    docker_manifest[0].get("RepoTags") != [f"sovereign-{role}:synthetic"]):
+                raise RuntimeError("archive is not the expected single synthetic image")
+            config_path = docker_manifest[0].get("Config")
+            if "index.json" not in members_by_name:
+                if (not isinstance(config_path, str) or
+                        not re.fullmatch(r"[0-9a-f]{64}\.json", config_path)):
+                    raise RuntimeError("invalid Docker configuration path")
+                config_digest = "sha256:" + config_path[:-5]
+                source = stream.extractfile(members_by_name[config_path][0]) if \
+                    len(members_by_name.get(config_path, [])) == 1 else None
+                if (source is None or members_by_name[config_path][0].size > 1024 * 1024 or
+                        hashlib.sha256(source.read()).hexdigest() != config_digest[7:]):
+                    raise RuntimeError("Docker image configuration hash mismatch")
+                return {config_digest}
+            index = small_json("index.json")
+            if (not isinstance(index, dict) or index.get("schemaVersion") != 2 or
+                    not isinstance(index.get("manifests"), list) or len(index["manifests"]) != 1):
+                raise RuntimeError("archive is not the expected single synthetic image")
+            manifest_digest = index["manifests"][0].get("digest")
+            if not isinstance(manifest_digest, str) or not _DIGEST.fullmatch(manifest_digest):
+                raise RuntimeError("invalid OCI manifest digest")
+            manifest_name = "blobs/sha256/" + manifest_digest[7:]
+            oci_manifest = small_json(manifest_name)
+            if not isinstance(oci_manifest, dict) or not isinstance(oci_manifest.get("config"), dict):
+                raise RuntimeError("invalid OCI image manifest")
+            config_digest = oci_manifest["config"].get("digest")
+            if not isinstance(config_digest, str) or not _DIGEST.fullmatch(config_digest):
+                raise RuntimeError("invalid OCI configuration digest")
+            if config_path != "blobs/sha256/" + config_digest[7:]:
+                raise RuntimeError("Docker and OCI image configurations differ")
+            for digest in (manifest_digest, config_digest):
+                name = "blobs/sha256/" + digest[7:]
+                members = members_by_name.get(name, [])
+                if len(members) != 1 or not members[0].isfile() or members[0].size > 1024 * 1024:
+                    raise RuntimeError("invalid OCI image blob")
+                source = stream.extractfile(members[0])
+                if source is None or hashlib.sha256(source.read()).hexdigest() != digest[7:]:
+                    raise RuntimeError("OCI image blob hash mismatch")
+            return {manifest_digest, config_digest}
+    except (OSError, tarfile.TarError, ValueError, TypeError, AttributeError, KeyError) as exc:
+        raise RuntimeError("invalid single-image archive metadata") from exc
+
+
+def _docker(*args: str, timeout: int = 120) -> str:
+    try:
+        completed = subprocess.run(["docker", *args], capture_output=True, text=True,
+                                   check=True, timeout=timeout)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Docker operation failed: {args[0]} {args[1] if len(args) > 1 else ''}") from exc
+    return completed.stdout.strip()
+
+
+def _image_id(bundle: Path, role: str, item: dict[str, str], crane: Path) -> str:
+    archive = bundle / item["archive_path"]
+    identity = validate_image_archive(archive, item["image_ref"], crane,
+                                      item["crane_sha256"])
+    if identity["archive_sha256"] != item["archive_sha256"]:
+        raise RuntimeError("image archive changed after bundle verification")
+    expected_ids = _archive_image_ids(archive, role)
+    _docker("load", "-i", str(archive), timeout=300)
+    tag = f"sovereign-{role}:synthetic"
+    raw = _docker("image", "inspect", tag, "--format", "{{json .RepoDigests}}|{{.Id}}")
+    try:
+        digests_json, image_id = raw.split("|", 1)
+        digests = json.loads(digests_json)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("loaded image has invalid identity") from exc
+    if (not isinstance(digests, list) or
+            image_id not in expected_ids or
+            not image_id.startswith("sha256:") or len(image_id) != 71):
+        raise RuntimeError("loaded image does not match signed archive")
+    return image_id
+
+
+def _validate_console_config(path: Path) -> None:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
+        raise RuntimeError("synthetic Console configuration is missing or linked")
+    try:
+        def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            result: dict[str, object] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate configuration key")
+                result[key] = value
+            return result
+
+        config = json.loads(path.read_bytes(), object_pairs_hook=unique_object)
+    except (ValueError, UnicodeError) as exc:
+        raise RuntimeError("invalid synthetic Console configuration") from exc
+    if (not isinstance(config, dict) or
+            config != {"schema": 1, "oidc_issuer": None} or type(config["schema"]) is not int):
+        raise RuntimeError("only the synthetic no-issuer Console configuration is allowed")
+
+
+def _health(core_id: str) -> None:
+    _docker("exec", core_id, "python", "-c",
+            'import urllib.error, urllib.request; '
+            'assert urllib.request.urlopen("http://127.0.0.1:18100/health", timeout=3).status == 200')
+    _docker("exec", core_id, "python", "-c",
+            'import json, urllib.request; '
+            'r=urllib.request.urlopen("http://console:8080/console-config.json", timeout=3); '
+            'assert json.load(r)=={"schema":1,"oidc_issuer":None}; '
+            'assert r.headers["Cache-Control"]=="no-store"')
+    _docker("exec", core_id, "python", "-c",
+            'import urllib.request; '
+            'assert b"root" in urllib.request.urlopen("http://console:8080/", timeout=3).read()')
+    _docker("exec", core_id, "python", "-c",
+            'import urllib.error, urllib.request\n'
+            'try:\n urllib.request.urlopen("http://console:8080/api/models", timeout=3)\n'
+            'except urllib.error.HTTPError as exc:\n assert exc.code == 401\n'
+            'else:\n raise AssertionError("unauthorised API passed")')
+
+
+def stop_runtime(handle: RuntimeHandle) -> None:
+    """Remove only resources created by this invocation."""
+    for identifier in (handle.console_id, handle.core_id):
+        if identifier:
+            try:
+                _docker("rm", "-f", identifier)
+            except RuntimeError:
+                pass
+    if handle.network_id:
+        try:
+            _docker("network", "rm", handle.network_id)
+        except RuntimeError:
+            pass
+
+
+def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
+                          console_config: Path) -> RuntimeHandle:
+    """Load exact signed archives, launch two isolated services and check them."""
+    manifest = verify_bundle(bundle, trusted_key)
+    if manifest["schema"] != 4:
+        raise BundleError("synthetic runtime requires a two-image product bundle")
+    _validate_console_config(console_config)
+    images = manifest["images"]
+    ids = {role: _image_id(bundle, role, images[role], crane)
+           for role in ("core", "console")}
+    name = f"sovereign-synthetic-{uuid.uuid4().hex[:12]}"
+    network_id = _docker("network", "create", "--internal", name)
+    if len(network_id) != 64 or _docker("network", "inspect", network_id,
+                                     "--format", "{{.Internal}}") != "true":
+        stop_runtime(RuntimeHandle(network_id, "", ""))
+        raise RuntimeError("isolated Docker network was not created")
+    core_id = ""
+    console_id = ""
+    try:
+        core_id = _docker("run", "-d", "--pull", "never", "--name", name + "-core",
+                          "--network", name, "--network-alias", "core", "--read-only",
+                          "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                          "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                          ids["core"])
+        console_id = _docker("run", "-d", "--pull", "never", "--name", name + "-console",
+                             "--network", name, "--network-alias", "console", "--read-only",
+                             "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                             "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                             "--mount", f"type=bind,source={console_config.resolve()},target=/srv/console-config.json,readonly",
+                             ids["console"])
+        for identifier in (core_id, console_id):
+            ports = _docker("inspect", identifier, "--format",
+                            "{{json .HostConfig.PortBindings}}")
+            if ports not in ("null", "{}"):
+                raise RuntimeError("synthetic container published a host port")
+        for attempt in range(30):
+            try:
+                _health(core_id)
+                break
+            except RuntimeError:
+                if attempt == 29:
+                    raise
+                time.sleep(1)
+        return RuntimeHandle(network_id, core_id, console_id)
+    except Exception:
+        stop_runtime(RuntimeHandle(network_id, core_id, console_id))
+        raise
