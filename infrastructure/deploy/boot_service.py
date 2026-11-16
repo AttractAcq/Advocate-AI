@@ -52,6 +52,8 @@ def render_recovery_unit(root: Path, trusted_key: Path, crane: Path,
         "TimeoutStartSec=15min\n"
         f"ExecStart={python_bin} -m infrastructure.deploy.product_installer recover "
         f"--root {install} --trusted-key {trusted} --crane {crane_bin}\n"
+        f"ExecStart={python_bin} -m infrastructure.deploy.product_installer cleanup-orphans "
+        f"--root {install} --trusted-key {trusted}\n"
         "\n[Install]\n"
         "WantedBy=multi-user.target\n"
     )

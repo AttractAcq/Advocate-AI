@@ -17,10 +17,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_candidate_bundle, create_product_bundle, verify_bundle
 from infrastructure.deploy.container_runtime import (
-    RuntimeError as ContainerRuntimeError, RuntimeHandle, stop_runtime,
+    RuntimeError as ContainerRuntimeError, RuntimeHandle, start_verified_bundle,
+    stop_runtime,
 )
 from infrastructure.deploy.product_installer import (
-    install_product, product_status, recover_product, rollback_product,
+    cleanup_product_orphans, install_product, product_status, recover_product,
+    rollback_product,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -189,6 +191,24 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         if product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("installed product status mismatch")
                         result["runtime"] = "healthy-isolated"
+                        installation_id = (install_root / "installation-id").read_text().strip()
+                        orphan = start_verified_bundle(product_bundle, trusted, crane,
+                                                       config, installation_id=installation_id)
+                        try:
+                            cleaned = cleanup_product_orphans(install_root, trusted)
+                            if (cleaned["containers"], cleaned["networks"]) != (2, 1):
+                                raise AssertionError("orphan cleanup did not remove exactly one runtime")
+                            if product_status(install_root, trusted)["active"] != first["active"]:
+                                raise AssertionError("orphan cleanup changed the active runtime")
+                            try:
+                                _docker("inspect", orphan.core_id)
+                            except subprocess.CalledProcessError:
+                                pass
+                            else:
+                                raise AssertionError("orphan Core container survived cleanup")
+                            result["orphan_cleanup"] = "scoped-runtime-retired"
+                        finally:
+                            stop_runtime(orphan)
                         try:
                             install_product(root / "missing-candidate", trusted,
                                             crane, config, install_root)
