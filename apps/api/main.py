@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 from typing import Literal
 
 import httpx
@@ -32,6 +33,33 @@ from services.intelligence.assets import AssetRegistry
 from services.intelligence.engine import load_fixture_incidents, safe_incident_analysis, supported_incidents
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _lab_password_from_env() -> str | None:
+    direct = os.environ.get("SOVEREIGN_LAB_PASSWORD")
+    filename = os.environ.get("SOVEREIGN_LAB_PASSWORD_FILE")
+    if direct and filename:
+        raise ValueError("ambiguous synthetic lab credential")
+    if not filename:
+        return direct
+    path = Path(filename)
+    if (not path.is_absolute() or path.is_symlink() or not path.is_file()
+            or path.stat().st_size > 4096 or stat.S_IMODE(path.stat().st_mode) & 0o077):
+        raise ValueError("invalid synthetic lab credential file")
+    value = path.read_text(encoding="utf-8").rstrip("\n")
+    if not 16 <= len(value) <= 200 or "\n" in value or "\r" in value:
+        raise ValueError("invalid synthetic lab credential")
+    return value
+
+
+def _fixture_root_from_env() -> Path:
+    value = os.environ.get("SOVEREIGN_FIXTURE_ROOT")
+    if not value:
+        return ROOT / "fixtures"
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise ValueError("invalid synthetic fixture root")
+    return path
 
 
 @dataclass(frozen=True)
@@ -57,7 +85,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            lab_password=os.environ.get("SOVEREIGN_LAB_PASSWORD"),
+            fixture_root=_fixture_root_from_env(),
+            lab_password=_lab_password_from_env(),
             inference_endpoint=os.environ.get("SOVEREIGN_MODEL_ENDPOINT", cls.inference_endpoint),
             model_name=os.environ.get("SOVEREIGN_MODEL_NAME", cls.model_name),
             knowledge_manifest=Path(os.environ["SOVEREIGN_KNOWLEDGE_MANIFEST"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_MANIFEST") else None,
