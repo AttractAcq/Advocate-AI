@@ -85,13 +85,18 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
-                   *, evidence: dict[str, str] | None = None) -> dict[str, object]:
+                   *, evidence: dict[str, str] | None = None,
+                   images: dict[str, dict[str, str]] | None = None) -> dict[str, object]:
     """Copy an approved payload and sign its exact manifest bytes."""
     if not isinstance(version, str) or not version or len(version) > 80 or any(c.isspace() for c in version):
         raise BundleError("invalid release version")
     source_files = _files(payload)
+    if evidence is not None and images is not None:
+        raise BundleError("ambiguous release evidence")
     if evidence is not None:
         _validate_evidence(evidence, {name for name, _ in source_files})
+    if images is not None:
+        _validate_product_images(images, {name for name, _ in source_files})
     output = output.absolute()
     if output.exists() or output.is_relative_to(payload.resolve()):
         raise BundleError("output must be new and outside payload")
@@ -109,12 +114,15 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
             shutil.copyfile(source, target)
             rows.append({"path": name, "sha256": _sha256(target), "size": target.stat().st_size})
         manifest: dict[str, object] = {
-            "schema": 3 if evidence is not None else 2,
+            "schema": 4 if images is not None else (3 if evidence is not None else 2),
             "version": version, "key_id": _key_id(key.public_key()), "files": rows,
         }
         if evidence is not None:
             manifest["signed_at"] = datetime.now(timezone.utc).isoformat()
             manifest["evidence"] = evidence
+        if images is not None:
+            manifest["signed_at"] = datetime.now(timezone.utc).isoformat()
+            manifest["images"] = images
         raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
         (output / MANIFEST).write_bytes(raw)
         (output / SIGNATURE).write_bytes(base64.b64encode(key.sign(raw)))
@@ -156,6 +164,62 @@ def _validate_evidence(evidence: object, files: set[str]) -> None:
             raise BundleError("invalid evidence digest")
     if not isinstance(evidence["image_ref"], str):
         raise BundleError("invalid image reference")
+
+
+def _validate_product_images(images: object, files: set[str]) -> None:
+    """Require one fully evidenced Core archive and one Console archive."""
+    if not isinstance(images, dict) or set(images) != {"core", "console"}:
+        raise BundleError("product bundle requires Core and Console images")
+    paths: set[str] = set()
+    for role in ("core", "console"):
+        item = images[role]
+        _validate_evidence(item, files)
+        if (set(item) != {"image_ref", "scan_path", "scan_sha256", "sbom_path",
+                          "sbom_sha256", "archive_path", "archive_sha256", "crane_sha256"} or
+                item["archive_path"] != f"images/{role}.tar" or
+                item["image_ref"].split("@", 1)[0].rsplit("/", 1)[-1] != role):
+            raise BundleError("product image role or archive evidence mismatch")
+        for name in ("scan_path", "sbom_path", "archive_path"):
+            if item[name] in paths:
+                raise BundleError("product images share an evidence path")
+            paths.add(item[name])
+    if {name for name in files if name.startswith("images/")} != \
+            {"images/core.tar", "images/console.tar"}:
+        raise BundleError("unreviewed product image archive")
+
+
+def _preflight_image(payload: Path, evidence: dict[str, str], crane: Path) -> None:
+    result = verify_intake(payload / evidence["scan_path"], payload / evidence["sbom_path"],
+                           evidence["image_ref"], evidence["scan_sha256"], evidence["sbom_sha256"])
+    if "archive_sha256" not in result or result["archive_sha256"] != evidence["archive_sha256"]:
+        raise BundleError("product image lacks matching generated archive evidence")
+    identity = validate_image_archive(payload / evidence["archive_path"],
+                                      evidence["image_ref"], crane, evidence["crane_sha256"])
+    if identity["archive_sha256"] != evidence["archive_sha256"]:
+        raise BundleError("product image archive changed after evidence generation")
+
+
+def create_product_bundle(payload: Path, output: Path, signing_key: Path,
+                          version: str, images: dict[str, dict[str, str]],
+                          *, crane: Path) -> dict[str, object]:
+    """Sign Core and Console only after both exact archives pass intake."""
+    files = {name for name, _ in _files(payload)}
+    _validate_product_images(images, files)
+    for role in ("core", "console"):
+        _preflight_image(payload, images[role], crane)
+    manifest = _create_bundle(payload, output, signing_key, version, images=images)
+    try:
+        for role in ("core", "console"):
+            item = images[role]
+            copied = verify_intake(output / item["scan_path"], output / item["sbom_path"],
+                                   item["image_ref"], item["scan_sha256"], item["sbom_sha256"])
+            if copied.get("archive_sha256") != item["archive_sha256"] or \
+                    _sha256(output / item["archive_path"]) != item["archive_sha256"]:
+                raise BundleError("copied product archive does not match signed evidence")
+    except (IntakeError, BundleError, OSError):
+        shutil.rmtree(output)
+        raise
+    return manifest
 
 
 def create_candidate_bundle(payload: Path, output: Path, signing_key: Path,
@@ -208,11 +272,13 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
         raise BundleError("invalid manifest, signature or public key") from exc
     if not isinstance(key, Ed25519PublicKey):
         raise BundleError("trusted key must be Ed25519")
-    if not isinstance(manifest, dict) or manifest.get("schema") not in (2, 3):
+    if not isinstance(manifest, dict) or manifest.get("schema") not in (2, 3, 4):
         raise BundleError("invalid manifest fields")
     required = {"schema", "version", "key_id", "files"}
     if manifest["schema"] == 3:
         required |= {"signed_at", "evidence"}
+    elif manifest["schema"] == 4:
+        required |= {"signed_at", "images"}
     if set(manifest) != required:
         raise BundleError("invalid manifest fields")
     if manifest["key_id"] != _key_id(key):
@@ -247,9 +313,7 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
     actual = {name for name, _ in _files(bundle, allow_control=True)} - {MANIFEST, SIGNATURE}
     if actual != expected:
         raise BundleError("unlisted or missing payload")
-    if manifest["schema"] == 3:
-        evidence = manifest["evidence"]
-        _validate_evidence(evidence, expected)
+    if manifest["schema"] in (3, 4):
         try:
             signed_at = datetime.fromisoformat(manifest["signed_at"])
         except (TypeError, ValueError) as exc:
@@ -257,6 +321,9 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
         if (signed_at.tzinfo is None or
                 signed_at > datetime.now(timezone.utc) + timedelta(minutes=5)):
             raise BundleError("invalid signing timestamp")
+    if manifest["schema"] == 3:
+        evidence = manifest["evidence"]
+        _validate_evidence(evidence, expected)
         try:
             intake = verify_intake(bundle / evidence["scan_path"], bundle / evidence["sbom_path"],
                                    evidence["image_ref"], evidence["scan_sha256"],
@@ -270,6 +337,20 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
                 raise BundleError("signed image archive does not match the SBOM")
         elif "archive_path" in evidence:
             raise BundleError("signed image archive lacks generated inventory")
+    elif manifest["schema"] == 4:
+        images = manifest["images"]
+        _validate_product_images(images, expected)
+        for role in ("core", "console"):
+            item = images[role]
+            try:
+                intake = verify_intake(bundle / item["scan_path"], bundle / item["sbom_path"],
+                                       item["image_ref"], item["scan_sha256"],
+                                       item["sbom_sha256"], now=signed_at)
+            except IntakeError as exc:
+                raise BundleError("signed product evidence failed preflight") from exc
+            if intake.get("archive_sha256") != item["archive_sha256"] or \
+                    _sha256(bundle / item["archive_path"]) != item["archive_sha256"]:
+                raise BundleError("signed product image archive does not match the SBOM")
     return manifest
 
 
@@ -295,6 +376,13 @@ def main() -> None:
     candidate.add_argument("--archive-sha256")
     candidate.add_argument("--crane", type=Path)
     candidate.add_argument("--crane-sha256")
+    product = commands.add_parser("pack-product")
+    product.add_argument("payload", type=Path)
+    product.add_argument("output", type=Path)
+    product.add_argument("--signing-key", required=True, type=Path)
+    product.add_argument("--version", required=True)
+    product.add_argument("--images-json", required=True, type=Path)
+    product.add_argument("--crane", required=True, type=Path)
     verify = commands.add_parser("verify")
     verify.add_argument("bundle", type=Path)
     verify.add_argument("--trusted-key", required=True, type=Path)
@@ -312,6 +400,13 @@ def main() -> None:
                                  "crane_sha256": args.crane_sha256})
             result = create_candidate_bundle(args.payload, args.output, args.signing_key,
                                              args.version, evidence, crane=args.crane)
+        elif args.command == "pack-product":
+            if args.images_json.is_symlink() or not args.images_json.is_file() or \
+                    args.images_json.stat().st_size > MAX_MANIFEST_BYTES:
+                raise BundleError("invalid product image descriptor")
+            images = json.loads(args.images_json.read_text(), object_pairs_hook=_unique_object)
+            result = create_product_bundle(args.payload, args.output, args.signing_key,
+                                           args.version, images, crane=args.crane)
         else:
             result = verify_bundle(args.bundle, args.trusted_key)
     except (BundleError, IntakeError, UpstreamError, OSError, ValueError) as exc:
