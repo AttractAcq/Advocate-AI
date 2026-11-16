@@ -105,6 +105,31 @@ def prepare_synthetic_state(live: Path) -> str:
     return conversation_id
 
 
+def restore_synthetic_state(root: Path, restic: Path,
+                            restic_sha256: str) -> tuple[Path, str, str]:
+    """Delete fictional live state and clean-restore its checked restic snapshot."""
+    live = root / "live"
+    conversation_id = prepare_synthetic_state(live)
+    spec = root / "spec.json"
+    spec.write_text(json.dumps({"schema": 1, "files": [
+        {"name": "roles.json", "kind": "file", "source": "live/roles.json"},
+        {"name": "manifest.csv", "kind": "file", "source": "live/manifest.csv"},
+        {"name": "sources/ENG-001.txt", "kind": "file", "source": "live/sources/ENG-001.txt"},
+        {"name": "history.db", "kind": "sqlite", "source": "live/history.db"}]}))
+    password = root / "restic-password"
+    password.write_text(os.urandom(32).hex())
+    password.chmod(0o600)
+    stage = root / "staging"
+    stage.mkdir(mode=0o700)
+    repository = root / "repository"
+    saved = create_snapshot(spec, repository, password, restic, restic_sha256, stage)
+    shutil.rmtree(live)
+    restored = root / "restored"
+    restore_snapshot(saved["snapshot_id"], repository, password, restic,
+                     restic_sha256, restored)
+    return restored, conversation_id, str(saved["snapshot_id"])
+
+
 def rehearse(image: str, restic: Path, restic_sha256: str) -> dict[str, object]:
     if os.getuid() == 0:
         raise ValueError("synthetic Core restore must run as a non-root user")
@@ -114,25 +139,8 @@ def rehearse(image: str, restic: Path, restic_sha256: str) -> dict[str, object]:
     container = ""
     with tempfile.TemporaryDirectory(prefix="sovereign-core-restored-") as directory:
         root = Path(directory)
-        live = root / "live"
-        conversation_id = prepare_synthetic_state(live)
-        spec = root / "spec.json"
-        spec.write_text(json.dumps({"schema": 1, "files": [
-            {"name": "roles.json", "kind": "file", "source": "live/roles.json"},
-            {"name": "manifest.csv", "kind": "file", "source": "live/manifest.csv"},
-            {"name": "sources/ENG-001.txt", "kind": "file", "source": "live/sources/ENG-001.txt"},
-            {"name": "history.db", "kind": "sqlite", "source": "live/history.db"}]}))
-        password = root / "restic-password"
-        password.write_text(os.urandom(32).hex())
-        password.chmod(0o600)
-        stage = root / "staging"
-        stage.mkdir(mode=0o700)
-        repository = root / "repository"
-        saved = create_snapshot(spec, repository, password, restic, restic_sha256, stage)
-        shutil.rmtree(live)
-        restored = root / "restored"
-        restore_snapshot(saved["snapshot_id"], repository, password, restic,
-                         restic_sha256, restored)
+        restored, conversation_id, snapshot_id = restore_synthetic_state(
+            root, restic, restic_sha256)
         credential = root / "lab-password"
         credential.write_text(PASSPHRASE + "\n")
         credential.chmod(0o600)
@@ -167,7 +175,7 @@ def rehearse(image: str, restic: Path, restic_sha256: str) -> dict[str, object]:
             (restored / "roles.json").write_text(json.dumps(roles))
             after = _probe(container, conversation_id, "after")
             return {"status": "pass", "image_id": image_id,
-                    "snapshot_id": saved["snapshot_id"], "restored_files": 4,
+                    "snapshot_id": snapshot_id, "restored_files": 4,
                     "network_mode": "none", "before": before, "after": after}
         finally:
             if container:

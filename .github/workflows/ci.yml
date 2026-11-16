@@ -188,12 +188,16 @@ jobs:
           curl -fsSL --retry 3 https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz -o "$RUNNER_TEMP/upstream/crane.tar.gz"
           curl -fsSL --retry 3 https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_linux_amd64.tar.gz -o "$RUNNER_TEMP/upstream/syft.tar.gz"
           curl -fsSL --retry 3 https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz -o "$RUNNER_TEMP/upstream/trivy.tar.gz"
+          curl -fsSL --retry 3 https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2 -o "$RUNNER_TEMP/upstream/restic.bz2"
           echo "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0  $RUNNER_TEMP/upstream/crane.tar.gz" | sha256sum --check
           echo "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c  $RUNNER_TEMP/upstream/syft.tar.gz" | sha256sum --check
           echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  $RUNNER_TEMP/upstream/trivy.tar.gz" | sha256sum --check
+          echo "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c  $RUNNER_TEMP/upstream/restic.bz2" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/upstream/crane.tar.gz" -C "$RUNNER_TEMP/upstream/crane" crane
           tar -xzf "$RUNNER_TEMP/upstream/syft.tar.gz" -C "$RUNNER_TEMP/upstream/syft" syft
           tar -xzf "$RUNNER_TEMP/upstream/trivy.tar.gz" -C "$RUNNER_TEMP/upstream/trivy" trivy
+          bzip2 -d "$RUNNER_TEMP/upstream/restic.bz2"
+          chmod +x "$RUNNER_TEMP/upstream/restic"
           DOCKER_CONFIG="$RUNNER_TEMP/upstream/docker-config" "$RUNNER_TEMP/upstream/trivy/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/upstream/trivy-cache" --quiet
       - name: Rehearse offline image identity, scan and signed evidence
         shell: bash
@@ -223,7 +227,9 @@ jobs:
             --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
             --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
             --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
-            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache" \
+            --restic "$RUNNER_TEMP/upstream/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/upstream/restic" | cut -d' ' -f1)"
       - name: Retain product image evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

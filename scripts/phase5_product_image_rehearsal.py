@@ -28,7 +28,7 @@ from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
-from scripts.phase5_core_state_restore import PASSPHRASE, _probe, prepare_synthetic_state
+from scripts.phase5_core_state_restore import PASSPHRASE, _probe, restore_synthetic_state
 
 
 def _sha256(path: Path) -> str:
@@ -75,7 +75,8 @@ def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
 
 def rehearse(output: Path, crane: Path, crane_sha256: str,
              syft: Path, syft_sha256: str, trivy: Path,
-             trivy_sha256: str, trivy_cache: Path) -> dict[str, object]:
+             trivy_sha256: str, trivy_cache: Path,
+             restic: Path, restic_sha256: str) -> dict[str, object]:
     if output.exists() or output.is_symlink():
         raise ValueError("output directory must be new")
     output.mkdir(parents=True)
@@ -165,8 +166,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 if verify_bundle(product_bundle, trusted) != created:
                     raise AssertionError("signed product trial did not verify")
                 result["product_bundle"] = "verified"
-                state = root / "restored-core-state"
-                conversation_id = prepare_synthetic_state(state)
+                state_root = root / "core-restore"
+                state_root.mkdir(mode=0o700)
+                state, conversation_id, snapshot_id = restore_synthetic_state(
+                    state_root, restic, restic_sha256)
                 lab_credential = root / "lab-password"
                 lab_credential.write_text(PASSPHRASE + "\n")
                 lab_credential.chmod(0o600)
@@ -181,7 +184,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     roles["allow"]["chief_engineer"] = ["deck"]
                     (state / "roles.json").write_text(json.dumps(roles))
                     after = _probe(state_runtime.core_id, conversation_id, "after")
-                    result["signed_state_runtime"] = {"before": before, "after": after}
+                    result["signed_state_runtime"] = {"snapshot_id": snapshot_id,
+                                                      "before": before, "after": after}
                 finally:
                     stop_runtime(state_runtime)
                 second_bundle = root / "signed-product-trial-2"
@@ -286,13 +290,14 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Rehearse exact product-image release evidence")
     for name in ("output", "crane", "crane-sha256", "syft", "syft-sha256",
-                 "trivy", "trivy-sha256", "trivy-cache"):
+                 "trivy", "trivy-sha256", "trivy-cache", "restic", "restic-sha256"):
         parser.add_argument("--" + name, required=True,
-                            type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache"} else str)
+                            type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache", "restic"} else str)
     args = parser.parse_args()
     print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
                              args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache), sort_keys=True))
+                             args.trivy_sha256, args.trivy_cache,
+                             args.restic, args.restic_sha256), sort_keys=True))
 
 
 if __name__ == "__main__":
