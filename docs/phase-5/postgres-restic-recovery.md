@@ -6,9 +6,9 @@ rows to the first, captures a custom-format `pg_dump` archive, stores that
 archive in the pinned restic encrypted repository, deletes the plaintext
 copy, restores the exact snapshot to a new private directory, and streams the
 archive into the second clean database with `pg_restore --single-transaction`.
-The job checks the archive hash and compares the restored rows. The image is
-selected by digest for the rehearsal, although its tag is resolved during
-CI preparation; production image provenance remains open.
+The job checks the archive hash and compares the restored rows. CI pulls the
+synthetic PostgreSQL image by the exact digest recorded during the first
+passing runner rehearsal; production image provenance remains open.
 
 The official [pg_dump documentation](https://www.postgresql.org/docs/current/app-pgdump.html)
 describes consistent exports during concurrent database use and custom
