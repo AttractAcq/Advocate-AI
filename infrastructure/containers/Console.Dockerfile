@@ -5,9 +5,8 @@ RUN npm ci --ignore-scripts
 COPY apps/console/web/ ./
 RUN npm run build
 
-FROM docker.io/library/caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
-ENV XDG_CONFIG_HOME=/tmp/caddy/config XDG_DATA_HOME=/tmp/caddy/data
-COPY infrastructure/containers/Caddyfile /etc/caddy/Caddyfile
+FROM docker.io/library/nginx:1.30.6-alpine-slim@sha256:e2355aa95529a7999dad94ddcb45a8768abf6fb0b204c93b1a3ffce477d7b893
+COPY infrastructure/containers/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /workspace/dist /srv
 USER 10001:10001
 EXPOSE 8080
