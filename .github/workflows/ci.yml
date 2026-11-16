@@ -79,3 +79,39 @@ jobs:
       - name: Scan Console dependency lock
         working-directory: apps/console/web
         run: npm audit --audit-level=high
+
+  container-scan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve digest-pinned synthetic Keycloak image
+        id: image
+        run: |
+          echo "ref=$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)" >> "$GITHUB_OUTPUT"
+      - name: Scan lab image packages for high and critical advisories
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.image.outputs.ref }}
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: json
+          output: keycloak-trivy.json
+          exit-code: '0'
+          cache: 'false'
+      - name: Check report and summarize findings
+        run: |
+          jq -e '.SchemaVersion and .ArtifactName' keycloak-trivy.json >/dev/null
+          echo "Keycloak lab image: ${{ steps.image.outputs.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "High/critical findings: $(jq '[.Results[]?.Vulnerabilities[]?] | length' keycloak-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Findings require triage before a target release; this job does not approve the image." >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain scanner report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: keycloak-lab-trivy
+          path: keycloak-trivy.json
+          retention-days: 30

@@ -12,8 +12,18 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "infrastructure/lab/runtime/phase3-identity"
-IMAGE = "quay.io/keycloak/keycloak:26.8.2"
+IMAGE_MANIFEST = ROOT / "infrastructure/lab/container-image.json"
+_IMAGE = json.loads(IMAGE_MANIFEST.read_text(encoding="utf-8"))
+IMAGE = f"{_IMAGE['name']}@{_IMAGE['digest']}"
 NAME = "sovereign-keycloak-lab"
+
+
+def container_create_command() -> list[str]:
+    """Describe the synthetic lab container without starting Docker."""
+    return ["docker", "create", "--name", NAME, "--memory", "1g", "--pids-limit", "256",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+            "-p", "127.0.0.1:18086:8080", "--env-file", str(RUNTIME / "keycloak.env"),
+            IMAGE, "start-dev", "--import-realm", "--hostname=http://127.0.0.1:18086"]
 
 
 def prepare() -> None:
@@ -51,10 +61,7 @@ def prepare() -> None:
 
 def start() -> None:
     prepare()
-    command = ["docker", "create", "--name", NAME, "--memory", "1g",
-               "-p", "127.0.0.1:18086:8080", "--env-file", str(RUNTIME / "keycloak.env"),
-               IMAGE, "start-dev", "--import-realm", "--hostname=http://127.0.0.1:18086"]
-    subprocess.run(command, check=True)
+    subprocess.run(container_create_command(), check=True)
     import_dir = RUNTIME / "import"
     import_dir.mkdir(exist_ok=True)
     shutil.copy2(RUNTIME / "sovereign-lab-realm.json", import_dir / "sovereign-lab-realm.json")

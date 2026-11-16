@@ -1,0 +1,20 @@
+{
+  "purpose": "Fictional parser preflight regression inputs; no executable payloads or vessel data",
+  "pdf_names_rejected": [
+    "/OpenAction",
+    "/JavaScript",
+    "/Java#53cript",
+    "/EmbeddedFiles",
+    "/Encrypt",
+    "/ObjStm",
+    "/XFA"
+  ],
+  "office_cases": [
+    "duplicate_member",
+    "case_folded_duplicate",
+    "symlink_member",
+    "parent_traversal",
+    "compressed_ratio",
+    "expanded_size"
+  ]
+}

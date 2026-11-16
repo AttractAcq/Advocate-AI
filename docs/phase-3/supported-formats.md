@@ -28,3 +28,9 @@ qualification before they enter the supported register. Docling supports the loc
 [usage guide](https://docling-project.github.io/docling/usage/) and
 [supported formats](https://docling-project.github.io/docling/usage/supported_formats/).
 
+The later [synthetic parser regression](../phase-5/security-scan-and-parser-corpus.md)
+rejects malformed PDF envelopes and recognizable active, encrypted and
+compressed-object PDF names before conversion. It also rejects duplicate and
+symlinked Office ZIP entries. These checks narrow the accepted subset; they do
+not qualify arbitrary PDF/Office content for vessel ingestion.
+
