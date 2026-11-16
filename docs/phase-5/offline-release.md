@@ -21,7 +21,9 @@ before a real release.
 The public key must arrive through an authenticated trust-establishment
 procedure separate from the bundle. A valid signature proves control of the
 corresponding private key, not that the included software was approved or
-scanned. The target workflow must still verify dependency/model/container
-provenance, generate a resolved SBOM, scan transfer media, stage the bundle,
-install it offline, exercise rollback and record AT-15. Those remain open in
+scanned. The synthetic [installer](installer.md) now stages a verified bundle
+and rehearses pointer rollback. The target workflow must still verify
+dependency/model/container provenance, generate a resolved SBOM, scan transfer
+media, install the full stack offline, exercise functioning-service rollback
+and record AT-15. Those remain open in
 the [blocker and build tracker](../blockers-and-build-queue.md).
