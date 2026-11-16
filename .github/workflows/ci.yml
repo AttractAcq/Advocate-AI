@@ -212,6 +212,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 fixtures/generate.py
           docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
           crane="$RUNNER_TEMP/upstream/crane/crane"

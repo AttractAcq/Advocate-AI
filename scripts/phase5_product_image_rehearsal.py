@@ -28,6 +28,7 @@ from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from scripts.phase5_core_state_restore import PASSPHRASE, _probe, prepare_synthetic_state
 
 
 def _sha256(path: Path) -> str:
@@ -164,6 +165,25 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 if verify_bundle(product_bundle, trusted) != created:
                     raise AssertionError("signed product trial did not verify")
                 result["product_bundle"] = "verified"
+                state = root / "restored-core-state"
+                conversation_id = prepare_synthetic_state(state)
+                lab_credential = root / "lab-password"
+                lab_credential.write_text(PASSPHRASE + "\n")
+                lab_credential.chmod(0o600)
+                state_console_config = root / "synthetic-console-config.json"
+                state_console_config.write_text('{"schema":1,"oidc_issuer":null}\n')
+                state_runtime = start_verified_bundle(
+                    product_bundle, trusted, crane, state_console_config,
+                    core_state=state, lab_password_file=lab_credential)
+                try:
+                    before = _probe(state_runtime.core_id, conversation_id, "before")
+                    roles = json.loads((state / "roles.json").read_text())
+                    roles["allow"]["chief_engineer"] = ["deck"]
+                    (state / "roles.json").write_text(json.dumps(roles))
+                    after = _probe(state_runtime.core_id, conversation_id, "after")
+                    result["signed_state_runtime"] = {"before": before, "after": after}
+                finally:
+                    stop_runtime(state_runtime)
                 second_bundle = root / "signed-product-trial-2"
                 create_product_bundle(payload, second_bundle, private,
                                       "synthetic-product-trial-2", descriptors,
