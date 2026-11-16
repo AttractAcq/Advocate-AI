@@ -8,8 +8,9 @@ customer, release, deployment, licence, support, maintenance and approved
 offline deployment-receipt metadata. There are no free-text descriptions or
 fields for vessel documents, prompts, embeddings or security logs. Unknown
 fields are rejected before storage. A receipt's source value records that a
-lab administrator performed an approved offline entry; it is not itself a
-cryptographic approval or proof of a vessel handoff.
+lab administrator performed an approved offline entry. The signed import
+proves possession of a configured issuer key; it does not prove owner approval
+or a physical vessel handoff.
 
 The API stores records in an owner-only SQLite database and appends a
 transaction-bound hash-chain event containing record type, code and digest.
@@ -35,6 +36,20 @@ events. Records use fixed codes and enums. Licence dates must increase,
 deployments must reference known customers and releases, and offline receipts
 must match the deployment's release.
 
+Receipt import requires `SOVEREIGN_FLEET_IMPORT_KEY_FILE` pointing to an
+owner-only regular PEM file containing the offline issuer's Ed25519 public
+key. If unset, import returns 503 while the rest of Fleet remains available.
+The API accepts a strict JSON envelope with `schema_version: 1`, `key_id`
+(SHA-256 of the raw 32-byte public key), `receipt` (the strict metadata-only
+record) and a standard Base64 `signature`. The issuer signs the ASCII bytes
+of `SOVEREIGN-FLEET-DEPLOYMENT-RECEIPT-V1\n` followed by JSON containing
+only `schema_version` and `receipt`, encoded with sorted keys, compact
+separators and ASCII escaping. Invalid signatures, wrong keys and altered
+receipt fields fail before storage. Duplicate receipt codes reject replay.
+The audit event records the trusted issuer key ID and record digest, without
+the signature or raw request. The import key is a synthetic lab trust anchor;
+production key custody, revocation and approved offline handoff remain B-12.
+
 The local lifecycle candidate exposes authenticated `PATCH` routes for
 `/licences/{code}/status`, `/tickets/{code}/status` and
 `/maintenance/{code}/status`. A request body contains only a `status` enum.
@@ -51,5 +66,5 @@ The [AT-24](../05-acceptance-tests.md) synthetic tests submit forbidden
 prompt, document, embedding and security-log fields and confirm 422 responses
 with no stored content. They create authorised metadata and verify audit
 events, references and tamper detection. A real company portal, customer user
-accounts, approved lifecycle rules and role enforcement, signed offline import, support workflow,
+accounts, approved lifecycle rules and role enforcement, approved offline handoff, support workflow,
 retention, network route proof and independent review remain open.

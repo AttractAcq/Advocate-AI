@@ -227,6 +227,16 @@ class FleetCatalog:
                            (at, action, kind, code, event["digest"], previous, chain))
 
     def add(self, kind: str, record: Metadata) -> dict[str, object]:
+        return self._add(kind, record, "create")
+
+    def add_signed_receipt(self, record: DeploymentReceipt,
+                           issuer_key_id: str) -> dict[str, object]:
+        if len(issuer_key_id) != 64 or any(c not in "0123456789abcdef"
+                                           for c in issuer_key_id):
+            raise FleetError("invalid offline receipt issuer")
+        return self._add("receipt", record, f"import-signed:{issuer_key_id}")
+
+    def _add(self, kind: str, record: Metadata, action: str) -> dict[str, object]:
         if kind not in KIND_MODELS or type(record) is not KIND_MODELS[kind]:
             raise FleetError("unknown Fleet record type")
         data = record.model_dump(mode="json")
@@ -255,7 +265,7 @@ class FleetCatalog:
                                    (kind, code, payload))
             except sqlite3.IntegrityError as exc:
                 raise FleetError("duplicate Fleet record code") from exc
-            self._append_audit(connection, "create", kind, code, payload)
+            self._append_audit(connection, action, kind, code, payload)
         return data
 
     def transition(self, kind: str, code: str, status: str) -> dict[str, object]:
