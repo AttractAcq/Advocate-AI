@@ -23,14 +23,19 @@ as the `pack-candidate` descriptor plus mandatory archive fields:
   /path/to/new-bundle --trusted-key /protected/trusted-key.pem
 ```
 
-The [CI product-image rehearsal](product-image-release-rehearsal.md) now calls
-the same packer against the actual synthetic Core and Console archives. As
-recorded in the [scan triage](product-image-scan.md), Console findings currently
-deny the product bundle. A passing synthetic signature later would establish
-only software behavior; release key custody, licence review, target tests and
+The [CI product-image rehearsal](product-image-release-rehearsal.md) calls
+the same packer against the actual synthetic Core and Console archives. The
+earlier Caddy Console findings denied the product bundle. The current pinned
+Nginx candidate passed intake and verified the combined bundle. This proves
+the local software path; release key custody, licence review, target tests and
 site approvals remain open.
 
 The [PR #31 CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/43889746690)
 shows `product_bundle: denied-findings` with Core preflight passing and Console
 intake denying four findings. All eight CI jobs passed because denial is the
 required behavior for this candidate.
+
+The [PR #32 CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/43890872823)
+shows `product_bundle: verified` with both image preflights passing and zero
+unresolved findings in the saved archives. The signer was temporary and does
+not authorize release distribution.
