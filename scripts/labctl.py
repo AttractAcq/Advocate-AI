@@ -67,6 +67,8 @@ def verify_smoke() -> None:
         assert isinstance(exc.reason, ssl.SSLCertVerificationError)
     else:
         raise AssertionError("untrusted lab certificate was accepted")
+    from scripts.phase5_install_rehearsal import rehearse
+    assert rehearse()["result"] == "pass"
 
 
 def up(smoke: bool = False) -> bool:

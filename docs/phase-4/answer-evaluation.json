@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "date": "2026-11-15",
+  "environment": "local Apple M3 Mac, synthetic fixtures, loopback Ollama",
+  "model": "qwen3.5:2b",
+  "model_digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
+  "fixture_sha256": "08326189cb11ba5e91e3d05397eee8df3e9e7d2123cf3be248336f51319c7ce3",
+  "assessor": "development self-check; independent reviewer pending",
+  "rubric": "The sentence must describe only fields present in the synthetic alert and mapped asset, avoid asserting compromise or proposing equipment changes, and retain the server-attached Wazuh evidence IDs.",
+  "result": "3 of 3 local summaries met this narrow rubric in one run; not an independent quality gate",
+  "cases": [
+    {
+      "incident_id": "wazuh-alerts-4.x-2026.11.15:doc-forti-001",
+      "wazuh_event_id": "lab-wazuh-forti-001",
+      "method": "local-model",
+      "answer": "A high-severity repeated denied connection alert was reported on the lab-forti-1 firewall device.",
+      "local_assessment": "supported"
+    },
+    {
+      "incident_id": "wazuh-alerts-4.x-2026.11.15:doc-switch-002",
+      "wazuh_event_id": "lab-wazuh-switch-002",
+      "method": "local-model",
+      "answer": "A network switch named lab-switch-1 reported a failed login attempt on its management interface.",
+      "local_assessment": "supported"
+    },
+    {
+      "incident_id": "wazuh-alerts-4.x-2026.11.15:doc-host-003",
+      "wazuh_event_id": "lab-wazuh-host-003",
+      "method": "local-model",
+      "answer": "A medium severity host malware test alert was reported on the lab-workstation-1 workstation device.",
+      "local_assessment": "supported"
+    }
+  ],
+  "known_limits": [
+    "The first, broader prompt produced two truncated answers and unsupported investigation details; the current prompt restricts output to one sentence and rejects malformed output.",
+    "This is one run on three fictional cases. It does not measure general accuracy, independent claim support or adversarial resilience.",
+    "No independent Wazuh collector or indexer was used; event evidence came from the committed synthetic fixture."
+  ]
+}

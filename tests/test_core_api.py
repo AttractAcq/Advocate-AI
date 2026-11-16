@@ -193,6 +193,22 @@ class ModelBoundaryTests(unittest.TestCase):
 
 
 class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_incident_prompt_is_bounded_and_has_no_tools(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def answer(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"choices": [{"message": {"content": "An alert was reported."}}]})
+
+        model = LocalModel("http://127.0.0.1:11434/v1", "qwen3.5:2b",
+                           transport=httpx.MockTransport(answer))
+        await model.complete("synthetic alert facts", [], general=True,
+                             system_instruction="One evidence-bound sentence.", max_tokens=96)
+        payload = json.loads(requests[0].content)
+        self.assertEqual(payload["messages"][0]["content"], "One evidence-bound sentence.")
+        self.assertEqual(payload["max_tokens"], 96)
+        self.assertNotIn("tools", payload)
+
     async def test_request_is_local_and_has_no_tools(self) -> None:
         requests: list[httpx.Request] = []
 

@@ -9,6 +9,7 @@ import re
 from typing import Mapping
 
 from services.intelligence.assets import AssetRegistry
+from services.connectors.wazuh import parse_incident_id
 
 
 SOURCES = {"fortigate": "FortiGate", "switch-syslog": "Switch", "host-agent": "Host"}
@@ -39,10 +40,11 @@ def _description(value: object) -> str:
 
 def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[str, object]:
     source = _nested(hit, "source")
+    index_name = _text(hit.get("index_name"), limit=93)
     index_id = _text(hit.get("index_id"), limit=80)
+    incident_id = f"{index_name}:{index_id}"
+    parse_incident_id(incident_id)
     event_id = _text(source.get("id"), limit=80)
-    if index_id != event_id:
-        raise ValueError("alert id mismatch")
     timestamp = _text(source.get("timestamp"), limit=40)
     try:
         moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -62,19 +64,26 @@ def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[
     action = _text(data.get("action"), limit=40)
     if action not in ACTIONS:
         raise ValueError("unsupported action")
-    hostname = _text(agent.get("name"), limit=80)
+    if decoder == "fortigate":
+        source_hostname = data.get("devname")
+    elif decoder == "switch-syslog":
+        source_hostname = data.get("device_name")
+    else:
+        source_hostname = agent.get("name") if agent.get("id") != "000" else None
+    hostname = _text(source_hostname, limit=80) if source_hostname is not None else None
     ip = data.get("srcip")
     vlan = data.get("vlan")
     if ip is not None:
         ip = _text(ip, limit=45)
     if vlan is not None and (isinstance(vlan, bool) or not isinstance(vlan, int)):
         raise ValueError("invalid vlan")
-    asset_match = registry.resolve(hostname=hostname)
-    # The source device is identified by agent hostname. Event source IP may be a different device.
+    asset_match = registry.resolve(hostname=hostname) if hostname else {"status": "unknown", "asset": None}
+    # A syslog collector's agent name is not the source device. Use explicit device fields only.
     asset = asset_match["asset"] if asset_match["status"] == "known" else None
     related_match = registry.resolve(ip=ip, vlan=vlan) if ip else {"status": "unknown", "asset": None}
     related = related_match["asset"] if related_match["status"] == "known" else None
     return {
+        "incident_id": incident_id, "index_name": index_name, "index_id": index_id,
         "event_id": event_id, "timestamp": moment.isoformat(), "source": SOURCES[decoder],
         "rule_id": _text(rule.get("id"), limit=80),
         "description": _description(rule.get("description")),
@@ -95,10 +104,28 @@ def incident_view(event: Mapping[str, object]) -> dict[str, object]:
     checks = ["Verify the cited event in the independent alert store.",
               "Compare the timestamp and asset mapping with approved records.",
               "Escalate to the AV/IT officer if the finding remains unexplained."]
-    return {"incident_id": event["event_id"], "summary": summary, "event": dict(event),
-            "suggested_checks": checks, "confidence": "Limited to one synthetic alert; no independent correlation performed.",
-            "evidence": [{"event_id": event["event_id"], "timestamp": event["timestamp"],
+    limits = ["Limited to one alert; no independent correlation performed."]
+    if event["asset_status"] != "known":
+        limits.append("Source asset mapping is unresolved; no device identity was inferred.")
+    if event["related_asset_status"] == "ambiguous":
+        limits.append("Related asset mapping is ambiguous; no related device identity was inferred.")
+    return {"incident_id": event["incident_id"], "summary": summary, "event": dict(event),
+            "suggested_checks": checks, "confidence": " ".join(limits),
+            "evidence": [{"event_id": event["event_id"], "index_name": event["index_name"],
+                          "index_id": event["index_id"], "timestamp": event["timestamp"],
                           "rule_id": event["rule_id"], "location": event["location"]}]}
+
+
+def supported_incidents(hits: list[dict[str, object]], registry: AssetRegistry) -> list[dict[str, object]]:
+    incidents: list[dict[str, object]] = []
+    for hit in hits:
+        source = hit.get("source", {})
+        decoder = source.get("decoder", {}) if isinstance(source, dict) else {}
+        name = decoder.get("name") if isinstance(decoder, dict) else None
+        if name not in SOURCES:
+            continue
+        incidents.append(incident_view(normalize_alert(hit, registry)))
+    return incidents
 
 
 def load_fixture_incidents(path: Path, registry: AssetRegistry) -> list[dict[str, object]]:
@@ -106,5 +133,6 @@ def load_fixture_incidents(path: Path, registry: AssetRegistry) -> list[dict[str
     hits = payload["hits"]["hits"]
     if not isinstance(hits, list) or len(hits) > 100:
         raise ValueError("invalid alert fixture")
-    return [incident_view(normalize_alert({"index_id": hit["_id"], "source": hit["_source"]}, registry))
+    return [incident_view(normalize_alert({"index_name": hit["_index"],
+                                          "index_id": hit["_id"], "source": hit["_source"]}, registry))
             for hit in hits]

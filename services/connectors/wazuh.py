@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ipaddress
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 
 import httpx
@@ -11,6 +13,20 @@ import httpx
 
 class WazuhUnavailable(Exception):
     pass
+
+
+_INDEX_NAME = re.compile(r"wazuh-alerts-[A-Za-z0-9._-]{1,80}\Z")
+_DOCUMENT_ID = re.compile(r"[A-Za-z0-9._-]{1,80}\Z")
+SUPPORTED_DECODERS = ("fortigate", "switch-syslog", "host-agent")
+
+
+def parse_incident_id(incident_id: str) -> tuple[str, str]:
+    if not isinstance(incident_id, str):
+        raise ValueError("invalid incident id")
+    index_name, separator, document_id = incident_id.partition(":")
+    if not separator or not _INDEX_NAME.fullmatch(index_name) or not _DOCUMENT_ID.fullmatch(document_id):
+        raise ValueError("invalid incident id")
+    return index_name, document_id
 
 
 class WazuhIndexerReader:
@@ -41,17 +57,32 @@ class WazuhIndexerReader:
         self.ca_bundle = ca_bundle
         self.transport = transport
 
-    def alerts(self, *, limit: int = 50) -> list[dict[str, object]]:
+    def alerts(self, *, limit: int = 50, since: datetime | None = None,
+               until: datetime | None = None, incident_id: str | None = None) -> list[dict[str, object]]:
         if not 1 <= limit <= 100:
             raise ValueError("alert limit out of bounds")
+        index_name, document_id = parse_incident_id(incident_id) if incident_id is not None else (None, None)
+        if since is not None or until is not None:
+            if since is None or until is None or since.tzinfo is None or until.tzinfo is None:
+                raise ValueError("bounded UTC alert interval required")
+            since = since.astimezone(timezone.utc)
+            until = until.astimezone(timezone.utc)
+            if not since < until or until - since > timedelta(days=7):
+                raise ValueError("alert interval out of bounds")
+        filters: list[dict[str, object]] = [{"terms": {"decoder.name": list(SUPPORTED_DECODERS)}}]
+        if since is not None and until is not None:
+            filters.append({"range": {"timestamp": {"gte": since.isoformat(), "lt": until.isoformat()}}})
+        if document_id is not None:
+            filters.extend([{"term": {"_index": index_name}}, {"ids": {"values": [document_id]}}])
         query = {
             "size": limit,
             "sort": [{"timestamp": {"order": "desc"}}],
             "_source": ["id", "timestamp", "rule.id", "rule.level", "rule.description",
                         "agent.id", "agent.name", "data.srcip", "data.dstip",
                         "data.srcport", "data.dstport", "data.action", "data.vlan",
+                        "data.devname", "data.device_name",
                         "decoder.name", "location"],
-            "query": {"match_all": {}},
+            "query": {"bool": {"filter": filters}} if filters else {"match_all": {}},
         }
         try:
             with httpx.Client(timeout=10, verify=str(self.ca_bundle) if self.ca_bundle else True,
@@ -68,5 +99,9 @@ class WazuhIndexerReader:
         for hit in hits:
             if not isinstance(hit, dict) or not isinstance(hit.get("_id"), str) or not isinstance(hit.get("_source"), dict):
                 raise WazuhUnavailable("Wazuh returned malformed alert")
-            result.append({"index_id": hit["_id"], "source": hit["_source"]})
+            if not _INDEX_NAME.fullmatch(str(hit.get("_index", ""))) or not _DOCUMENT_ID.fullmatch(hit["_id"]):
+                raise WazuhUnavailable("Wazuh returned invalid alert identity")
+            if incident_id is not None and (hit["_index"], hit["_id"]) != (index_name, document_id):
+                raise WazuhUnavailable("Wazuh returned mismatched alert")
+            result.append({"index_name": hit["_index"], "index_id": hit["_id"], "source": hit["_source"]})
         return result

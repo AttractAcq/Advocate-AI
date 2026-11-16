@@ -1,0 +1,13 @@
+{
+  "backup_sha256": "31d836edbce62b186a700a1d8032a06f3c0781cc2deec9f3168d839afe05b3c6",
+  "elapsed_ms": 51,
+  "files_restored": 4,
+  "history_recovered": true,
+  "limitations": "Local synthetic state and separate fictional source; no clean host, model, Keycloak, Wazuh, offline network or backup-media test",
+  "mode": "synthetic-local",
+  "result": "pass",
+  "retrieval_recovered": true,
+  "role_isolation": true,
+  "schema": 1,
+  "tamper_rejected": true
+}
