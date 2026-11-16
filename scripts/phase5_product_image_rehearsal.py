@@ -22,13 +22,13 @@ from infrastructure.deploy.container_runtime import (
 )
 from infrastructure.deploy.product_installer import (
     cleanup_product_orphans, install_product, product_status, recover_product,
-    rollback_product,
+    restore_install_product, rollback_product,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
-from scripts.phase5_core_state_restore import PASSPHRASE, _probe, restore_synthetic_state
+from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
 
 
 def _sha256(path: Path) -> str:
@@ -168,7 +168,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 result["product_bundle"] = "verified"
                 state_root = root / "core-restore"
                 state_root.mkdir(mode=0o700)
-                state, conversation_id, snapshot_id = restore_synthetic_state(
+                repository, backup_password, snapshot_id, conversation_id = snapshot_synthetic_state(
                     state_root, restic, restic_sha256)
                 lab_credential = root / "lab-password"
                 lab_credential.write_text(PASSPHRASE + "\n")
@@ -185,8 +185,11 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     with os.fdopen(descriptor, "wb") as stream:
                         stream.write(b'{"schema":1,"oidc_issuer":null}\n')
                     config.chmod(0o644)
-                    first = install_product(product_bundle, trusted, crane, config,
-                                            install_root, state, lab_credential)
+                    first = restore_install_product(
+                        product_bundle, trusted, crane, config, install_root,
+                        snapshot_id, repository, backup_password, restic,
+                        restic_sha256, lab_credential)
+                    state = install_root / "core-state"
                     try:
                         def active_core() -> str:
                             active = json.loads((install_root / "product-state.json").read_text())

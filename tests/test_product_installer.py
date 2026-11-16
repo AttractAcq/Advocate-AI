@@ -9,7 +9,7 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeError as ContainerRuntimeError, RuntimeHandle
 from infrastructure.deploy.product_installer import (
     ProductInstallError, install_product, product_status, recover_product,
-    rollback_product,
+    restore_install_product, rollback_product,
 )
 
 
@@ -91,6 +91,58 @@ class ProductInstallerTests(unittest.TestCase):
             with self.assertRaises(ProductInstallError):
                 product_status(self.root, self.key)
             probe.assert_not_called()
+
+    def test_restore_install_activates_only_after_clean_state(self) -> None:
+        _, credential = self._external_state()
+        repository = self.base / "repository"
+        password = self.base / "restic-password"
+        restic = self.base / "restic"
+        snapshot_id = "a" * 64
+
+        def restore(_snapshot, _repository, _password, _restic, _digest,
+                    destination: Path) -> dict[str, object]:
+            destination.mkdir(mode=0o700)
+            (destination / "sources").mkdir()
+            for name in ("roles.json", "manifest.csv", "history.db"):
+                item = destination / name
+                item.write_text("synthetic")
+                item.chmod(0o600)
+            return {"files": 4}
+
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_snapshot",
+                   side_effect=restore) as restored, \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old) as started:
+            result = restore_install_product(self.first, self.key, self.crane,
+                self.config, self.root, snapshot_id, repository, password, restic,
+                "b" * 64, credential)
+            self.assertEqual(result["snapshot_id"], snapshot_id)
+            self.assertEqual(result["restored_files"], 4)
+            self.assertEqual(restored.call_count, 1)
+            self.assertEqual(started.call_args.kwargs["core_state"],
+                             (self.root / "core-state").resolve())
+
+    def test_restore_install_rejects_existing_root_and_failed_restore(self) -> None:
+        _, credential = self._external_state()
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_snapshot",
+                   side_effect=ValueError("corrupt snapshot")) as restored, \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle") as started:
+            with self.assertRaises(ValueError):
+                restore_install_product(self.first, self.key, self.crane, self.config,
+                    self.root, "a" * 64, self.base / "repository", self.base / "password",
+                    self.base / "restic", "b" * 64, credential)
+            self.assertFalse(self.root.exists())
+            started.assert_not_called()
+            self.root.mkdir(mode=0o700)
+            with self.assertRaises(ProductInstallError):
+                restore_install_product(self.first, self.key, self.crane, self.config,
+                    self.root, "a" * 64, self.base / "repository", self.base / "password",
+                    self.base / "restic", "b" * 64, credential)
+            self.assertEqual(restored.call_count, 1)
 
     def test_activate_then_rollback_and_idempotence(self) -> None:
         with patch("infrastructure.deploy.product_installer.verify_bundle",

@@ -24,6 +24,7 @@ from infrastructure.deploy.container_runtime import (
     verify_runtime_identity,
 )
 from infrastructure.release.bundle import BundleError, verify_bundle
+from infrastructure.restic_repository import restore_snapshot
 
 
 class ProductInstallError(ValueError):
@@ -278,6 +279,35 @@ def install_product(bundle: Path, trusted_key: Path, crane: Path,
         return _activate(root, stage, identifier, trusted_key, crane)
 
 
+def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
+                            console_config: Path, root: Path, snapshot_id: str,
+                            repository: Path, restic_password_file: Path,
+                            restic: Path, restic_sha256: str,
+                            lab_password_file: Path) -> dict[str, object]:
+    """Clean-restore fictional Core state before first signed installation."""
+    if not root.is_absolute() or root.exists() or root.is_symlink():
+        raise ProductInstallError("restore installation requires a new absolute root")
+    _owner_directory(root.parent, create=False)
+    manifest = verify_bundle(bundle, trusted_key)
+    if manifest["schema"] != 4:
+        raise ProductInstallError("restore installation requires a two-image bundle")
+    _validate_console_config(console_config)
+    root.mkdir(mode=0o700)
+    try:
+        restored = restore_snapshot(snapshot_id, repository, restic_password_file,
+                                    restic, restic_sha256, root / "core-state")
+        if restored["files"] != 4:
+            raise ProductInstallError("unexpected synthetic Core snapshot contents")
+        activated = install_product(bundle, trusted_key, crane, console_config,
+                                    root, root / "core-state", lab_password_file)
+        return {**activated, "snapshot_id": snapshot_id,
+                "restored_files": restored["files"]}
+    except Exception:
+        if not (root / "product-state.json").exists() and not root.is_symlink():
+            shutil.rmtree(root)
+        raise
+
+
 def product_status(root: Path, trusted_key: Path) -> dict[str, object]:
     core_state, lab_password_file = _mount_config(root)
     current = _state(root)
@@ -359,15 +389,24 @@ def cleanup_product_orphans(root: Path, trusted_key: Path) -> dict[str, object]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic two-image product installer")
     actions = parser.add_subparsers(dest="action", required=True)
-    for action in ("install", "status", "rollback", "recover", "cleanup-orphans"):
+    for action in ("install", "restore-install", "status", "rollback", "recover",
+                   "cleanup-orphans"):
         command = actions.add_parser(action)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
-        if action in ("install", "rollback", "recover"):
+        if action in ("install", "restore-install", "rollback", "recover"):
             command.add_argument("--crane", required=True, type=Path)
-        if action == "install":
+        if action in ("install", "restore-install"):
             command.add_argument("--bundle", required=True, type=Path)
             command.add_argument("--console-config", required=True, type=Path)
+        if action == "restore-install":
+            command.add_argument("--snapshot-id", required=True)
+            command.add_argument("--repository", required=True, type=Path)
+            command.add_argument("--restic-password-file", required=True, type=Path)
+            command.add_argument("--restic", required=True, type=Path)
+            command.add_argument("--restic-sha256", required=True)
+            command.add_argument("--lab-password-file", required=True, type=Path)
+        if action == "install":
             command.add_argument("--core-state", type=Path)
             command.add_argument("--lab-password-file", type=Path)
     args = parser.parse_args()
@@ -376,6 +415,12 @@ def main() -> None:
             result = install_product(args.bundle, args.trusted_key, args.crane,
                                      args.console_config, args.root,
                                      args.core_state, args.lab_password_file)
+        elif args.action == "restore-install":
+            result = restore_install_product(
+                args.bundle, args.trusted_key, args.crane, args.console_config,
+                args.root, args.snapshot_id, args.repository,
+                args.restic_password_file, args.restic, args.restic_sha256,
+                args.lab_password_file)
         elif args.action == "rollback":
             result = rollback_product(args.root, args.trusted_key, args.crane)
         elif args.action == "recover":

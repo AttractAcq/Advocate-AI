@@ -5,8 +5,9 @@ archive against its digest, generates an SBOM and vulnerability scan, and
 creates a signed two-image bundle only when release intake passes. It takes
 an application-consistent restic snapshot of fictional Core policy, one source,
 manifest and SQLite history, removes the original state, verifies the encrypted
-repository and restores into a clean directory. The synthetic installer then
-launches the exact verified bundle with that restored state mounted outside the
+repository. The synthetic installer verifies the bundle and clean-restores the
+snapshot into a new private installation root before launching the exact
+verified bundle with that restored state mounted outside the
 image and records its paths for update, rollback and recovery. The lab
 passphrase is a separate owner-only read-only mount and is absent from the
 snapshot and signed bundle.
@@ -23,7 +24,7 @@ HIGH, CRITICAL or UNKNOWN image findings is denied before bundle creation,
 so this runtime check is conditional on a releasable synthetic candidate.
 
 This closes the local test gap between signed images, a clean restic Core
-restore and installer-managed state mounts. The installer still does not
-perform the restore itself or prove
+restore and installer-managed state mounts. This does not prove a complete
+clean-host disaster recovery or
 Keycloak, PostgreSQL, model, NAS, Wazuh, protected media, target timing or
 vessel recovery. Those remain in the [blocker tracker](../blockers-and-build-queue.md).
