@@ -112,6 +112,10 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     release_write = [Depends(require_roles("fleet_admin", "fleet_release_manager"))]
     audit_read = [Depends(require_roles("fleet_admin", "fleet_release_manager"))]
 
+    @router.get("/me")
+    def me(user: dict[str, str] = Depends(authorise)):
+        return {"id": user["id"], "role": user["role"]}
+
     def add(kind: str, record):
         try:
             return catalog.add(kind, record)
