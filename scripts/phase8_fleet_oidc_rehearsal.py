@@ -166,7 +166,15 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
                                           roles_file=roles, identity_network=network,
                                           ca_file=ca)
             except RuntimeError as exc:
-                raise AssertionError(f"synthetic Fleet activation failed: {last_probe_error}") from exc
+                status = subprocess.run(
+                    ["docker", "inspect", server, "--format", "{{.State.Status}}"],
+                    capture_output=True, text=True)
+                logs = subprocess.run(["docker", "logs", "--tail", "10", server],
+                                      capture_output=True, text=True)
+                raise AssertionError(
+                    "synthetic Fleet activation failed: " + last_probe_error +
+                    f" IdP status={status.stdout.strip() or status.stderr[-200:]}" +
+                    f" IdP log={logs.stderr[-500:]}") from exc
             finally:
                 fleet_runtime._docker = original_docker
             if fleet_status(install_root, trusted)["active"] != installed["active"]:
