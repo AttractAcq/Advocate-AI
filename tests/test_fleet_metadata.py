@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
 from apps.fleet.main import FleetSettings, create_app
+from apps.fleet.body_limit import MAX_BODY_BYTES
 from services.fleet.catalog import DeploymentReceipt, FleetCatalog, Release
 from services.fleet.offline_import import key_id, load_import_key, receipt_bytes
 
@@ -104,6 +105,24 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(
             "/api/fleet/import/deployment-receipts")).json(), [])
         self.assertNotIn(b"never-store-this-vessel-content", self.db.read_bytes())
+
+    async def test_oversized_json_and_streaming_body_reject_before_storage(self) -> None:
+        marker = "oversized-vessel-content-marker"
+        large = marker + "x" * MAX_BODY_BYTES
+        response = await self.client.post("/api/fleet/customers", json={
+            "code": "CUST-LAB1", "category": "owner_manager", "document": large})
+        self.assertEqual(response.status_code, 413)
+
+        async def chunks():
+            yield b'{"code":"CUST-LAB1","category":"owner_manager","document":"'
+            yield large.encode()
+            yield b'"}'
+
+        response = await self.client.post("/api/fleet/customers", content=chunks(),
+                                          headers={"Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual((await self.client.get("/api/fleet/customers")).json(), [])
+        self.assertNotIn(marker.encode(), self.db.read_bytes())
 
     async def test_signed_import_rejects_tamper_wrong_issuer_and_replay(self) -> None:
         await self._seed()

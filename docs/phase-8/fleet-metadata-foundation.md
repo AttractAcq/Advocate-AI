@@ -14,6 +14,10 @@ or a physical vessel handoff.
 
 The API stores records in an owner-only SQLite database and appends a
 transaction-bound hash-chain event containing record type, code and digest.
+The API rejects any POST, PUT or PATCH body above 16 KiB before JSON parsing,
+including streamed bodies without a declared length. This keeps the
+metadata-only import boundary bounded even when a client sends unexpected
+document content.
 Reads verify the chain, each record digest and the strict schema. The audit
 does not store the raw request body. The hash chain is not signed: someone
 with database write access could recompute it. Production Fleet needs its own
