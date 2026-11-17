@@ -309,18 +309,24 @@ class FleetCatalog:
                                code, payload)
         return validated.model_dump(mode="json")
 
-    def list(self, kind: str) -> list[dict[str, object]]:
+    def list(self, kind: str, *, after: str = "", limit: int = 100) -> list[dict[str, object]]:
         if kind not in KINDS:
             raise FleetError("unknown Fleet record type")
+        if not isinstance(after, str) or not 1 <= limit <= 100:
+            raise FleetError("invalid Fleet page")
         with self._connect() as connection:
             self._verify(connection)
             rows = connection.execute("SELECT payload FROM records WHERE kind=? "
-                                      "ORDER BY code LIMIT 100", (kind,))
+                                      "AND code>? ORDER BY code LIMIT ?",
+                                      (kind, after, limit))
             return [json.loads(row["payload"]) for row in rows]
 
-    def audit(self) -> list[dict[str, object]]:
+    def audit(self, *, after: int = 0, limit: int = 100) -> list[dict[str, object]]:
+        if not isinstance(after, int) or after < 0 or not 1 <= limit <= 100:
+            raise FleetError("invalid Fleet audit page")
         with self._connect() as connection:
             self._verify(connection)
             rows = connection.execute("SELECT seq, at, action, kind, code, digest, "
-                                      "chain_hash FROM audit ORDER BY seq LIMIT 100")
+                                      "chain_hash FROM audit WHERE seq>? "
+                                      "ORDER BY seq LIMIT ?", (after, limit))
             return [dict(row) for row in rows]

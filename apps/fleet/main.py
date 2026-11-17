@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 import secrets
 import stat
+from typing import Annotated
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, status
 
 from services.fleet.catalog import (
     Customer, Deployment, FleetCatalog, FleetError,
@@ -20,6 +21,11 @@ from services.fleet.catalog import (
 from services.fleet.offline_import import (
     SignedDeploymentReceipt, load_import_key, verify_signed_receipt,
 )
+
+
+PageAfter = Annotated[str, Query(max_length=32)]
+PageLimit = Annotated[int, Query(ge=1, le=100)]
+AuditAfter = Annotated[int, Query(ge=0)]
 
 
 @dataclass(frozen=True)
@@ -72,9 +78,9 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
         except FleetError as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
-    def list_records(kind: str):
+    def list_records(kind: str, after: str, limit: int):
         try:
-            return catalog.list(kind)
+            return catalog.list(kind, after=after, limit=limit)
         except FleetIntegrityError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 "Fleet store integrity check failed") from exc
@@ -93,12 +99,12 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
         return add("customer", record)
 
     @router.get("/customers")
-    def customers():
-        return list_records("customer")
+    def customers(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("customer", after, limit)
 
     @router.get("/releases")
-    def releases():
-        return list_records("release")
+    def releases(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("release", after, limit)
 
     @router.patch("/releases/{code}/status")
     def update_release(code: str, change: ReleaseStatus):
@@ -109,16 +115,16 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
         return add("deployment", record)
 
     @router.get("/deployments")
-    def deployments():
-        return list_records("deployment")
+    def deployments(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("deployment", after, limit)
 
     @router.post("/licences", status_code=201)
     def create_licence(record: Licence):
         return add("licence", record)
 
     @router.get("/licences")
-    def licences():
-        return list_records("licence")
+    def licences(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("licence", after, limit)
 
     @router.patch("/licences/{code}/status")
     def update_licence(code: str, change: LicenceStatus):
@@ -129,8 +135,8 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
         return add("ticket", record)
 
     @router.get("/tickets")
-    def tickets():
-        return list_records("ticket")
+    def tickets(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("ticket", after, limit)
 
     @router.patch("/tickets/{code}/status")
     def update_ticket(code: str, change: TicketStatus):
@@ -141,8 +147,8 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
         return add("maintenance", record)
 
     @router.get("/maintenance")
-    def maintenance():
-        return list_records("maintenance")
+    def maintenance(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("maintenance", after, limit)
 
     @router.patch("/maintenance/{code}/status")
     def update_maintenance(code: str, change: MaintenanceStatus):
@@ -166,13 +172,13 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     @router.get("/import/deployment-receipts")
-    def receipts():
-        return list_records("receipt")
+    def receipts(after: PageAfter = "", limit: PageLimit = 100):
+        return list_records("receipt", after, limit)
 
     @router.get("/audit")
-    def audit():
+    def audit(after: AuditAfter = 0, limit: PageLimit = 100):
         try:
-            return catalog.audit()
+            return catalog.audit(after=after, limit=limit)
         except FleetIntegrityError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 "Fleet store integrity check failed") from exc
