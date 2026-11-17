@@ -44,6 +44,8 @@ def _realm(password: str) -> dict[str, object]:
         }],
         "users": [{
             "username": "admin", "enabled": True, "emailVerified": True,
+            "email": "admin@synthetic.example.invalid", "firstName": "Synthetic",
+            "lastName": "Administrator",
             "requiredActions": [], "realmRoles": ["fleet_admin"],
             "credentials": [{"type": "password", "value": password,
                              "temporary": False}],
