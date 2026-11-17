@@ -35,3 +35,42 @@ result is `denied-findings` and no signed bundle. Its metadata-only result,
 scan and inventory files are retained as CI artifacts; temporary signing keys
 and image archives are not published by the rehearsal. This is evidence of
 the software path, not approval to distribute an image.
+
+[PR #60's CI evidence](https://github.com/AttractAcq/Advocate-AI/actions/runs/44091882326)
+reported `fleet_bundle: verified`: both actual synthetic Fleet images passed
+archive identity and intake with zero unresolved HIGH, CRITICAL or UNKNOWN
+findings. This result applies only to those CI-built image digests.
+
+The synthetic Fleet installer stages a verified schema-5 bundle under an
+owner-only root, preserves the private state directory across versions and launches both
+images on a private Docker network. A candidate becomes active only after the
+API and same-origin portal pass health and permission probes. The prior
+release remains staged for rollback; recovery restarts the signed active
+release after a stopped service. On first installation, supply an owner-only
+lab token source. Later updates reuse the installed token and database:
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_installer install \
+  --bundle /path/to/signed-fleet-bundle --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane --config /path/to/fleet-config.json \
+  --root /private/fleet-install --token-file /protected/fleet-lab-token
+.venv/bin/python -m infrastructure.deploy.fleet_installer status \
+  --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem
+.venv/bin/python -m infrastructure.deploy.fleet_installer rollback \
+  --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane
+```
+
+The local runtime accepts only the no-issuer lab configuration. It publishes
+no host port; production TLS, external company identity, backup/migration of
+Fleet state, operator ingress and topology are separate B-12 gates. The CI
+rehearsal exercises install, rejected candidate, update, rollback and
+recovery only when both images pass intake.
+
+[PR #61's retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44093561479)
+reports `fleet_bundle: verified`, `failed_candidate: previous-runtime-preserved`,
+`update: healthy-candidate-activated`, `rollback: previous-release-restored`
+and `recovery: signed-release-restarted` for the actual CI-built images. The
+synthetic images had zero unresolved HIGH, CRITICAL or UNKNOWN findings in
+that run. This does not establish production readiness for company identity,
+TLS, backup or operator access.

@@ -14,6 +14,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_fleet_bundle, verify_bundle
+from infrastructure.deploy.fleet_installer import (
+    fleet_status, install_fleet, recover_fleet, rollback_fleet,
+)
+from infrastructure.deploy.fleet_runtime import FleetRuntime, stop_runtime
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -109,6 +113,56 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 if verify_bundle(bundle, trusted) != created:
                     raise AssertionError("signed Fleet bundle did not verify")
                 result["fleet_bundle"] = "verified"
+                second_bundle = root / "signed-fleet-2"
+                create_fleet_bundle(payload, second_bundle, private,
+                                    "synthetic-fleet-trial-2", descriptors, crane=crane)
+                config = root / "fleet-config.json"
+                config.write_text('{"schema":1,"oidc_issuer":null}\n')
+                config.chmod(0o644)
+                token = root / "fleet-token"
+                token.write_text("synthetic-fleet-admin-token-0123456789\n")
+                token.chmod(0o600)
+                install_root = root / "fleet-install"
+                active_runtime: FleetRuntime | None = None
+                try:
+                    first = install_fleet(bundle, trusted, crane, config,
+                                          install_root, token)
+                    if fleet_status(install_root, trusted)["active"] != first["active"]:
+                        raise AssertionError("Fleet first install is not healthy")
+                    try:
+                        install_fleet(root / "missing-bundle", trusted, crane,
+                                      config, install_root)
+                    except (OSError, ValueError):
+                        if fleet_status(install_root, trusted)["active"] != first["active"]:
+                            raise AssertionError("failed Fleet candidate changed active state")
+                        result["failed_candidate"] = "previous-runtime-preserved"
+                    else:
+                        raise AssertionError("missing Fleet bundle unexpectedly installed")
+                    second = install_fleet(second_bundle, trusted, crane,
+                                           config, install_root)
+                    if second["previous"] != first["active"] or \
+                            fleet_status(install_root, trusted)["active"] != second["active"]:
+                        raise AssertionError("Fleet update did not activate cleanly")
+                    result["update"] = "healthy-candidate-activated"
+                    restored = rollback_fleet(install_root, trusted, crane)
+                    if restored["active"] != first["active"] or \
+                            fleet_status(install_root, trusted)["active"] != first["active"]:
+                        raise AssertionError("Fleet rollback did not restore first release")
+                    result["rollback"] = "previous-release-restored"
+                    state = json.loads((install_root / "fleet-state.json").read_text())
+                    active_runtime = FleetRuntime(**state["runtime"])
+                    subprocess.run(["docker", "stop", active_runtime.portal_id],
+                                   check=True, capture_output=True, timeout=60)
+                    recovery = recover_fleet(install_root, trusted, crane)
+                    if recovery["result"] != "recovered" or \
+                            fleet_status(install_root, trusted)["active"] != first["active"]:
+                        raise AssertionError("Fleet stopped portal did not recover")
+                    result["recovery"] = "signed-release-restarted"
+                finally:
+                    state_file = install_root / "fleet-state.json"
+                    if state_file.exists():
+                        current = json.loads(state_file.read_text())
+                        stop_runtime(FleetRuntime(**current["runtime"]))
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
         return result
     except Exception:
