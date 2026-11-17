@@ -280,6 +280,24 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             create_app(FleetSettings(self.db, None, oidc_verifier=OidcVerifier(
                 self.issuer, self.roles_path, audience="sovereign-core")))
+        ca = self.db.parent / "company-ca.pem"
+        ca.write_text("synthetic CA fixture")
+        ca.chmod(0o600)
+        company = {"SOVEREIGN_FLEET_DB": str(self.db),
+                   "SOVEREIGN_FLEET_OIDC_ISSUER":
+                       "https://identity.example.invalid/realms/fleet",
+                   "SOVEREIGN_FLEET_ROLES_FILE": str(self.roles_path),
+                   "SOVEREIGN_FLEET_CA_FILE": str(ca)}
+        with patch.dict(os.environ, company, clear=True):
+            self.assertEqual(FleetSettings.from_env().oidc_verifier.ca_file, ca)
+        ca.chmod(0o644)
+        with patch.dict(os.environ, company, clear=True), self.assertRaises(ValueError):
+            FleetSettings.from_env()
+        with patch.dict(os.environ, {"SOVEREIGN_FLEET_DB": str(self.db),
+                                          "SOVEREIGN_FLEET_TOKEN_FILE": str(self.roles_path),
+                                          "SOVEREIGN_FLEET_CA_FILE": str(ca)}, clear=True), \
+             self.assertRaises(ValueError):
+            FleetSettings.from_env()
 
     async def test_company_https_issuer_accepts_scoped_token_and_rejects_unsafe_hosts(self) -> None:
         company_issuer = "https://identity.example.invalid/realms/fleet"

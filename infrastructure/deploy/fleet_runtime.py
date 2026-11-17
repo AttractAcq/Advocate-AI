@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import ssl
 import stat
 import time
 import uuid
@@ -68,6 +69,7 @@ def validate_state(state: Path, issuer: str | None = None) -> None:
     if issuer is not None:
         identity = state.parent / "identity"
         roles = identity / "roles.json"
+        ca = identity / "ca.pem"
         if (identity.is_symlink() or not identity.is_dir() or
                 identity.stat().st_uid != os.getuid() or
                 stat.S_IMODE(identity.stat().st_mode) & 0o077 or
@@ -88,6 +90,16 @@ def validate_state(state: Path, issuer: str | None = None) -> None:
                         user.get("status") == "active" and
                         user.get("customer_codes") == ["*"] for user in users)):
             raise RuntimeError("Fleet OIDC roles require an active global administrator")
+        if ca.exists() or ca.is_symlink():
+            if (ca.is_symlink() or not ca.is_file() or
+                    ca.stat().st_uid != os.getuid() or
+                    stat.S_IMODE(ca.stat().st_mode) & 0o077 or
+                    ca.stat().st_size > 64 * 1024):
+                raise RuntimeError("Fleet OIDC CA must be owner-only")
+            try:
+                ssl.create_default_context(cafile=str(ca))
+            except ssl.SSLError as exc:
+                raise RuntimeError("invalid Fleet OIDC CA certificate") from exc
 
 
 def stop_runtime(handle: FleetRuntime) -> None:
@@ -104,7 +116,8 @@ def stop_runtime(handle: FleetRuntime) -> None:
             pass
 
 
-def _health(api_id: str, issuer: str | None = None) -> None:
+def _health(api_id: str, issuer: str | None = None,
+            custom_ca: bool = False) -> None:
     _docker("exec", api_id, "python", "-c",
             'import urllib.request; '
             'assert urllib.request.urlopen("http://127.0.0.1:18800/health", timeout=3).status == 200')
@@ -125,6 +138,9 @@ def _health(api_id: str, issuer: str | None = None) -> None:
             'headers={"X-Fleet-Lab-Token":token})\n'
             'assert json.load(urllib.request.urlopen(request, timeout=3))["role"]=="fleet_admin"\n')
     else:
+        if custom_ca:
+            script += ('import ssl\n'
+                       'context=ssl.create_default_context(cafile="/etc/fleet-ca.pem")\n')
         script += (
             'request=urllib.request.Request(base+"/api/fleet/me", '
             'headers={"X-Fleet-Lab-Token":"synthetic-fleet-admin-token-0123456789"})\n'
@@ -132,7 +148,8 @@ def _health(api_id: str, issuer: str | None = None) -> None:
             'except urllib.error.HTTPError as exc:\n assert exc.code==401\n'
             'else:\n raise AssertionError("lab token accepted in OIDC mode")\n'
             f'keys=json.load(urllib.request.urlopen({issuer!r}+'
-            '"/protocol/openid-connect/certs", timeout=5))\n'
+            '"/protocol/openid-connect/certs", timeout=5'
+            + (', context=context' if custom_ca else '') + '))\n'
             'assert isinstance(keys.get("keys"), list) and keys["keys"]\n')
     script += (
             'try:\n urllib.request.urlopen(base+"/api/models", timeout=3)\n'
@@ -159,6 +176,7 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
     if manifest.get("schema") != 5 or manifest.get("target") != "fleet":
         raise BundleError("Fleet runtime requires a signed Fleet bundle")
     issuer = validate_config(config)
+    custom_ca = issuer is not None and (state.parent / "identity" / "ca.pem").exists()
     if issuer is None:
         if handle.identity_network_id is not None or handle.identity_network_name is not None:
             raise RuntimeError("lab Fleet runtime has unexpected identity network")
@@ -192,7 +210,8 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
                  handle.identity_network_id)):
             raise RuntimeError("Fleet container network mismatch")
         mounts = json.loads(_docker("inspect", identifier, "--format", "{{json .Mounts}}"))
-        required_mounts = ({"/state", "/etc/fleet-roles.json"}
+        required_mounts = ({"/state", "/etc/fleet-roles.json"} |
+                           ({"/etc/fleet-ca.pem"} if custom_ca else set())
                            if role == "fleet-api" and issuer is not None else
                            {"/state"} if role == "fleet-api" else
                            {"/srv/fleet-config.json"})
@@ -216,6 +235,14 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
                         bound[0].get("Source") != str(roles.resolve()) or
                         bound[0].get("RW") is not False):
                     raise RuntimeError("Fleet roles mount identity mismatch")
+                if custom_ca:
+                    ca = state.parent / "identity" / "ca.pem"
+                    bound_ca = [item for item in mounts if item.get("Destination") ==
+                                "/etc/fleet-ca.pem"]
+                    if (len(bound_ca) != 1 or bound_ca[0].get("Type") != "bind" or
+                            bound_ca[0].get("Source") != str(ca.resolve()) or
+                            bound_ca[0].get("RW") is not False):
+                        raise RuntimeError("Fleet CA mount identity mismatch")
             environment = json.loads(_docker("inspect", identifier, "--format",
                                              "{{json .Config.Env}}"))
             relevant = [item for item in environment if item.startswith("SOVEREIGN_FLEET_")]
@@ -225,6 +252,8 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
             else:
                 expected_env.update({f"SOVEREIGN_FLEET_OIDC_ISSUER={issuer}",
                                      "SOVEREIGN_FLEET_ROLES_FILE=/etc/fleet-roles.json"})
+                if custom_ca:
+                    expected_env.add("SOVEREIGN_FLEET_CA_FILE=/etc/fleet-ca.pem")
             if (set(relevant) != expected_env or
                     len(relevant) != len(expected_env) or
                     _docker("inspect", identifier, "--format", "{{.Config.User}}") !=
@@ -240,7 +269,8 @@ def probe_runtime(handle: FleetRuntime, bundle: Path, trusted_key: Path,
     if any(_docker("inspect", identifier, "--format", "{{.State.Running}}") != "true"
            for identifier in (handle.api_id, handle.portal_id)):
         raise RuntimeError("Fleet container is stopped")
-    _health(handle.api_id, issuer)
+    _health(handle.api_id, issuer,
+            issuer is not None and (state.parent / "identity" / "ca.pem").exists())
 
 
 def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
@@ -281,6 +311,11 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
                 "--mount", f"type=bind,source={roles.resolve()},target=/etc/fleet-roles.json,readonly",
                 "-e", f"SOVEREIGN_FLEET_OIDC_ISSUER={issuer}",
                 "-e", "SOVEREIGN_FLEET_ROLES_FILE=/etc/fleet-roles.json"))
+            ca = state.parent / "identity" / "ca.pem"
+            if ca.exists():
+                api_args.extend((
+                    "--mount", f"type=bind,source={ca.resolve()},target=/etc/fleet-ca.pem,readonly",
+                    "-e", "SOVEREIGN_FLEET_CA_FILE=/etc/fleet-ca.pem"))
         api_id = _docker(*api_args, ids["fleet-api"])
         if identity_network is not None:
             _docker("network", "connect", identity_network, api_id)

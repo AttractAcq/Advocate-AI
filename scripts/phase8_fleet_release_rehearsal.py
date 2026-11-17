@@ -26,6 +26,7 @@ from services.fleet.catalog import Customer, FleetCatalog
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from scripts.phase8_fleet_oidc_rehearsal import rehearse_oidc
 
 
 def _sha256(path: Path) -> str:
@@ -201,6 +202,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     if state_file.exists():
                         current = json.loads(state_file.read_text())
                         stop_runtime(FleetRuntime(**current["runtime"]))
+                result.update(rehearse_oidc(bundle, trusted, crane, root))
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
         return result
     except Exception:

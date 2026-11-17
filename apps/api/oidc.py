@@ -21,7 +21,8 @@ class OidcVerifier:
                  *, transport: httpx.BaseTransport | None = None,
                  revocations_path: Path | None = None,
                  authorized_client: str = "sovereign-console",
-                 allow_https_issuer: bool = False) -> None:
+                 allow_https_issuer: bool = False,
+                 ca_file: Path | None = None) -> None:
         parsed = urlsplit(issuer)
         realm = re.fullmatch(r"/realms/[A-Za-z0-9_-]{1,80}", parsed.path)
         if (not realm or parsed.query or parsed.fragment or parsed.username or
@@ -31,6 +32,8 @@ class OidcVerifier:
             port = parsed.port
         except ValueError as exc:
             raise ValueError("invalid OIDC issuer port") from exc
+        if ca_file is not None and parsed.scheme != "https":
+            raise ValueError("custom OIDC CA requires an HTTPS issuer")
         if parsed.scheme == "https" and allow_https_issuer:
             hostname = parsed.hostname or ""
             labels = hostname.split(".")
@@ -54,6 +57,7 @@ class OidcVerifier:
         self.audience = audience
         self.authorized_client = authorized_client
         self.transport = transport
+        self.ca_file = ca_file
         self._keys: dict[str, object] = {}
         self._expires = 0.0
         self.revocations_path = revocations_path
@@ -96,7 +100,8 @@ class OidcVerifier:
 
     def _key(self, kid: str):
         if time.monotonic() > self._expires or kid not in self._keys:
-            with httpx.Client(timeout=5, trust_env=False, transport=self.transport) as client:
+            with httpx.Client(timeout=5, trust_env=False, transport=self.transport,
+                              verify=str(self.ca_file) if self.ca_file else True) as client:
                 response = client.get(f"{self.issuer}/protocol/openid-connect/certs")
                 response.raise_for_status()
                 keys = response.json()["keys"]

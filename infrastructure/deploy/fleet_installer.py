@@ -170,13 +170,15 @@ def _stage(root: Path, bundle: Path, config: Path,
 
 
 def _provision_identity(root: Path, issuer: str | None,
-                        token_file: Path | None, roles_file: Path | None) -> None:
+                        token_file: Path | None, roles_file: Path | None,
+                        ca_file: Path | None = None) -> None:
     state = root / "state"
     _owner_directory(state, create=True)
     target = state / "token"
     identity = root / "identity"
     if issuer is None:
-        if roles_file is not None or identity.exists() or identity.is_symlink():
+        if (roles_file is not None or ca_file is not None or
+                identity.exists() or identity.is_symlink()):
             raise FleetInstallError("lab Fleet cannot contain OIDC roles")
     elif token_file is not None or target.exists() or target.is_symlink():
         raise FleetInstallError("OIDC Fleet cannot contain a lab token")
@@ -195,6 +197,8 @@ def _provision_identity(root: Path, issuer: str | None,
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+    if ca_file is not None and roles_file is None:
+        raise FleetInstallError("Fleet OIDC CA is provisioned with initial roles")
     if issuer is not None and roles_file is not None:
         if (identity.exists() or identity.is_symlink() or
                 not roles_file.is_absolute() or roles_file.is_symlink()):
@@ -221,6 +225,30 @@ def _provision_identity(root: Path, issuer: str | None,
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
+            if ca_file is not None:
+                if not ca_file.is_absolute() or ca_file.is_symlink():
+                    raise FleetInstallError("invalid Fleet OIDC CA source")
+                ca_descriptor = os.open(ca_file, os.O_RDONLY | os.O_NOFOLLOW)
+                try:
+                    ca_stat = os.fstat(ca_descriptor)
+                    if (not stat.S_ISREG(ca_stat.st_mode) or
+                            ca_stat.st_uid != os.getuid() or
+                            stat.S_IMODE(ca_stat.st_mode) & 0o077 or
+                            ca_stat.st_size > 64 * 1024):
+                        raise FleetInstallError("invalid Fleet OIDC CA source")
+                    with os.fdopen(ca_descriptor, "rb", closefd=False) as source:
+                        ca_data = source.read(64 * 1024 + 1)
+                    if len(ca_data) > 64 * 1024:
+                        raise FleetInstallError("Fleet OIDC CA source is too large")
+                finally:
+                    os.close(ca_descriptor)
+                ca_target = identity / "ca.pem"
+                ca_output = os.open(ca_target, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                    os.O_NOFOLLOW, 0o600)
+                with os.fdopen(ca_output, "wb") as stream:
+                    stream.write(ca_data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
         except Exception:
             shutil.rmtree(identity)
             raise
@@ -261,7 +289,8 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
                   config: Path, root: Path,
                   token_file: Path | None = None,
                   roles_file: Path | None = None,
-                  identity_network: str | None = None) -> dict[str, object]:
+                  identity_network: str | None = None,
+                  ca_file: Path | None = None) -> dict[str, object]:
     _owner_directory(root, create=True)
     with _lock(root):
         issuer = validate_config(config)
@@ -270,7 +299,7 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
             identity_network = _handle(current).identity_network_name
         if (issuer is None) != (identity_network is None):
             raise FleetInstallError("Fleet identity mode requires matching network")
-        _provision_identity(root, issuer, token_file, roles_file)
+        _provision_identity(root, issuer, token_file, roles_file, ca_file)
         identifier, stage = _stage(root, bundle, config, trusted_key)
         return _activate(root, identifier, stage, trusted_key, crane, identity_network)
 
@@ -279,7 +308,8 @@ def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
                           config: Path, root: Path, token_file: Path | None,
                           archive: Path, backup_key: Path,
                           roles_file: Path | None = None,
-                          identity_network: str | None = None) -> dict[str, object]:
+                          identity_network: str | None = None,
+                          ca_file: Path | None = None) -> dict[str, object]:
     """Clean-restore the audited Fleet database before signed activation."""
     if not root.is_absolute() or root.exists() or root.is_symlink():
         raise FleetInstallError("Fleet restore-install requires a new absolute root")
@@ -288,7 +318,7 @@ def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
     try:
         restored = restore_fleet(archive, backup_key, root / "state")
         installed = install_fleet(bundle, trusted_key, crane, config, root,
-                                  token_file, roles_file, identity_network)
+                                  token_file, roles_file, identity_network, ca_file)
         return {**installed, "restored_files": restored["files"]}
     except Exception:
         if not (root / "fleet-state.json").exists() and not root.is_symlink():
@@ -374,6 +404,7 @@ def main() -> None:
             command.add_argument("--token-file", type=Path)
             command.add_argument("--roles-file", type=Path)
             command.add_argument("--identity-network")
+            command.add_argument("--ca-file", type=Path)
         if name == "restore-install":
             command.add_argument("--archive", required=True, type=Path)
             command.add_argument("--backup-key", required=True, type=Path)
@@ -382,14 +413,14 @@ def main() -> None:
         if args.command == "install":
             result = install_fleet(args.bundle, args.trusted_key, args.crane,
                                    args.config, args.root, args.token_file,
-                                   args.roles_file, args.identity_network)
+                                   args.roles_file, args.identity_network, args.ca_file)
         elif args.command == "restore-install":
             if (args.token_file is None) == (args.roles_file is None):
                 raise FleetInstallError("Fleet restore-install requires one identity source")
             result = restore_install_fleet(args.bundle, args.trusted_key, args.crane,
                                            args.config, args.root, args.token_file,
                                            args.archive, args.backup_key,
-                                           args.roles_file, args.identity_network)
+                                           args.roles_file, args.identity_network, args.ca_file)
         elif args.command == "status":
             result = fleet_status(args.root, args.trusted_key)
         elif args.command == "rollback":

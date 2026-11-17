@@ -54,17 +54,22 @@ class FleetSettings:
         filename = os.environ.get("SOVEREIGN_FLEET_TOKEN_FILE")
         issuer = os.environ.get("SOVEREIGN_FLEET_OIDC_ISSUER")
         roles_filename = os.environ.get("SOVEREIGN_FLEET_ROLES_FILE")
+        ca_filename = os.environ.get("SOVEREIGN_FLEET_CA_FILE")
         if (not database or bool(issuer) != bool(roles_filename)
-                or bool(filename) == bool(issuer)):
+                or bool(filename) == bool(issuer) or
+                (ca_filename is not None and not issuer)):
             raise ValueError("Fleet requires exactly one local identity mode")
         import_path = os.environ.get("SOVEREIGN_FLEET_IMPORT_KEY_FILE")
         import_key = load_import_key(Path(import_path)) if import_path else None
         if issuer and roles_filename:
             roles_path = Path(roles_filename)
             _owner_file(roles_path, 1024 * 1024)
+            ca_path = Path(ca_filename) if ca_filename else None
+            if ca_path is not None:
+                _owner_file(ca_path, 64 * 1024)
             verifier = OidcVerifier(issuer, roles_path, audience="sovereign-fleet",
                                     authorized_client="sovereign-fleet-portal",
-                                    allow_https_issuer=True)
+                                    allow_https_issuer=True, ca_file=ca_path)
             return cls(Path(database), None, import_key, verifier)
         path = Path(filename or "")
         _owner_file(path, 4096)

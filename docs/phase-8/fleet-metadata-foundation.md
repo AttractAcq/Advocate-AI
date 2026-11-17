@@ -136,7 +136,10 @@ with normal certificate validation, then checks the separate Fleet audience,
 client, role and customer grant. The signed Fleet installer now has a company
 OIDC mode that mounts the roles file separately and attaches only the API to
 a labelled internal identity network. Browser TLS ingress, the actual company
-IdP, certificate policy and target network behavior remain B-12 gates. The
+IdP, certificate policy and target network behavior remain B-12 gates. A
+private company CA may be supplied as an owner-only file and is mounted
+read-only for the Fleet API's HTTPS JWKS check; it must be reprovisioned
+separately during restore. The
 separate `FleetApi.Dockerfile` and `FleetPortal.Dockerfile` now package the
 company API and built portal for an internal-network synthetic rehearsal.
 The portal serves `/fleet-config.json` from an explicit read-only mount and
