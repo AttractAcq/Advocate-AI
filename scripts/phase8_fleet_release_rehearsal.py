@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from cryptography.hazmat.primitives import serialization
@@ -15,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_fleet_bundle, verify_bundle
 from infrastructure.deploy.fleet_installer import (
-    fleet_status, install_fleet, recover_fleet, restore_install_fleet,
+    fleet_status, install_fleet, restore_install_fleet,
     rollback_fleet,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, stop_runtime
@@ -157,9 +158,17 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     active_runtime = FleetRuntime(**state["runtime"])
                     subprocess.run(["docker", "stop", active_runtime.portal_id],
                                    check=True, capture_output=True, timeout=60)
-                    recovery = recover_fleet(install_root, trusted, crane)
-                    if recovery["result"] != "recovered" or \
-                            fleet_status(install_root, trusted)["active"] != first["active"]:
+                    command = [sys.executable, "-m", "infrastructure.deploy.fleet_installer"]
+                    base_args = ["--root", str(install_root), "--trusted-key", str(trusted)]
+                    recovery = json.loads(subprocess.run(
+                        command + ["recover", *base_args, "--crane", str(crane)],
+                        check=True, capture_output=True, text=True, timeout=300).stdout)
+                    status = json.loads(subprocess.run(
+                        command + ["status", *base_args], check=True,
+                        capture_output=True, text=True, timeout=60).stdout)
+                    if (recovery["result"] != "recovered" or
+                            status["result"] != "healthy" or
+                            status["active"] != first["active"]):
                         raise AssertionError("Fleet stopped portal did not recover")
                     result["recovery"] = "signed-release-restarted"
                     catalog = FleetCatalog(install_root / "state" / "fleet.db")

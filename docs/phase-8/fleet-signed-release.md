@@ -113,6 +113,23 @@ names are fixed so the timer cannot point at a different unit.
   --max-archives 30
 ```
 
+For boot recovery, render the Fleet one-shot unit into the same private staging
+area and validate it before installation. It waits for Docker, requires an
+installed Fleet state file, restarts the signed active release if unhealthy,
+then runs the full status probe. The service account must own the installation
+root and have access to the local Docker socket; that privilege and the host
+unit placement need target review. CI validates the unit syntax and calls the
+same recover/status CLI against actual synthetic Fleet images after stopping
+the portal. This is not a physical reboot test.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_boot_service \
+  --output /private/unit-staging/sovereign-fleet-recover.service \
+  --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane --python /opt/sovereign/.venv/bin/python \
+  --workdir /opt/sovereign
+```
+
 This synthetic software path uses owner-only staging but has no approved
 production backup media, retention, key custody or timed recovery runbook.
 Those remain B-12 gates. CI checks that a fictional customer survives a clean

@@ -340,6 +340,29 @@ jobs:
             --staging /srv/sovereign/staging --hour-utc 2 --max-age-hours 24
           systemd-analyze verify "$RUNNER_TEMP/sovereign-backup.service" \
             "$RUNNER_TEMP/sovereign-backup.timer"
+      - name: Validate synthetic Fleet service unit syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m infrastructure.deploy.fleet_boot_service \
+            --output "$RUNNER_TEMP/sovereign-fleet-recover.service" \
+            --root /var/lib/sovereign-fleet \
+            --trusted-key /etc/sovereign/fleet-trusted.pem \
+            --crane /opt/sovereign/bin/crane \
+            --python /opt/sovereign/bin/python \
+            --workdir /opt/sovereign/app
+          .venv/bin/python -m infrastructure.deploy.fleet_backup_service render \
+            --service-output "$RUNNER_TEMP/sovereign-fleet-backup.service" \
+            --timer-output "$RUNNER_TEMP/sovereign-fleet-backup.timer" \
+            --db /var/lib/sovereign-fleet/state/fleet.db \
+            --directory /var/lib/sovereign-fleet-backups \
+            --key /etc/sovereign/fleet-backup.key \
+            --python /opt/sovereign/bin/python \
+            --workdir /opt/sovereign/app --hour-utc 3 \
+            --max-age-hours 26 --max-archives 30
+          systemd-analyze verify "$RUNNER_TEMP/sovereign-fleet-recover.service" \
+            "$RUNNER_TEMP/sovereign-fleet-backup.service" \
+            "$RUNNER_TEMP/sovereign-fleet-backup.timer"
       - name: Rehearse encrypted PostgreSQL dump and clean restore
         shell: bash
         run: |
