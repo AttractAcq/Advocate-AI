@@ -278,6 +278,27 @@ jobs:
           name: synthetic-product-image-release-evidence
           path: ${{ runner.temp }}/product-image-evidence
           retention-days: 30
+      - name: Bind actual Fleet image archives to release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+          docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase8_fleet_release_rehearsal \
+            --output "$RUNNER_TEMP/fleet-image-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Fleet image evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-fleet-image-release-evidence
+          path: ${{ runner.temp }}/fleet-image-evidence
+          retention-days: 30
 
   restic-recovery-rehearsal:
     if: github.event_name == 'pull_request'
