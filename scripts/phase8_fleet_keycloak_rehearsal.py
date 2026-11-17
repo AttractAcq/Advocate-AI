@@ -90,6 +90,16 @@ with httpx.Client(verify=ca, trust_env=False, follow_redirects=False, timeout=10
                                            "password": password})
     assert login.status_code in (302, 303), ("login", login.status_code, login.text[:200])
     location = login.headers["location"]
+    for _ in range(5):
+        if location.startswith(redirect):
+            break
+        next_url = urllib.parse.urljoin(issuer + "/", location)
+        assert next_url.startswith(issuer + "/"), "login redirected outside Keycloak"
+        next_page = client.get(next_url)
+        assert next_page.status_code in (302, 303), (
+            "intermediate login redirect", next_page.status_code,
+            urllib.parse.urlsplit(next_url).path)
+        location = next_page.headers["location"]
     assert location.startswith(redirect), "login redirected outside the Fleet callback"
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(location).query)
     assert query.get("state") == [state] and len(query.get("code", [])) == 1, "invalid PKCE callback"
