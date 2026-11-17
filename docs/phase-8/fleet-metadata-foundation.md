@@ -63,6 +63,26 @@ release field fail schema verification. Start a fresh lab catalog and reimport
 signed product bundles; do not relabel an unverified digest as proven release
 provenance.
 
+The separate React/TypeScript Fleet portal runs locally from `apps/fleet/web`:
+
+```sh
+cd apps/fleet/web
+npm ci --ignore-scripts
+npm run dev
+```
+
+The development server listens on `127.0.0.1:18801` and proxies only
+`/api/fleet` to the loopback Fleet API on port 18800. It shows company
+customers, verified release metadata, deployments, licences, coded support
+and maintenance, signed receipt results and audit events. It can create
+strictly structured customer, deployment, licence, ticket and maintenance
+records and use the lab status-transition routes. Release import remains a
+local signed-bundle operation. The lab token stays in browser-tab memory and
+is sent only to same-origin Fleet API paths; no token is written to browser
+storage. This portal is a synthetic company-side candidate. Production
+identity, roles, signed receipt entry UI, pagination, retention and
+independent usability/security review remain B-12.
+
 Receipt import requires `SOVEREIGN_FLEET_IMPORT_KEY_FILE` pointing to an
 owner-only regular PEM file containing the offline issuer's Ed25519 public
 key. If unset, import returns 503 while the rest of Fleet remains available.

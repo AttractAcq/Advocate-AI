@@ -12,7 +12,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build/sovereign-source.tar.gz"
-SKIP = {".git", "build", "runtime", "__pycache__", ".venv", "node_modules", ".pytest_cache"}
+SKIP = {".git", "build", "runtime", "dist", "__pycache__", ".venv", "node_modules", ".pytest_cache"}
 INCLUDE = {".github", ".gitignore", "Makefile", "pyproject.toml", "uv.lock", "requirements.lock",
            "apps", "services", "infrastructure", "scripts", "tests", "fixtures"}
 
