@@ -111,6 +111,10 @@ Ephemeral CA, keys and tokens are deleted; retained evidence contains only
 result codes. This synthetic service is not a Keycloak interoperability or
 browser TLS acceptance test.
 
+[PR #67's signed-image CI run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44150682876/job/134277834972)
+reports `oidc_runtime: synthetic-https-token-authorized`,
+`wrong_audience: denied` and `idp_outage: status-failed-closed`.
+
 [PR #61's retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44093561479)
 reports `fleet_bundle: verified`, `failed_candidate: previous-runtime-preserved`,
 `update: healthy-candidate-activated`, `rollback: previous-release-restored`
