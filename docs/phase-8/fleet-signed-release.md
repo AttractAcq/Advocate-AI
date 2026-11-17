@@ -61,11 +61,36 @@ lab token source. Later updates reuse the installed token and database:
   --crane /path/to/pinned/crane
 ```
 
-The local runtime accepts only the no-issuer lab configuration. It publishes
-no host port; production TLS, external company identity, backup/migration of
-Fleet state, operator ingress and topology are separate B-12 gates. The CI
-rehearsal exercises install, rejected candidate, update, rollback and
-recovery only when both images pass intake.
+The local runtime publishes no host port. The CI image rehearsal uses the
+no-issuer lab configuration and exercises install, rejected candidate, update,
+rollback and recovery only when both images pass intake.
+
+The OIDC runtime candidate accepts a company HTTPS issuer in
+`fleet-config.json`. Before installation, a company administrator provisions a
+separate Docker network that is internal and labelled
+`sovereign.fleet.identity=true`, attaches the company Keycloak endpoint to it
+under the issuer's DNS name, and supplies an owner-only Fleet roles file. Only
+the API container joins this identity network. The portal stays on the
+private Fleet network; both containers have no host port. The installer copies
+the roles file outside the writable catalog volume, mounts it read-only in
+the API, and never copies a lab token into OIDC mode. Candidate health checks
+verify the portal config, reject unauthenticated and lab-token requests, and
+retrieve the issuer's JWKS over certificate-validated HTTPS. The network
+name is retained through update, rollback and boot recovery.
+
+```sh
+docker network create --internal --label sovereign.fleet.identity=true fleet-identity
+.venv/bin/python -m infrastructure.deploy.fleet_installer install \
+  --bundle /path/to/signed-fleet-bundle --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane --config /path/to/fleet-https-config.json \
+  --root /private/fleet-install --roles-file /protected/fleet-roles.json \
+  --identity-network fleet-identity
+```
+
+The external identity endpoint and browser TLS ingress must exist before this
+command can pass health checks. The command does not create them. Production
+IdP configuration, certificate trust, MFA, operator ingress and network
+policy still require company approval and target validation under B-12.
 
 [PR #61's retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44093561479)
 reports `fleet_bundle: verified`, `failed_candidate: previous-runtime-preserved`,
@@ -78,6 +103,8 @@ TLS, backup or operator access.
 The local Fleet backup command verifies the catalog audit chain, snapshots
 only `fleet.db` through the existing SQLite-safe backup code and encrypts it
 with AES-256-GCM. It excludes the lab token, signing keys and portal config.
+An OIDC roles file and the identity network are also outside the encrypted
+catalog archive and must be reprovisioned separately during recovery.
 Restore authenticates into a new private directory and verifies the catalog
 again before the signed installer starts. The token is provisioned separately:
 

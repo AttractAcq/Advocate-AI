@@ -133,9 +133,10 @@ The token mode and OIDC mode cannot be active together. For a company browser
 origin, `/fleet-config.json` accepts only a DNS-hosted HTTPS realm on port
 443 and the page itself must use HTTPS. The API retrieves JWKS over HTTPS
 with normal certificate validation, then checks the separate Fleet audience,
-client, role and customer grant. The installed Fleet runtime still uses the
-lab token path; its company identity network, TLS ingress, roles-file mount,
-and target IdP are separate integration gates under B-12. The
+client, role and customer grant. The signed Fleet installer now has a company
+OIDC mode that mounts the roles file separately and attaches only the API to
+a labelled internal identity network. Browser TLS ingress, the actual company
+IdP, certificate policy and target network behavior remain B-12 gates. The
 separate `FleetApi.Dockerfile` and `FleetPortal.Dockerfile` now package the
 company API and built portal for an internal-network synthetic rehearsal.
 The portal serves `/fleet-config.json` from an explicit read-only mount and
