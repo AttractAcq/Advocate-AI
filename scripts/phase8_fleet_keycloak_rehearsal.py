@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,10 @@ import subprocess
 import tempfile
 import time
 import uuid
+from urllib.request import urlopen
+import ssl
 
+from scripts.phase8_fleet_browser_rehearsal import FLEET, certificate, driver_request, until
 from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, ISSUER, _identity_material
 
 
@@ -134,7 +138,64 @@ print(json.dumps({"keycloak_flow": "authorization-code-pkce-authorized",
 '''
 
 
-def rehearse() -> dict[str, str]:
+def browser_flow(password: str, chromedriver: str) -> dict[str, str]:
+    driver = subprocess.Popen([chromedriver, "--port=9515", "--allowed-ips=127.0.0.1"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    session = None
+    try:
+        for _ in range(50):
+            try:
+                with urlopen("http://127.0.0.1:9515/status", timeout=1):
+                    break
+            except OSError:
+                time.sleep(0.2)
+        options = {"browserName": "chrome", "acceptInsecureCerts": True,
+                   "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
+                       "--no-proxy-server", "--host-resolver-rules=MAP fleet.example.invalid 127.0.0.2,"
+                       "MAP identity.fleet 127.0.0.3"]}}
+        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}})
+        assert isinstance(result, dict)
+        session = result["sessionId"]
+        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"})
+        until(session, "document.querySelector('button.primary')?.textContent?.includes('Sign in with local identity')")
+        driver_request("POST", f"/session/{session}/execute/sync",
+                       {"script": "document.querySelector('button.primary').click()", "args": []})
+        until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('form#kc-form-login input[name=username]')", 45)
+        driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+            document.querySelector('input[name=username]').value = arguments[0];
+            document.querySelector('input[name=password]').value = arguments[1];
+            document.querySelector('form#kc-form-login').requestSubmit();
+        """, "args": ["admin", password]})
+        until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
+        cleared = driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+            return !location.search && !sessionStorage.getItem('sovereign_fleet_oidc_state')
+                && !sessionStorage.getItem('sovereign_fleet_pkce_verifier');
+        """, "args": []})
+        assert cleared, "real Keycloak callback state or code remained in the browser"
+        driver_request("POST", f"/session/{session}/execute/sync",
+                       {"script": "document.querySelector('.sidebar-bottom button').click()", "args": []})
+        outcome = until(session, """location.hostname === 'fleet.example.invalid'
+            && document.body.textContent.includes('Sign in with local identity') ? 'fleet' :
+            location.hostname === 'identity.fleet' && !!document.querySelector('form') ? 'confirm' : false""", 45)
+        if outcome == "confirm":
+            driver_request("POST", f"/session/{session}/execute/sync",
+                           {"script": "document.querySelector('form').requestSubmit()", "args": []})
+            until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('Sign in with local identity')", 45)
+        assert not driver_request("POST", f"/session/{session}/execute/sync",
+                                  {"script": "return document.body.textContent.includes('admin · fleet admin')", "args": []})
+        return {"browser_flow": "real-keycloak-pkce-sign-in-and-sign-out", "callback_state": "cleared",
+                "api_role": "fleet_admin"}
+    finally:
+        if session:
+            try:
+                driver_request("DELETE", f"/session/{session}")
+            except Exception:
+                pass
+        driver.terminate()
+        driver.wait(timeout=5)
+
+
+def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[str, str]:
     image = json.loads(Path("infrastructure/lab/container-image.json").read_text())
     if image.get("schema") != 1 or image.get("purpose") != "synthetic Keycloak lab only":
         raise ValueError("unapproved Keycloak lab image configuration")
@@ -165,12 +226,16 @@ def rehearse() -> dict[str, str]:
         config = root / "fleet-config.json"
         config.write_text(json.dumps({"schema": 1, "oidc_issuer": ISSUER}))
         config.chmod(0o644)
+        proxy = None
+        if browser:
+            certificate(root, FLEET)
         _run("docker", "network", "create", "--internal", "--label",
              "sovereign.fleet.identity=true", identity_network)
         _run("docker", "network", "create", "--internal", app_network)
         try:
             _run("docker", "run", "-d", "--name", keycloak,
                  "--network", identity_network, "--network-alias", IDENTITY_HOST,
+                 *(["--publish", "127.0.0.3:443:443"] if browser else []),
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
                  "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
                  "--mount", f"type=bind,source={realm},target=/opt/keycloak/data/import,readonly",
@@ -198,6 +263,7 @@ def rehearse() -> dict[str, str]:
             _run("docker", "network", "connect", identity_network, api)
             _run("docker", "run", "-d", "--name", portal,
                  "--network", app_network, "--network-alias", "fleet-portal",
+                 *(["--publish", "127.0.0.1:18080:8080"] if browser else []),
                  "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                  "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                  "--mount", f"type=bind,source={config},target=/srv/fleet-config.json,readonly",
@@ -224,8 +290,31 @@ def rehearse() -> dict[str, str]:
             flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
                 "__PASSWORD__", repr(password))
             outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
+            if browser:
+                proxy = subprocess.Popen(["sudo", "-n", str(Path.cwd() / ".venv/bin/python"), "-m",
+                                          "scripts.phase8_fleet_https_proxy", "--cert", str(root / f"{FLEET}.crt"),
+                                          "--key", str(root / f"{FLEET}.key")],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                for _ in range(50):
+                    if proxy.poll() is not None:
+                        raise RuntimeError("Fleet HTTPS bridge failed: " + proxy.stderr.read().decode())
+                    try:
+                        with urlopen("https://127.0.0.2/", context=ssl._create_unverified_context(), timeout=1):
+                            break
+                    except OSError:
+                        time.sleep(0.2)
+                else:
+                    raise RuntimeError("Fleet HTTPS bridge did not become ready")
+                outcome.update(browser_flow(password, chromedriver))
             return outcome
         finally:
+            if proxy:
+                proxy.terminate()
+                try:
+                    proxy.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proxy.kill()
+                    proxy.wait(timeout=5)
             for name in (portal, api, keycloak):
                 subprocess.run(["docker", "rm", "-f", name], capture_output=True)
             for name in (app_network, identity_network):
@@ -233,4 +322,8 @@ def rehearse() -> dict[str, str]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(rehearse(), sort_keys=True))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--browser", action="store_true")
+    parser.add_argument("--chromedriver", default=os.environ.get("CHROMEDRIVER", "chromedriver"))
+    arguments = parser.parse_args()
+    print(json.dumps(rehearse(arguments.browser, arguments.chromedriver), sort_keys=True))

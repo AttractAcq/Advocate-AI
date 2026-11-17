@@ -229,3 +229,10 @@ fixture certificates; this does not approve production browser CA trust.
 The separate Keycloak interoperability rehearsal covers actual OIDC protocol
 and signed-token verification by the Fleet API. Neither rehearsal closes the
 company IdP, MFA, target TLS/network or independent assessment gates.
+
+The combined browser rehearsal also connects Chrome to the actual lab
+Keycloak and built Fleet API through loopback-only HTTPS ports. It checks the
+Keycloak login form, PKCE callback, company role, cleared callback state and
+logout in one flow. A separate API probe in the same run rejects the lab token.
+The temporary browser certificates are accepted only by this synthetic Chrome
+session; target ingress certificates and trust policy require later validation.
