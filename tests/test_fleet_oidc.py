@@ -96,6 +96,37 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
             json={"code": "TKT-LAB1", "vessel_code": "VSL-LAB1",
                   "category": "installation", "priority": "p3",
                   "status": "open"})).status_code, 201)
+        self.assertEqual((await self.client.post("/api/fleet/tickets", headers=release,
+            json={"code": "TKT-LAB2", "vessel_code": "VSL-LAB1",
+                  "category": "installation", "priority": "p3",
+                  "status": "open"})).status_code, 403)
+        licence = {"code": "LIC-LAB1", "customer_code": "CUST-LAB1",
+                   "vessel_code": "VSL-LAB1", "tier": "pilot",
+                   "valid_from": "2026-11-17", "valid_until": "2027-11-17",
+                   "status": "pending"}
+        self.assertEqual((await self.client.post("/api/fleet/licences", headers=support,
+                                                  json=licence)).status_code, 403)
+        self.assertEqual((await self.client.post("/api/fleet/licences", headers=admin,
+                                                  json=licence)).status_code, 201)
+        self.assertEqual((await self.client.patch(
+            "/api/fleet/licences/LIC-LAB1/status", headers=support,
+            json={"status": "active"})).status_code, 403)
+        self.assertEqual((await self.client.post("/api/fleet/maintenance", headers=support,
+            json={"code": "MNT-LAB1", "vessel_code": "VSL-LAB1",
+                  "kind": "backup_rehearsal", "due_on": "2026-12-01",
+                  "engineer_code": "ENGR-LAB1", "status": "planned"})).status_code, 201)
+        receipt = {"schema_version": 1, "key_id": "a" * 64,
+                   "receipt": {"code": "RCP-LAB1", "vessel_code": "VSL-LAB1",
+                               "release_code": "REL-LAB1",
+                               "source": "approved_offline_admin",
+                               "observed_on": "2026-11-17", "health": "healthy"},
+                   "signature": "A" * 88}
+        self.assertEqual((await self.client.post(
+            "/api/fleet/import/deployment-receipts", headers=support,
+            json=receipt)).status_code, 403)
+        self.assertEqual((await self.client.post(
+            "/api/fleet/import/deployment-receipts", headers=admin,
+            json=receipt)).status_code, 503)
         self.assertEqual((await self.client.get("/api/fleet/audit",
                                                 headers=release)).status_code, 200)
         self.assertEqual((await self.client.get(
