@@ -128,7 +128,23 @@ then `/api/fleet/me` supplies the current mapped role and customer grants. The a
 in browser-tab memory and goes only to same-origin Fleet API paths; PKCE state
 and verifier are removed from session storage when the callback is processed.
 The token mode and OIDC mode cannot be active together. A production static
-server and approved OIDC configuration are still needed. This portal is a
+server TLS boundary and approved OIDC configuration are still needed. The
+separate `FleetApi.Dockerfile` and `FleetPortal.Dockerfile` now package the
+company API and built portal for an internal-network synthetic rehearsal.
+The portal serves `/fleet-config.json` from an explicit read-only mount and
+proxies only `/api/fleet/` to the API image; `/api/models` is denied. Both
+images run as non-root with read-only roots and dropped capabilities in
+`infrastructure/containers/fleet-smoke.sh`. The API uses a private state
+volume with an owner-only token and database. Run the packaging check after
+building both images with their respective Dockerfiles:
+
+```sh
+docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+bash infrastructure/containers/fleet-smoke.sh
+```
+
+This portal is a
 synthetic company-side candidate; production customer-scope governance,
 approved offline handoff, large-catalog performance, retention and independent
 usability/security review remain B-12.

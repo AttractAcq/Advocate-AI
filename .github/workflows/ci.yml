@@ -23,6 +23,11 @@ jobs:
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
       - name: Exercise isolated synthetic stack
         run: bash infrastructure/containers/smoke.sh
+      - name: Build and exercise separate Fleet images
+        run: |
+          docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+          docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+          bash infrastructure/containers/fleet-smoke.sh
       - name: Scan built Core image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -47,11 +52,37 @@ jobs:
           output: console-trivy.json
           exit-code: '0'
           cache: 'false'
+      - name: Scan built Fleet API image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sovereign-fleet-api:synthetic
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL,UNKNOWN
+          format: json
+          output: fleet-api-trivy.json
+          exit-code: '0'
+          cache: 'false'
+      - name: Scan built Fleet portal image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sovereign-fleet-portal:synthetic
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL,UNKNOWN
+          format: json
+          output: fleet-portal-trivy.json
+          exit-code: '0'
+          cache: 'false'
       - name: Summarize built image findings
         run: |
-          jq -e '.SchemaVersion and .ArtifactName' core-trivy.json console-trivy.json >/dev/null
+          jq -e '.SchemaVersion and .ArtifactName' core-trivy.json console-trivy.json fleet-api-trivy.json fleet-portal-trivy.json >/dev/null
           echo "Core high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' core-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
           echo "Console high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' console-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fleet API high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' fleet-api-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fleet portal high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' fleet-portal-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
           echo "This is triage evidence, not release approval." >> "$GITHUB_STEP_SUMMARY"
       - name: Retain built image scan reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -60,6 +91,8 @@ jobs:
           path: |
             core-trivy.json
             console-trivy.json
+            fleet-api-trivy.json
+            fleet-portal-trivy.json
           retention-days: 30
 
   quality:
