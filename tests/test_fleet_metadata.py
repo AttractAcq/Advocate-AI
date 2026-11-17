@@ -162,6 +162,25 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OSError):
             load_import_key(alias)
 
+    async def test_record_and_audit_pages_have_stable_cursors(self) -> None:
+        for code in ("CUST-LAB1", "CUST-LAB2", "CUST-LAB3"):
+            response = await self.client.post("/api/fleet/customers", json={
+                "code": code, "category": "owner_manager"})
+            self.assertEqual(response.status_code, 201)
+        first = (await self.client.get("/api/fleet/customers?limit=2")).json()
+        self.assertEqual([row["code"] for row in first], ["CUST-LAB1", "CUST-LAB2"])
+        second = (await self.client.get(
+            "/api/fleet/customers?limit=2&after=CUST-LAB2")).json()
+        self.assertEqual([row["code"] for row in second], ["CUST-LAB3"])
+        audit_first = (await self.client.get("/api/fleet/audit?limit=2")).json()
+        audit_second = (await self.client.get(
+            f"/api/fleet/audit?limit=2&after={audit_first[-1]['seq']}")).json()
+        self.assertEqual([row["seq"] for row in audit_first + audit_second], [1, 2, 3])
+        self.assertEqual((await self.client.get(
+            "/api/fleet/customers?limit=101")).status_code, 422)
+        self.assertEqual((await self.client.get(
+            "/api/fleet/audit?after=-1")).status_code, 422)
+
     async def test_auth_references_and_tamper_fail_closed(self) -> None:
         response = await self.client.get("/api/fleet/customers",
                                          headers={"X-Fleet-Lab-Token": "wrong"})

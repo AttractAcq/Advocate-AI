@@ -53,6 +53,9 @@ tbody tr:hover { background: #f9fcfb; }
 .actions { display: flex; gap: 6px; }
 .actions button { text-transform: capitalize; white-space: nowrap; }
 .empty { margin: 0; padding: 24px; color: #83979b; font-size: 13px; }
+.load-more { display: flex; justify-content: center; padding: 15px; border-top: 1px solid #edf1f1; }
+.load-more button { border: 1px solid #b9d5d0; border-radius: 7px; background: #eff8f5; color: #276b64; padding: 8px 15px; font-size: 12px; font-weight: 700; }
+.load-more button:hover { background: #dff2ea; }
 .form-panel { padding: 23px 25px 27px; }
 .muted { color: #668087; font-size: 13px; line-height: 1.6; }
 .record-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; align-items: end; margin-top: 22px; }

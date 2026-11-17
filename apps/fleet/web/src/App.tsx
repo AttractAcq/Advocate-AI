@@ -80,6 +80,7 @@ export default function App() {
   const [entryToken, setEntryToken] = useState('')
   const [section, setSection] = useState<Section>('overview')
   const [rows, setRows] = useState<Record<string, FleetRow[]>>({})
+  const [hasMore, setHasMore] = useState<Record<string, boolean>>({})
   const [form, setForm] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -92,11 +93,13 @@ export default function App() {
       const entries = await Promise.all(sections.filter((item) => item.endpoint).map(async (item) =>
         [item.id, await fleetApi<FleetRow[]>(`/api/fleet/${item.endpoint}`, activeToken)] as const))
       setRows(Object.fromEntries(entries))
+      setHasMore(Object.fromEntries(entries.map(([id, values]) => [id, values.length === 100])))
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Fleet data is unavailable'
       if (message === 'Fleet lab token was rejected') {
         setToken('')
         setRows({})
+        setHasMore({})
       }
       setError(message)
     } finally {
@@ -121,6 +124,7 @@ export default function App() {
     setToken('')
     setEntryToken('')
     setRows({})
+    setHasMore({})
     setForm({})
     setSection('overview')
     setNotice('')
@@ -161,6 +165,25 @@ export default function App() {
       await refresh(token)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Status could not be changed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function loadMore() {
+    if (!token || !current.endpoint || !visible.length) return
+    const last = visible[visible.length - 1]
+    const cursor = section === 'audit' ? last.seq : last.code
+    if (cursor === null || cursor === undefined) return
+    setLoading(true)
+    setError('')
+    try {
+      const page = await fleetApi<FleetRow[]>(
+        `/api/fleet/${current.endpoint}?limit=100&after=${encodeURIComponent(String(cursor))}`, token)
+      setRows((existing) => ({ ...existing, [section]: [...(existing[section] || []), ...page] }))
+      setHasMore((existing) => ({ ...existing, [section]: page.length === 100 }))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'More Fleet records are unavailable')
     } finally {
       setLoading(false)
     }
@@ -214,7 +237,7 @@ export default function App() {
             <>
               <div className="metrics">{sections.filter((item) => item.endpoint && item.id !== 'audit').map((item) =>
                 <button type="button" className="metric" key={item.id} onClick={() => setSection(item.id)}>
-                  <span>{item.label}</span><strong>{rows[item.id]?.length ?? '—'}</strong><small>View records →</small>
+                  <span>{item.label}</span><strong>{rows[item.id] ? `${rows[item.id].length}${hasMore[item.id] ? '+' : ''}` : '—'}</strong><small>View records →</small>
                 </button>)}</div>
               <div className="info-panel"><h2>Offline by design</h2><p>Fleet has no standing connection to a strict-mode vessel. Signed receipt imports and verified product releases use an approved offline administrative process. This portal currently runs only in a synthetic local lab.</p></div>
             </>
@@ -223,7 +246,7 @@ export default function App() {
               {section === 'releases' && <div className="info-panel"><h2>Import a signed release</h2><p>Use the local <code>services.fleet.release_import</code> command with a trusted public key. Fleet accepts only verified Core and Console product bundles. Lab approval is available after import; production approval remains a separate gate.</p></div>}
               {section === 'receipts' && <div className="info-panel"><h2>Signed offline receipts</h2><p>Import a metadata-only signed envelope through the authenticated Fleet API after the issuer trust key is configured. This portal displays accepted receipts without vessel content.</p></div>}
               <section className="table-panel" aria-label={`${current.label} records`}>
-                <div className="panel-heading"><h2>{current.label} records</h2><span>{visible.length} shown · first 100 per API</span></div>
+                <div className="panel-heading"><h2>{current.label} records</h2><span>{visible.length} shown{hasMore[section] ? ' · more available' : ''}</span></div>
                 <div className="table-scroll"><table><thead><tr>{current.columns?.map((column) =>
                   <th key={column} scope="col">{column.replaceAll('_', ' ')}</th>)}
                   {nextStatuses[section] && <th scope="col">Next action</th>}</tr></thead><tbody>
@@ -237,6 +260,8 @@ export default function App() {
                     </div></td>}
                   </tr>)}</tbody></table></div>
                 {!visible.length && <p className="empty">No records in this section.</p>}
+                {hasMore[section] && <div className="load-more"><button type="button" disabled={loading}
+                  onClick={() => void loadMore()}>Load more records</button></div>}
               </section>
               {current.fields && <section className="form-panel"><h2>Add {current.label.toLowerCase()} record</h2>
                 <p className="muted">Only structured company metadata is accepted. Enter codes and approved values.</p>
