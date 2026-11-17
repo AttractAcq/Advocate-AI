@@ -23,23 +23,44 @@ does not store the raw request body. The hash chain is not signed: someone
 with database write access could recompute it. Production Fleet needs its own
 identity, key custody, database operations and independent review.
 
-For a local synthetic run, create an owner-only directory and token file,
-set `SOVEREIGN_FLEET_DB` and `SOVEREIGN_FLEET_TOKEN_FILE`, then start:
+For a local synthetic run, create an owner-only directory and choose one
+identity mode. Set `SOVEREIGN_FLEET_DB` and either
+`SOVEREIGN_FLEET_TOKEN_FILE` (owner-only shared lab token) or both
+`SOVEREIGN_FLEET_OIDC_ISSUER` and `SOVEREIGN_FLEET_ROLES_FILE` (owner-only
+separate Fleet user/role map). The OIDC issuer must be a numeric loopback
+Keycloak realm for this lab candidate. Then start:
 
 ```sh
 .venv/bin/python -m uvicorn 'apps.fleet.main:create_app' --factory \
   --host 127.0.0.1 --port 18800
 ```
 
-Every `/api/fleet/*` request needs `X-Fleet-Lab-Token` with the token file's
-value. `/health` returns only a static status. The local lab token is not a
-production authentication design. `POST` and `GET` routes cover customers,
+In token mode, every `/api/fleet/*` request needs `X-Fleet-Lab-Token` with the
+token file's value. In OIDC mode, it needs `Authorization: Bearer` with a
+signed `sovereign-fleet` audience token issued to `sovereign-fleet-portal`;
+the shared lab token is rejected. The current role map is re-read on every
+request, so revocation fails closed. `/health` returns only a static status.
+The local lab token is not a production authentication design. `POST` and
+`GET` routes cover customers,
 deployments, licences, tickets, maintenance and signed
 `import/deployment-receipts`; releases are read through `GET` and imported
 locally from a verified bundle. `GET /api/fleet/audit` returns metadata-only
 events. Records use fixed codes and enums. Licence dates must increase,
 deployments must reference known customers and releases, and offline receipts
 must match the deployment's release.
+
+| Synthetic Fleet role | Allowed API actions |
+|---|---|
+| `fleet_viewer` | Read coded records except the audit history |
+| `fleet_support` | Read coded records; create and change ticket/maintenance records |
+| `fleet_release_manager` | Read coded records and audit history; approve/retire imported releases |
+| `fleet_admin` | All metadata API routes, including receipt import and customer/licence/deployment changes |
+
+This is an API-level lab role matrix. The React portal still has only its
+shared-token sign-in; OIDC browser login, per-customer scoping, MFA policy,
+named release approvers and approved company identity operations remain
+open under B-12. Core's vessel audience and Console client cannot access
+Fleet.
 
 Import a signed Core and Console product bundle from an approved local
 administrative workstation with:

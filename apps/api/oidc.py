@@ -18,7 +18,8 @@ import jwt
 class OidcVerifier:
     def __init__(self, issuer: str, roles_path: Path, audience: str = "sovereign-core",
                  *, transport: httpx.BaseTransport | None = None,
-                 revocations_path: Path | None = None) -> None:
+                 revocations_path: Path | None = None,
+                 authorized_client: str = "sovereign-console") -> None:
         parsed = urlsplit(issuer)
         try:
             address = ipaddress.ip_address(parsed.hostname or "")
@@ -31,6 +32,7 @@ class OidcVerifier:
         self.issuer = issuer.rstrip("/")
         self.roles_path = roles_path
         self.audience = audience
+        self.authorized_client = authorized_client
         self.transport = transport
         self._keys: dict[str, object] = {}
         self._expires = 0.0
@@ -95,7 +97,7 @@ class OidcVerifier:
                 return None
             claims = jwt.decode(token, key, algorithms=["RS256"], issuer=self.issuer,
                                 audience=self.audience, options={"require": ["exp", "iat", "iss", "aud", "sub"]})
-            if claims.get("azp") != "sovereign-console" or claims.get("typ") != "Bearer":
+            if claims.get("azp") != self.authorized_client or claims.get("typ") != "Bearer":
                 return None
             username = claims.get("preferred_username")
             if not isinstance(username, str):
