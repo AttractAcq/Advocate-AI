@@ -30,11 +30,38 @@ set `SOVEREIGN_FLEET_DB` and `SOVEREIGN_FLEET_TOKEN_FILE`, then start:
 Every `/api/fleet/*` request needs `X-Fleet-Lab-Token` with the token file's
 value. `/health` returns only a static status. The local lab token is not a
 production authentication design. `POST` and `GET` routes cover customers,
-releases, deployments, licences, tickets, maintenance and
-`import/deployment-receipts`; `GET /api/fleet/audit` returns metadata-only
+deployments, licences, tickets, maintenance and signed
+`import/deployment-receipts`; releases are read through `GET` and imported
+locally from a verified bundle. `GET /api/fleet/audit` returns metadata-only
 events. Records use fixed codes and enums. Licence dates must increase,
 deployments must reference known customers and releases, and offline receipts
 must match the deployment's release.
+
+Import a signed Core and Console product bundle from an approved local
+administrative workstation with:
+
+```sh
+.venv/bin/python -m services.fleet.release_import \
+  --db /private/fleet/fleet.db --code REL-EXAMPLE1 \
+  --bundle /private/releases/product-bundle \
+  --trusted-key /private/keys/release-public.pem
+```
+
+The trust key must be an owner-only Ed25519 PEM public-key file. Import calls
+the existing bundle verifier, requires product schema 4 with both images and
+their evidence, and records the signed manifest SHA-256 and trusted signing
+key ID as a `candidate`. It never stores or serves the image archives in
+Fleet. `POST /api/fleet/releases` is unavailable, preventing a client from
+submitting an arbitrary digest as release provenance. A local lab
+administrator can change an imported candidate to `approved`, then to
+`retired`, through `PATCH /api/fleet/releases/{code}/status`. A deployment
+requires an approved release. The lab token and transition are not a
+production release approval; named approvers, signing-key custody, release
+review and target-vessel validation remain B-11/B-12.
+Existing synthetic Fleet databases with the earlier arbitrary `bundle_sha256`
+release field fail schema verification. Start a fresh lab catalog and reimport
+signed product bundles; do not relabel an unverified digest as proven release
+provenance.
 
 Receipt import requires `SOVEREIGN_FLEET_IMPORT_KEY_FILE` pointing to an
 owner-only regular PEM file containing the offline issuer's Ed25519 public

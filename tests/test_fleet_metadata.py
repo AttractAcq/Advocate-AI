@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import base64
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -14,7 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
 from apps.fleet.main import FleetSettings, create_app
-from services.fleet.catalog import DeploymentReceipt
+from services.fleet.catalog import DeploymentReceipt, FleetCatalog, Release
 from services.fleet.offline_import import key_id, load_import_key, receipt_bytes
 
 
@@ -35,10 +36,15 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.temporary.cleanup()
 
     async def _seed(self) -> None:
+        response = await self.client.post("/api/fleet/releases", json={
+            "code": "REL-DEMO1", "version": "1.0.0", "manifest_sha256": "a" * 64,
+            "signing_key_id": "b" * 64, "status": "approved"})
+        self.assertEqual(response.status_code, 405)
+        FleetCatalog(self.db).add("release", Release(
+            code="REL-DEMO1", version="1.0.0", manifest_sha256="a" * 64,
+            signing_key_id="b" * 64, status="approved"))
         for endpoint, payload in (
             ("customers", {"code": "CUST-ACME1", "category": "owner_manager"}),
-            ("releases", {"code": "REL-DEMO1", "version": "1.0.0",
-                          "bundle_sha256": "a" * 64, "status": "approved"}),
             ("deployments", {"code": "VSL-TEST1", "customer_code": "CUST-ACME1",
                              "release_code": "REL-DEMO1", "hardware_profile": "pilot_gpu",
                              "status": "pilot"}),
@@ -166,7 +172,7 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
             "status": "planned"})
         self.assertEqual(response.status_code, 409)
         await self._seed()
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute("UPDATE records SET payload=? WHERE kind='customer'",
                                (json.dumps({"code": "CUST-ACME1", "prompt": "steal"}),))
         response = await self.client.get("/api/fleet/customers")
@@ -229,7 +235,7 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.patch(
             "/api/fleet/tickets/TKT-DEMO1/status",
             json={"status": "triaged"})).status_code, 200)
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute("UPDATE audit SET action='status:open:resolved' "
                                "WHERE kind='ticket' AND action='status:open:triaged'")
         self.assertEqual((await self.client.get("/api/fleet/tickets")).status_code, 503)
