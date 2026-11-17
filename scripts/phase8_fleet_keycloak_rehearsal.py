@@ -55,6 +55,7 @@ def _realm(password: str) -> dict[str, object]:
 
 _FLOW = '''import base64, hashlib, html.parser, json, secrets, urllib.parse
 import httpx
+import jwt
 
 issuer = __ISSUER__
 password = __PASSWORD__
@@ -111,11 +112,15 @@ with httpx.Client(verify=ca, trust_env=False, follow_redirects=False, timeout=10
         "code_verifier": verifier})
     assert token.status_code == 200, ("token", token.status_code, token.text[:200])
     access = token.json()["access_token"]
+    claims = jwt.decode(access, options={"verify_signature": False,
+                                         "verify_aud": False})
 
 with httpx.Client(trust_env=False, timeout=10) as client:
     me = client.get("http://fleet-portal:8080/api/fleet/me",
                     headers={"Authorization": "Bearer " + access})
-    assert me.status_code == 200, ("Fleet API", me.status_code, me.text[:200])
+    assert me.status_code == 200, ("Fleet API", me.status_code,
+        {key: claims.get(key) for key in ("iss", "aud", "azp", "typ",
+                                         "preferred_username", "realm_access")})
     assert me.json() == {"id": "admin", "role": "fleet_admin", "customer_codes": ["*"]}
     lab = client.get("http://fleet-portal:8080/api/fleet/me",
                      headers={"X-Fleet-Lab-Token": "synthetic-fleet-admin-token-0123456789"})
