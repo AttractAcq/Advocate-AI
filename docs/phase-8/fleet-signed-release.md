@@ -92,6 +92,27 @@ again before the signed installer starts. The token is provisioned separately:
   --root /private/new-fleet-install --token-file /protected/fleet-lab-token
 ```
 
+The synthetic daily backup candidate creates a new timestamped encrypted
+archive and immediately performs an authenticated clean restore of the newest
+archive, including the Fleet audit-chain check. It fails if no archive exists,
+the newest one is stale or damaged, or the archive count reaches the configured
+limit. It never deletes an archive: an owner-approved retention policy and
+protected storage capacity are still required. Render the units into a private
+staging directory, review them, and validate with `systemd-analyze verify`
+on a compatible host before installation. The `sovereign-fleet` service user
+must own the catalog, archive directory and key source. The timer and service
+names are fixed so the timer cannot point at a different unit.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_backup_service render \
+  --service-output /private/unit-staging/sovereign-fleet-backup.service \
+  --timer-output /private/unit-staging/sovereign-fleet-backup.timer \
+  --db /private/fleet-install/state/fleet.db --directory /private/backups \
+  --key /protected/fleet-backup.key --python /opt/sovereign/.venv/bin/python \
+  --workdir /opt/sovereign --hour-utc 3 --max-age-hours 26 \
+  --max-archives 30
+```
+
 This synthetic software path uses owner-only staging but has no approved
 production backup media, retention, key custody or timed recovery runbook.
 Those remain B-12 gates. CI checks that a fictional customer survives a clean
