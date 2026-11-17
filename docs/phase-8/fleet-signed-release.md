@@ -66,3 +66,11 @@ no host port; production TLS, external company identity, backup/migration of
 Fleet state, operator ingress and topology are separate B-12 gates. The CI
 rehearsal exercises install, rejected candidate, update, rollback and
 recovery only when both images pass intake.
+
+[PR #61's retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44093561479)
+reports `fleet_bundle: verified`, `failed_candidate: previous-runtime-preserved`,
+`update: healthy-candidate-activated`, `rollback: previous-release-restored`
+and `recovery: signed-release-restarted` for the actual CI-built images. The
+synthetic images had zero unresolved HIGH, CRITICAL or UNKNOWN findings in
+that run. This does not establish production readiness for company identity,
+TLS, backup or operator access.
