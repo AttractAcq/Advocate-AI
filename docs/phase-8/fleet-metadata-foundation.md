@@ -56,11 +56,11 @@ must match the deployment's release.
 | `fleet_release_manager` | Read coded records and audit history; approve/retire imported releases |
 | `fleet_admin` | All metadata API routes, including receipt import and customer/licence/deployment changes |
 
-This is an API-level lab role matrix. The React portal still has only its
-shared-token sign-in; OIDC browser login, per-customer scoping, MFA policy,
-named release approvers and approved company identity operations remain
-open under B-12. Core's vessel audience and Console client cannot access
-Fleet.
+The portal uses this same role matrix to show permitted controls and hide the
+audit view from support and viewer roles. The API enforces every action even
+when a client bypasses the portal. Per-customer scoping, MFA policy, named
+release approvers and approved company identity operations remain open under
+B-12. Core's vessel audience and Console client cannot access Fleet.
 
 Import a signed Core and Console product bundle from an approved local
 administrative workstation with:
@@ -102,11 +102,22 @@ customers, verified release metadata, deployments, licences, coded support
 and maintenance, signed receipt results and audit events. It can create
 strictly structured customer, deployment, licence, ticket and maintenance
 records and use the lab status-transition routes. Release import remains a
-local signed-bundle operation. The lab token stays in browser-tab memory and
-is sent only to same-origin Fleet API paths; no token is written to browser
-storage. This portal is a synthetic company-side candidate. Production
-identity, roles, approved offline handoff, large-catalog performance, retention and
-independent usability/security review remain B-12.
+local signed-bundle operation. With `SOVEREIGN_FLEET_TOKEN_FILE`, the portal
+uses its shared lab-token form. With Fleet OIDC mode, set
+`VITE_FLEET_OIDC_ISSUER` to the same loopback issuer before `npm run dev`.
+The development server provides `/fleet-config.json`; the browser validates
+that response before rendering and uses an authorization-code PKCE redirect
+for the `sovereign-fleet-portal` public client. Register
+`http://127.0.0.1:18801/` as that client's exact redirect and logout URI in
+the local realm. The API verifies the token's separate audience and client,
+then `/api/fleet/me` supplies the current mapped role. The access token stays
+in browser-tab memory and goes only to same-origin Fleet API paths; PKCE state
+and verifier are removed from session storage when the callback is processed.
+The token mode and OIDC mode cannot be active together. A production static
+server and approved OIDC configuration are still needed. This portal is a
+synthetic company-side candidate; per-customer scope, approved offline
+handoff, large-catalog performance, retention and independent
+usability/security review remain B-12.
 
 Record list endpoints accept `limit=1..100` and an `after` cursor containing
 the last record code. The audit list accepts the last numeric event `seq` as

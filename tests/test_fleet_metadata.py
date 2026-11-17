@@ -201,6 +201,8 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
             "/api/fleet/audit?after=-1")).status_code, 422)
 
     async def test_auth_references_and_tamper_fail_closed(self) -> None:
+        self.assertEqual((await self.client.get("/api/fleet/me")).json(),
+                         {"id": "synthetic-admin", "role": "fleet_admin"})
         response = await self.client.get("/api/fleet/customers",
                                          headers={"X-Fleet-Lab-Token": "wrong"})
         self.assertEqual(response.status_code, 401)

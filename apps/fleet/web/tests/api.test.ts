@@ -23,3 +23,20 @@ test('Fleet requests stay on the same-origin API and omit browser credentials', 
     globalThis.fetch = original
   }
 })
+
+test('OIDC mode sends a bearer token without the shared lab header', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async (_input, init) => {
+    const headers = init?.headers as Record<string, string>
+    assert.equal(headers.Authorization, 'Bearer signed-access-token')
+    assert.equal(Object.hasOwn(headers, 'X-Fleet-Lab-Token'), false)
+    return new Response(JSON.stringify({ id: 'viewer', role: 'fleet_viewer' }), { status: 200 })
+  }
+  try {
+    const me = await fleetApi<{ role: string }>('/api/fleet/me', 'signed-access-token',
+                                                undefined, 'oidc')
+    assert.equal(me.role, 'fleet_viewer')
+  } finally {
+    globalThis.fetch = original
+  }
+})

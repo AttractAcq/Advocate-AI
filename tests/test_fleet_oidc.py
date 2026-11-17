@@ -74,6 +74,8 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
         release = self.headers("release", "fleet_release_manager")
         admin = self.headers("admin", "fleet_admin")
 
+        self.assertEqual((await self.client.get("/api/fleet/me", headers=viewer)).json(),
+                         {"id": "viewer", "role": "fleet_viewer"})
         self.assertEqual((await self.client.get("/api/fleet/releases",
                                                 headers=viewer)).status_code, 200)
         self.assertEqual((await self.client.get("/api/fleet/audit",
