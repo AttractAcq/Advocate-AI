@@ -131,13 +131,27 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
     _run("docker", "network", "create", "--internal", "--label",
          "sovereign.fleet.identity=true", network)
     try:
-        _run("docker", "run", "--rm", "-d", "--name", server,
+        _run("docker", "run", "-d", "--name", server,
              "--network", network, "--network-alias", IDENTITY_HOST,
              "--user", "0:0", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=8m",
              "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE",
              "--mount", f"type=bind,source={idp},target=/idp,readonly",
              "--entrypoint", "python", "sovereign-fleet-api:synthetic",
              "-c", _SERVER)
+        for attempt in range(10):
+            if _run("docker", "inspect", server, "--format", "{{.State.Running}}") != "true":
+                logs = subprocess.run(["docker", "logs", "--tail", "20", server],
+                                      capture_output=True, text=True)
+                raise AssertionError("synthetic IdP exited: " + logs.stderr[-1000:])
+            ready = subprocess.run(
+                ["docker", "exec", server, "python", "-c",
+                 "import socket; socket.create_connection(('127.0.0.1',443),timeout=2).close()"],
+                capture_output=True, text=True, timeout=5)
+            if ready.returncode == 0:
+                break
+            time.sleep(0.5)
+        else:
+            raise AssertionError("synthetic IdP did not open HTTPS port")
         try:
             network_settings = json.loads(_run(
                 "docker", "inspect", server, "--format",
@@ -211,8 +225,8 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             if state_file.exists():
                 state = json.loads(state_file.read_text())
                 stop_runtime(FleetRuntime(**state["runtime"]))
-            subprocess.run(["docker", "rm", "-f", server], capture_output=True)
     finally:
+        subprocess.run(["docker", "rm", "-f", server], capture_output=True)
         subprocess.run(["docker", "network", "rm", network], capture_output=True)
 
 
