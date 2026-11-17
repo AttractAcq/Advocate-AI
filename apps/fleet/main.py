@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, status
 
+from apps.fleet.body_limit import FleetBodyLimit
 from services.fleet.catalog import (
     Customer, Deployment, FleetCatalog, FleetError,
     FleetIntegrityError, Licence, LicenceStatus, Maintenance, MaintenanceStatus,
@@ -61,6 +62,7 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     catalog = FleetCatalog(settings.db_path)
     app = FastAPI(title="Sovereign Fleet synthetic lab", docs_url=None,
                   redoc_url=None, openapi_url=None)
+    app.add_middleware(FleetBodyLimit)
 
     def authorise(x_fleet_lab_token: str | None = Header(default=None)) -> None:
         if (x_fleet_lab_token is None or
