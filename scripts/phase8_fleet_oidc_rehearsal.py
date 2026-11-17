@@ -19,6 +19,7 @@ import jwt
 
 from infrastructure.deploy.fleet_installer import fleet_status, install_fleet
 from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError, stop_runtime
+import infrastructure.deploy.fleet_runtime as fleet_runtime
 
 
 ISSUER = "https://identity.example.invalid/realms/fleet"
@@ -136,9 +137,29 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
              "--entrypoint", "python", "sovereign-fleet-api:synthetic",
              "-c", _SERVER)
         try:
-            installed = install_fleet(bundle, trusted, crane, config, install_root,
-                                      roles_file=roles, identity_network=network,
-                                      ca_file=ca)
+            original_docker = fleet_runtime._docker
+            last_probe_error = ""
+
+            def diagnostic_docker(*args: str) -> str:
+                nonlocal last_probe_error
+                try:
+                    return original_docker(*args)
+                except RuntimeError:
+                    if args and args[0] == "exec":
+                        probe = subprocess.run(["docker", *args], capture_output=True,
+                                               text=True, timeout=15)
+                        last_probe_error = probe.stderr[-1000:]
+                    raise
+
+            fleet_runtime._docker = diagnostic_docker
+            try:
+                installed = install_fleet(bundle, trusted, crane, config, install_root,
+                                          roles_file=roles, identity_network=network,
+                                          ca_file=ca)
+            except RuntimeError as exc:
+                raise AssertionError(f"synthetic Fleet activation failed: {last_probe_error}") from exc
+            finally:
+                fleet_runtime._docker = original_docker
             if fleet_status(install_root, trusted)["active"] != installed["active"]:
                 raise AssertionError("OIDC Fleet install is not healthy")
             state = json.loads((install_root / "fleet-state.json").read_text())
