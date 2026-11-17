@@ -349,7 +349,7 @@ jobs:
             --root /var/lib/sovereign-fleet \
             --trusted-key /etc/sovereign/fleet-trusted.pem \
             --crane /opt/sovereign/bin/crane \
-            --python /opt/sovereign/bin/python \
+            --python /usr/bin/python3 \
             --workdir /opt/sovereign/app
           .venv/bin/python -m infrastructure.deploy.fleet_backup_service render \
             --service-output "$RUNNER_TEMP/sovereign-fleet-backup.service" \
@@ -357,7 +357,7 @@ jobs:
             --db /var/lib/sovereign-fleet/state/fleet.db \
             --directory /var/lib/sovereign-fleet-backups \
             --key /etc/sovereign/fleet-backup.key \
-            --python /opt/sovereign/bin/python \
+            --python /usr/bin/python3 \
             --workdir /opt/sovereign/app --hour-utc 3 \
             --max-age-hours 26 --max-archives 30
           systemd-analyze verify "$RUNNER_TEMP/sovereign-fleet-recover.service" \
