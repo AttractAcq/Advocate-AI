@@ -80,7 +80,7 @@ records and use the lab status-transition routes. Release import remains a
 local signed-bundle operation. The lab token stays in browser-tab memory and
 is sent only to same-origin Fleet API paths; no token is written to browser
 storage. This portal is a synthetic company-side candidate. Production
-identity, roles, signed receipt entry UI, large-catalog performance, retention and
+identity, roles, approved offline handoff, large-catalog performance, retention and
 independent usability/security review remain B-12.
 
 Record list endpoints accept `limit=1..100` and an `after` cursor containing
@@ -89,6 +89,14 @@ its cursor. Results are stable in code/sequence order; the portal fetches
 additional pages on demand. Every page still verifies the full local audit
 chain and catalog, so production-sized databases need measured performance
 and an approved integrity/checkpoint design under B-12.
+
+The receipt view also has a fixed-field import form for receipt, vessel and
+release codes, observation date, health, issuer key ID and Base64 signature.
+It constructs the strict schema-1 envelope without accepting document or log
+fields, then submits it to the signature-verifying Fleet API. The browser does
+not sign receipts or store signature material after a successful import.
+The issuer must generate the signature over the exact record through the
+approved offline process; production handoff and key revocation remain B-12.
 
 Receipt import requires `SOVEREIGN_FLEET_IMPORT_KEY_FILE` pointing to an
 owner-only regular PEM file containing the offline issuer's Ed25519 public

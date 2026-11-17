@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { fleetApi } from './api'
 import type { FleetRow } from './api'
+import { signedReceiptEnvelope } from './receipt'
+import type { ReceiptInput } from './receipt'
 
 type Section = 'overview' | 'customers' | 'releases' | 'deployments' |
   'licences' | 'tickets' | 'maintenance' | 'receipts' | 'audit'
@@ -67,6 +69,11 @@ const nextStatuses: Partial<Record<Section, Record<string, string[]>>> = {
   maintenance: { planned: ['completed', 'deferred'], deferred: ['planned'] },
 }
 
+const emptyReceipt: ReceiptInput = {
+  code: '', vessel_code: '', release_code: '', observed_on: '',
+  health: 'healthy', key_id: '', signature: '',
+}
+
 function display(value: string | number | null | undefined, column: string) {
   if (value === null || value === undefined) return '—'
   if (column.endsWith('sha256') || column.endsWith('key_id') || column === 'digest' || column === 'chain_hash') {
@@ -82,6 +89,7 @@ export default function App() {
   const [rows, setRows] = useState<Record<string, FleetRow[]>>({})
   const [hasMore, setHasMore] = useState<Record<string, boolean>>({})
   const [form, setForm] = useState<Record<string, string>>({})
+  const [receiptForm, setReceiptForm] = useState<ReceiptInput>(emptyReceipt)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -126,6 +134,7 @@ export default function App() {
     setRows({})
     setHasMore({})
     setForm({})
+    setReceiptForm(emptyReceipt)
     setSection('overview')
     setNotice('')
     setError('')
@@ -165,6 +174,25 @@ export default function App() {
       await refresh(token)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Status could not be changed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function importReceipt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!token) return
+    setLoading(true)
+    setError('')
+    setNotice('')
+    try {
+      await fleetApi<FleetRow>('/api/fleet/import/deployment-receipts', token,
+        { method: 'POST', body: JSON.stringify(signedReceiptEnvelope(receiptForm)) })
+      setReceiptForm(emptyReceipt)
+      setNotice('Signed deployment receipt imported.')
+      await refresh(token)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Signed receipt was rejected')
     } finally {
       setLoading(false)
     }
@@ -244,7 +272,7 @@ export default function App() {
           ) : (
             <>
               {section === 'releases' && <div className="info-panel"><h2>Import a signed release</h2><p>Use the local <code>services.fleet.release_import</code> command with a trusted public key. Fleet accepts only verified Core and Console product bundles. Lab approval is available after import; production approval remains a separate gate.</p></div>}
-              {section === 'receipts' && <div className="info-panel"><h2>Signed offline receipts</h2><p>Import a metadata-only signed envelope through the authenticated Fleet API after the issuer trust key is configured. This portal displays accepted receipts without vessel content.</p></div>}
+              {section === 'receipts' && <div className="info-panel"><h2>Signed offline receipts</h2><p>Enter the coded metadata and signature from an approved offline handoff. Fleet verifies the issuer key and signature before storing the receipt. Do not enter vessel documents, prompts or logs.</p></div>}
               <section className="table-panel" aria-label={`${current.label} records`}>
                 <div className="panel-heading"><h2>{current.label} records</h2><span>{visible.length} shown{hasMore[section] ? ' · more available' : ''}</span></div>
                 <div className="table-scroll"><table><thead><tr>{current.columns?.map((column) =>
@@ -275,6 +303,28 @@ export default function App() {
                       onChange={(event) => setForm({ ...form, [field.name]: event.target.value })} />}
                   </label>)}
                   <button type="submit" className="primary" disabled={loading}>Create record</button>
+                </form>
+              </section>}
+              {section === 'receipts' && <section className="form-panel"><h2>Import signed receipt</h2>
+                <p className="muted">The issuer must sign this exact metadata record offline. A modified field invalidates the signature.</p>
+                <form onSubmit={(event) => void importReceipt(event)} className="record-form">
+                  <label>Receipt code<input required autoComplete="off" maxLength={16}
+                    value={receiptForm.code} onChange={(event) => setReceiptForm({ ...receiptForm, code: event.target.value })} /></label>
+                  <label>Vessel code<input required autoComplete="off" maxLength={16}
+                    value={receiptForm.vessel_code} onChange={(event) => setReceiptForm({ ...receiptForm, vessel_code: event.target.value })} /></label>
+                  <label>Release code<input required autoComplete="off" maxLength={20}
+                    value={receiptForm.release_code} onChange={(event) => setReceiptForm({ ...receiptForm, release_code: event.target.value })} /></label>
+                  <label>Observed on<input required type="date" value={receiptForm.observed_on}
+                    onChange={(event) => setReceiptForm({ ...receiptForm, observed_on: event.target.value })} /></label>
+                  <label>Health<select value={receiptForm.health}
+                    onChange={(event) => setReceiptForm({ ...receiptForm, health: event.target.value as ReceiptInput['health'] })}>
+                    <option value="healthy">Healthy</option><option value="degraded">Degraded</option><option value="offline">Offline</option>
+                  </select></label>
+                  <label>Issuer key ID<input required autoComplete="off" minLength={64} maxLength={64} pattern="[0-9a-f]{64}"
+                    value={receiptForm.key_id} onChange={(event) => setReceiptForm({ ...receiptForm, key_id: event.target.value })} /></label>
+                  <label>Base64 signature<input required autoComplete="off" minLength={88} maxLength={88}
+                    value={receiptForm.signature} onChange={(event) => setReceiptForm({ ...receiptForm, signature: event.target.value })} /></label>
+                  <button type="submit" className="primary" disabled={loading}>Verify and import</button>
                 </form>
               </section>}
             </>
