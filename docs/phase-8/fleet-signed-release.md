@@ -103,6 +103,10 @@ The actual-image CI release rehearsal also creates a temporary private CA and
 HTTPS JWKS service on a labelled internal identity network. It installs the
 same signed Fleet images in OIDC mode, checks a signed Fleet-audience token,
 rejects a Core-audience token, and confirms status fails when the IdP stops.
+The synthetic runner maps that temporary IdP hostname to its private network
+address because the hosted Linux Docker runner does not resolve its network
+alias from the two-network API container. This mapping is confined to the
+rehearsal; target DNS and network routing remain pilot acceptance checks.
 Ephemeral CA, keys and tokens are deleted; retained evidence contains only
 result codes. This synthetic service is not a Keycloak interoperability or
 browser TLS acceptance test.
