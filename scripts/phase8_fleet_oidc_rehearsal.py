@@ -22,7 +22,8 @@ from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError, stop
 import infrastructure.deploy.fleet_runtime as fleet_runtime
 
 
-ISSUER = "https://identity.example.invalid/realms/fleet"
+IDENTITY_HOST = "identity.fleet"
+ISSUER = f"https://{IDENTITY_HOST}/realms/fleet"
 _SERVER = '''from http.server import BaseHTTPRequestHandler, HTTPServer
 import ssl
 class Handler(BaseHTTPRequestHandler):
@@ -77,13 +78,13 @@ def _identity_material(root: Path) -> tuple[Path, Path, rsa.RSAPrivateKey]:
                    ca_key.public_key()), critical=False)
                .sign(ca_key, hashes.SHA256()))
     leaf_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,
-                                             "identity.example.invalid")])
+                                             IDENTITY_HOST)])
     leaf_cert = (x509.CertificateBuilder().subject_name(leaf_name).issuer_name(ca_name)
                  .public_key(leaf_key.public_key()).serial_number(x509.random_serial_number())
                  .not_valid_before(now - timedelta(days=1))
                  .not_valid_after(now + timedelta(days=2))
                  .add_extension(x509.SubjectAlternativeName([
-                     x509.DNSName("identity.example.invalid")]), critical=False)
+                     x509.DNSName(IDENTITY_HOST)]), critical=False)
                  .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(
                      ca_key.public_key()), critical=False)
                  .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
@@ -130,7 +131,7 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
          "sovereign.fleet.identity=true", network)
     try:
         _run("docker", "run", "--rm", "-d", "--name", server,
-             "--network", network, "--network-alias", "identity.example.invalid",
+             "--network", network, "--network-alias", IDENTITY_HOST,
              "--user", "0:0", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=8m",
              "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE",
              "--mount", f"type=bind,source={idp},target=/idp,readonly",
@@ -148,7 +149,12 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
                     if args and args[0] == "exec":
                         probe = subprocess.run(["docker", *args], capture_output=True,
                                                text=True, timeout=15)
-                        last_probe_error = probe.stderr[-1000:]
+                        dns = subprocess.run(["docker", "exec", args[1], "python",
+                                              "-c", "import socket; "
+                                              f"print(socket.getaddrinfo({IDENTITY_HOST!r}, 443))"],
+                                             capture_output=True, text=True, timeout=15)
+                        last_probe_error = (probe.stderr[-700:] + " DNS: " +
+                                            dns.stdout[-300:] + dns.stderr[-300:])
                     raise
 
             fleet_runtime._docker = diagnostic_docker
