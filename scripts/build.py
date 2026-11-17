@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tarfile
 
@@ -18,8 +19,15 @@ INCLUDE = {".github", ".gitignore", "Makefile", "pyproject.toml", "uv.lock", "re
 
 
 def source_files() -> list[Path]:
+    if (ROOT / ".git").exists():
+        listed = subprocess.run(["git", "ls-files", "-z", "--cached"], cwd=ROOT,
+                                check=True, stdout=subprocess.PIPE).stdout
+        candidates = (ROOT / os.fsdecode(name) for name in listed.split(b"\0") if name)
+    else:
+        # A source bundle has no Git metadata; it contains only selected inputs.
+        candidates = ROOT.rglob("*")
     return sorted(
-        p for p in ROOT.rglob("*")
+        p for p in candidates
         if p.is_file() and not p.is_symlink()
         and p.relative_to(ROOT).parts[0] in INCLUDE
         and not any(part in SKIP for part in p.relative_to(ROOT).parts)
