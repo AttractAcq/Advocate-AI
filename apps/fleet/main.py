@@ -131,10 +131,10 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Fleet record not found") from exc
         if customer is None:
             if scope(user) is not None:
-                raise HTTPException(status.HTTP_403_FORBIDDEN,
-                                    "global Fleet record is not authorised")
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Fleet record not found")
         else:
-            require_customer(user, customer)
+            if scope(user) is not None and customer not in scope(user):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Fleet record not found")
 
     def require_roles(*allowed: str):
         def check(user: dict[str, str] = Depends(authorise)) -> None:

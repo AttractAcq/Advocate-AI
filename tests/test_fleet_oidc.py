@@ -188,14 +188,14 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
                                                 headers=scoped_admin)).json(), [])
         self.assertEqual((await self.client.patch(
             "/api/fleet/releases/REL-LAB1/status", headers=scoped_admin,
-            json={"status": "retired"})).status_code, 403)
+            json={"status": "retired"})).status_code, 404)
         self.assertEqual((await self.client.post("/api/fleet/customers",
             headers=scoped_admin, json={"code": "CUST-LAB3",
                                         "category": "owner_manager"})).status_code, 403)
         self.assertEqual((await self.client.post("/api/fleet/tickets",
             headers=support, json={"code": "TKT-LAB2", "vessel_code": "VSL-LAB2",
                 "category": "access", "priority": "p3",
-                "status": "open"})).status_code, 403)
+                "status": "open"})).status_code, 404)
         self.assertEqual((await self.client.post("/api/fleet/tickets",
             headers=support, json={"code": "TKT-LAB1", "vessel_code": "VSL-LAB1",
                 "category": "access", "priority": "p3",
@@ -203,12 +203,12 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/fleet/tickets",
             headers=admin, json={"code": "TKT-LAB2", "vessel_code": "VSL-LAB2",
                 "category": "access", "priority": "p3",
-                "status": "open"})).status_code, 403)
+                "status": "open"})).status_code, 404)
         self.assertEqual((await self.client.post("/api/fleet/licences",
             headers=scoped_admin, json={"code": "LIC-LAB2",
                 "customer_code": "CUST-LAB1", "vessel_code": "VSL-LAB2",
                 "tier": "pilot", "valid_from": "2026-11-17",
-                "valid_until": "2027-11-17", "status": "pending"})).status_code, 403)
+                "valid_until": "2027-11-17", "status": "pending"})).status_code, 404)
         self.assertEqual((await self.client.post(
             "/api/fleet/import/deployment-receipts", headers=scoped_admin,
             json={"schema_version": 1, "key_id": "a" * 64,
@@ -216,7 +216,7 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
                               "release_code": "REL-LAB1",
                               "source": "approved_offline_admin",
                               "observed_on": "2026-11-17", "health": "healthy"},
-                  "signature": "A" * 88})).status_code, 403)
+                  "signature": "A" * 88})).status_code, 404)
         self.policy["users"][0]["customer_codes"] = ["*"]
         self._write_policy()
         self.assertEqual((await self.client.post("/api/fleet/tickets",
@@ -227,7 +227,7 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
             "/api/fleet/tickets", headers=support)).json()], ["TKT-LAB1"])
         self.assertEqual((await self.client.patch(
             "/api/fleet/tickets/TKT-LAB2/status", headers=support,
-            json={"status": "triaged"})).status_code, 403)
+            json={"status": "triaged"})).status_code, 404)
         self.policy["users"][0]["customer_codes"] = ["CUST-LAB1"]
         self._write_policy()
         events = (await self.client.get("/api/fleet/audit?limit=1",
