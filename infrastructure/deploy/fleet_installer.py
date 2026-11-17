@@ -19,6 +19,7 @@ from infrastructure.deploy.fleet_runtime import (
     start_verified_bundle, stop_runtime, validate_config, validate_state,
     verify_runtime_identity,
 )
+from infrastructure.deploy.fleet_backup import restore_fleet
 from infrastructure.release.bundle import BundleError, MANIFEST, verify_bundle
 
 
@@ -213,6 +214,24 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
         return _activate(root, identifier, stage, trusted_key, crane)
 
 
+def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
+                          config: Path, root: Path, token_file: Path,
+                          archive: Path, backup_key: Path) -> dict[str, object]:
+    """Clean-restore the audited Fleet database before signed activation."""
+    if not root.is_absolute() or root.exists() or root.is_symlink():
+        raise FleetInstallError("Fleet restore-install requires a new absolute root")
+    _owner_directory(root.parent)
+    root.mkdir(mode=0o700)
+    try:
+        restored = restore_fleet(archive, backup_key, root / "state")
+        installed = install_fleet(bundle, trusted_key, crane, config, root, token_file)
+        return {**installed, "restored_files": restored["files"]}
+    except Exception:
+        if not (root / "fleet-state.json").exists() and not root.is_symlink():
+            shutil.rmtree(root)
+        raise
+
+
 def fleet_status(root: Path, trusted_key: Path) -> dict[str, object]:
     current = _state(root)
     if current is None:
@@ -277,21 +296,30 @@ def recover_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic signed Fleet installer")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("install", "status", "rollback", "recover"):
+    for name in ("install", "restore-install", "status", "rollback", "recover"):
         command = commands.add_parser(name)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
         if name != "status":
             command.add_argument("--crane", required=True, type=Path)
-        if name == "install":
+        if name in ("install", "restore-install"):
             command.add_argument("--bundle", required=True, type=Path)
             command.add_argument("--config", required=True, type=Path)
             command.add_argument("--token-file", type=Path)
+        if name == "restore-install":
+            command.add_argument("--archive", required=True, type=Path)
+            command.add_argument("--backup-key", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "install":
             result = install_fleet(args.bundle, args.trusted_key, args.crane,
                                    args.config, args.root, args.token_file)
+        elif args.command == "restore-install":
+            if args.token_file is None:
+                raise FleetInstallError("Fleet restore-install requires a separate token source")
+            result = restore_install_fleet(args.bundle, args.trusted_key, args.crane,
+                                           args.config, args.root, args.token_file,
+                                           args.archive, args.backup_key)
         elif args.command == "status":
             result = fleet_status(args.root, args.trusted_key)
         elif args.command == "rollback":
