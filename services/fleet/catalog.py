@@ -309,7 +309,28 @@ class FleetCatalog:
                                code, payload)
         return validated.model_dump(mode="json")
 
-    def list(self, kind: str, *, after: str = "", limit: int = 100) -> list[dict[str, object]]:
+    @staticmethod
+    def _customer_of(connection: sqlite3.Connection, kind: str,
+                     data: dict[str, object]) -> str | None:
+        if kind == "customer":
+            return str(data["code"])
+        if kind in {"deployment", "licence"}:
+            return str(data["customer_code"])
+        if kind in {"ticket", "maintenance", "receipt"}:
+            vessel = FleetCatalog._require(connection, "deployment", str(data["vessel_code"]))
+            return str(vessel["customer_code"])
+        return None
+
+    def customer_for(self, kind: str, code: str) -> str | None:
+        if kind not in KINDS:
+            raise FleetError("unknown Fleet record type")
+        with self._connect() as connection:
+            self._verify(connection)
+            data = self._require(connection, kind, code)
+            return self._customer_of(connection, kind, data)
+
+    def list(self, kind: str, *, after: str = "", limit: int = 100,
+             allowed_customers: frozenset[str] | None = None) -> list[dict[str, object]]:
         if kind not in KINDS:
             raise FleetError("unknown Fleet record type")
         if not isinstance(after, str) or not 1 <= limit <= 100:
@@ -317,16 +338,35 @@ class FleetCatalog:
         with self._connect() as connection:
             self._verify(connection)
             rows = connection.execute("SELECT payload FROM records WHERE kind=? "
-                                      "AND code>? ORDER BY code LIMIT ?",
-                                      (kind, after, limit))
-            return [json.loads(row["payload"]) for row in rows]
+                                      "AND code>? ORDER BY code",
+                                      (kind, after))
+            result = []
+            for row in rows:
+                data = json.loads(row["payload"])
+                if (allowed_customers is not None and
+                        self._customer_of(connection, kind, data) not in allowed_customers):
+                    continue
+                result.append(data)
+                if len(result) == limit:
+                    break
+            return result
 
-    def audit(self, *, after: int = 0, limit: int = 100) -> list[dict[str, object]]:
+    def audit(self, *, after: int = 0, limit: int = 100,
+              allowed_customers: frozenset[str] | None = None) -> list[dict[str, object]]:
         if not isinstance(after, int) or after < 0 or not 1 <= limit <= 100:
             raise FleetError("invalid Fleet audit page")
         with self._connect() as connection:
             self._verify(connection)
             rows = connection.execute("SELECT seq, at, action, kind, code, digest, "
                                       "chain_hash FROM audit WHERE seq>? "
-                                      "ORDER BY seq LIMIT ?", (after, limit))
-            return [dict(row) for row in rows]
+                                      "ORDER BY seq", (after,))
+            result = []
+            for row in rows:
+                if allowed_customers is not None:
+                    data = self._require(connection, row["kind"], row["code"])
+                    if self._customer_of(connection, row["kind"], data) not in allowed_customers:
+                        continue
+                result.append(dict(row))
+                if len(result) == limit:
+                    break
+            return result

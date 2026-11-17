@@ -10,7 +10,7 @@ type Section = 'overview' | 'customers' | 'releases' | 'deployments' |
   'licences' | 'tickets' | 'maintenance' | 'receipts' | 'audit'
 type Field = { name: string; label: string; type?: 'date'; options?: string[] }
 type FleetRole = 'fleet_admin' | 'fleet_release_manager' | 'fleet_support' | 'fleet_viewer'
-type Identity = { id: string; role: FleetRole }
+type Identity = { id: string; role: FleetRole; customer_codes: string[] }
 
 function mayWrite(role: FleetRole, section: Section): boolean {
   if (role === 'fleet_admin') return true

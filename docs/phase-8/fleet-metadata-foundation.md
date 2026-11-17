@@ -28,7 +28,11 @@ identity mode. Set `SOVEREIGN_FLEET_DB` and either
 `SOVEREIGN_FLEET_TOKEN_FILE` (owner-only shared lab token) or both
 `SOVEREIGN_FLEET_OIDC_ISSUER` and `SOVEREIGN_FLEET_ROLES_FILE` (owner-only
 separate Fleet user/role map). The OIDC issuer must be a numeric loopback
-Keycloak realm for this lab candidate. Then start:
+Keycloak realm for this lab candidate. Each active Fleet user in the role map
+must have an explicit `customer_codes` array, for example
+`["CUST-LAB1"]`. Only `fleet_admin` and `fleet_release_manager` may have
+`["*"]` for global company scope; missing, duplicate or malformed grants
+fail authentication. An empty array grants no customer records. Then start:
 
 ```sh
 .venv/bin/python -m uvicorn 'apps.fleet.main:create_app' --factory \
@@ -39,7 +43,8 @@ In token mode, every `/api/fleet/*` request needs `X-Fleet-Lab-Token` with the
 token file's value. In OIDC mode, it needs `Authorization: Bearer` with a
 signed `sovereign-fleet` audience token issued to `sovereign-fleet-portal`;
 the shared lab token is rejected. The current role map is re-read on every
-request, so revocation fails closed. `/health` returns only a static status.
+request, so revocation and scope changes take effect on the next request.
+`/health` returns only a static status.
 The local lab token is not a production authentication design. `POST` and
 `GET` routes cover customers,
 deployments, licences, tickets, maintenance and signed
@@ -58,9 +63,13 @@ must match the deployment's release.
 
 The portal uses this same role matrix to show permitted controls and hide the
 audit view from support and viewer roles. The API enforces every action even
-when a client bypasses the portal. Per-customer scoping, MFA policy, named
-release approvers and approved company identity operations remain open under
-B-12. Core's vessel audience and Console client cannot access Fleet.
+when a client bypasses the portal. The API filters customer-linked records and
+audit events before pagination and rejects cross-customer changes and imports.
+Release records and their audit events are global; only explicitly global
+administrators and release managers can see or transition them. This is a
+synthetic local scope model. MFA policy, named release approvers and approved
+company identity operations remain open under B-12. Core's vessel audience
+and Console client cannot access Fleet.
 
 Import a signed Core and Console product bundle from an approved local
 administrative workstation with:
@@ -110,13 +119,13 @@ that response before rendering and uses an authorization-code PKCE redirect
 for the `sovereign-fleet-portal` public client. Register
 `http://127.0.0.1:18801/` as that client's exact redirect and logout URI in
 the local realm. The API verifies the token's separate audience and client,
-then `/api/fleet/me` supplies the current mapped role. The access token stays
+then `/api/fleet/me` supplies the current mapped role and customer grants. The access token stays
 in browser-tab memory and goes only to same-origin Fleet API paths; PKCE state
 and verifier are removed from session storage when the callback is processed.
 The token mode and OIDC mode cannot be active together. A production static
 server and approved OIDC configuration are still needed. This portal is a
-synthetic company-side candidate; per-customer scope, approved offline
-handoff, large-catalog performance, retention and independent
+synthetic company-side candidate; production customer-scope governance,
+approved offline handoff, large-catalog performance, retention and independent
 usability/security review remain B-12.
 
 Record list endpoints accept `limit=1..100` and an `after` cursor containing
