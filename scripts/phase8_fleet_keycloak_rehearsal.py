@@ -28,6 +28,10 @@ def _realm(password: str) -> dict[str, object]:
         "accessTokenLifespan": 300,
         "roles": {"realm": [{"name": "fleet_admin"}]},
         "clients": [{
+            "clientId": "sovereign-fleet", "enabled": True,
+            "bearerOnly": True, "publicClient": False,
+            "standardFlowEnabled": False, "directAccessGrantsEnabled": False,
+        }, {
             "clientId": "sovereign-fleet-portal", "enabled": True,
             "publicClient": True, "standardFlowEnabled": True,
             "directAccessGrantsEnabled": False,
