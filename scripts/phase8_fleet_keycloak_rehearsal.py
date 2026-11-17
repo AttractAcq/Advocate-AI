@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import ssl
 
 from scripts.phase8_fleet_browser_rehearsal import FLEET, certificate, driver_request, until
@@ -299,7 +299,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                     if proxy.poll() is not None:
                         raise RuntimeError("Fleet HTTPS bridge failed: " + proxy.stderr.read().decode())
                     try:
-                        with urlopen("https://127.0.0.2/", context=ssl._create_unverified_context(), timeout=1):
+                        request = Request("https://127.0.0.2/", headers={"Host": FLEET})
+                        with urlopen(request, context=ssl._create_unverified_context(), timeout=1):
                             break
                     except OSError:
                         time.sleep(0.2)
