@@ -15,9 +15,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.release.bundle import create_fleet_bundle, verify_bundle
 from infrastructure.deploy.fleet_installer import (
-    fleet_status, install_fleet, recover_fleet, rollback_fleet,
+    fleet_status, install_fleet, recover_fleet, restore_install_fleet,
+    rollback_fleet,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, stop_runtime
+from infrastructure.deploy.fleet_backup import backup_fleet
+from infrastructure.backup import generate_key
+from services.fleet.catalog import Customer, FleetCatalog
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -158,6 +162,31 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                             fleet_status(install_root, trusted)["active"] != first["active"]:
                         raise AssertionError("Fleet stopped portal did not recover")
                     result["recovery"] = "signed-release-restarted"
+                    catalog = FleetCatalog(install_root / "state" / "fleet.db")
+                    catalog.add("customer", Customer(code="CUST-LAB1",
+                                                     category="owner_manager"))
+                    backup_key = root / "fleet-backup.key"
+                    generate_key(backup_key)
+                    archive = root / "fleet-backup.svb"
+                    backup_fleet(install_root / "state" / "fleet.db", archive,
+                                 backup_key)
+                    restored_root = root / "fleet-restored-install"
+                    try:
+                        restored = restore_install_fleet(
+                            bundle, trusted, crane, config, restored_root,
+                            token, archive, backup_key)
+                        rows = FleetCatalog(restored_root / "state" / "fleet.db").list(
+                            "customer")
+                        if (restored["restored_files"] != 1 or
+                                [row["code"] for row in rows] != ["CUST-LAB1"] or
+                                fleet_status(restored_root, trusted)["result"] != "healthy"):
+                            raise AssertionError("Fleet restored catalog is not healthy")
+                        result["encrypted_recovery"] = "fictional-customer-restored"
+                    finally:
+                        restored_state = restored_root / "fleet-state.json"
+                        if restored_state.exists():
+                            value = json.loads(restored_state.read_text())
+                            stop_runtime(FleetRuntime(**value["runtime"]))
                 finally:
                     state_file = install_root / "fleet-state.json"
                     if state_file.exists():

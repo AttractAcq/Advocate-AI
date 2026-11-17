@@ -74,3 +74,25 @@ and `recovery: signed-release-restarted` for the actual CI-built images. The
 synthetic images had zero unresolved HIGH, CRITICAL or UNKNOWN findings in
 that run. This does not establish production readiness for company identity,
 TLS, backup or operator access.
+
+The local Fleet backup command verifies the catalog audit chain, snapshots
+only `fleet.db` through the existing SQLite-safe backup code and encrypts it
+with AES-256-GCM. It excludes the lab token, signing keys and portal config.
+Restore authenticates into a new private directory and verifies the catalog
+again before the signed installer starts. The token is provisioned separately:
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_backup backup \
+  --db /private/fleet-install/state/fleet.db \
+  --output /private/backups/fleet.svb --key /protected/fleet-backup.key
+.venv/bin/python -m infrastructure.deploy.fleet_installer restore-install \
+  --archive /private/backups/fleet.svb --backup-key /protected/fleet-backup.key \
+  --bundle /path/to/signed-fleet-bundle --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane --config /path/to/fleet-config.json \
+  --root /private/new-fleet-install --token-file /protected/fleet-lab-token
+```
+
+This synthetic software path uses owner-only staging but has no approved
+production backup media, retention, key custody or timed recovery runbook.
+Those remain B-12 gates. CI checks that a fictional customer survives a clean
+restore and that the restored signed runtime is healthy.
