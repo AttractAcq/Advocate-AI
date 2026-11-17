@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 from threading import RLock
 import time
 from urllib.parse import urlsplit
@@ -19,16 +20,35 @@ class OidcVerifier:
     def __init__(self, issuer: str, roles_path: Path, audience: str = "sovereign-core",
                  *, transport: httpx.BaseTransport | None = None,
                  revocations_path: Path | None = None,
-                 authorized_client: str = "sovereign-console") -> None:
+                 authorized_client: str = "sovereign-console",
+                 allow_https_issuer: bool = False) -> None:
         parsed = urlsplit(issuer)
+        realm = re.fullmatch(r"/realms/[A-Za-z0-9_-]{1,80}", parsed.path)
+        if (not realm or parsed.query or parsed.fragment or parsed.username or
+                parsed.password or issuer.endswith("/")):
+            raise ValueError("OIDC issuer must identify one Keycloak realm")
         try:
-            address = ipaddress.ip_address(parsed.hostname or "")
+            port = parsed.port
         except ValueError as exc:
-            raise ValueError("OIDC issuer must use numeric loopback in lab") from exc
-        if (parsed.scheme != "http" or not address.is_loopback or not parsed.port or
-                not parsed.path.startswith("/realms/") or parsed.query or parsed.fragment or
-                parsed.username or parsed.password):
-            raise ValueError("OIDC issuer must be local Keycloak realm")
+            raise ValueError("invalid OIDC issuer port") from exc
+        if parsed.scheme == "https" and allow_https_issuer:
+            hostname = parsed.hostname or ""
+            labels = hostname.split(".")
+            if (port is not None or len(labels) < 2 or len(hostname) > 253 or
+                    hostname.replace(".", "").isdigit() or
+                    any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                        for label in labels) or
+                    parsed.netloc != hostname):
+                raise ValueError("Fleet HTTPS issuer must use a DNS host on port 443")
+        else:
+            try:
+                address = ipaddress.ip_address(parsed.hostname or "")
+            except ValueError as exc:
+                raise ValueError("OIDC issuer must use numeric loopback in lab") from exc
+            host = f"[{address}]" if address.version == 6 else str(address)
+            if (parsed.scheme != "http" or not address.is_loopback or not port or
+                    parsed.netloc != f"{host}:{port}"):
+                raise ValueError("OIDC issuer must be local Keycloak realm")
         self.issuer = issuer.rstrip("/")
         self.roles_path = roles_path
         self.audience = audience

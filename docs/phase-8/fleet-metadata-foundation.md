@@ -27,8 +27,10 @@ For a local synthetic run, create an owner-only directory and choose one
 identity mode. Set `SOVEREIGN_FLEET_DB` and either
 `SOVEREIGN_FLEET_TOKEN_FILE` (owner-only shared lab token) or both
 `SOVEREIGN_FLEET_OIDC_ISSUER` and `SOVEREIGN_FLEET_ROLES_FILE` (owner-only
-separate Fleet user/role map). The OIDC issuer must be a numeric loopback
-Keycloak realm for this lab candidate. Each active Fleet user in the role map
+separate Fleet user/role map). The OIDC issuer may be a numeric loopback HTTP
+Keycloak realm for the lab or a DNS-hosted HTTPS realm on port 443 for a
+company deployment. The Core verifier still accepts only a lab loopback
+issuer. Each active Fleet user in the role map
 must have an explicit `customer_codes` array, for example
 `["CUST-LAB1"]`. Only `fleet_admin` and `fleet_release_manager` may have
 `["*"]` for global company scope; missing, duplicate or malformed grants
@@ -127,8 +129,13 @@ the local realm. The API verifies the token's separate audience and client,
 then `/api/fleet/me` supplies the current mapped role and customer grants. The access token stays
 in browser-tab memory and goes only to same-origin Fleet API paths; PKCE state
 and verifier are removed from session storage when the callback is processed.
-The token mode and OIDC mode cannot be active together. A production static
-server TLS boundary and approved OIDC configuration are still needed. The
+The token mode and OIDC mode cannot be active together. For a company browser
+origin, `/fleet-config.json` accepts only a DNS-hosted HTTPS realm on port
+443 and the page itself must use HTTPS. The API retrieves JWKS over HTTPS
+with normal certificate validation, then checks the separate Fleet audience,
+client, role and customer grant. The installed Fleet runtime still uses the
+lab token path; its company identity network, TLS ingress, roles-file mount,
+and target IdP are separate integration gates under B-12. The
 separate `FleetApi.Dockerfile` and `FleetPortal.Dockerfile` now package the
 company API and built portal for an internal-network synthetic rehearsal.
 The portal serves `/fleet-config.json` from an explicit read-only mount and

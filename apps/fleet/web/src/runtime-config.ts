@@ -20,11 +20,18 @@ export function validateFleetConfig(value: unknown, page: URL): FleetConfig {
   let issuer: URL
   try { issuer = new URL(record.oidc_issuer) }
   catch { throw new Error('Invalid identity provider') }
-  if (!localPage || issuer.protocol !== 'http:' || issuer.hostname !== '127.0.0.1' ||
-      !issuer.port || !issuer.pathname.startsWith('/realms/') ||
+  const realm = /^\/realms\/[A-Za-z0-9_-]{1,80}$/.test(issuer.pathname)
+  const labIssuer = localPage && issuer.protocol === 'http:' &&
+    issuer.hostname === '127.0.0.1' && Boolean(issuer.port)
+  const productionIssuer = page.protocol === 'https:' && issuer.protocol === 'https:' &&
+    /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(issuer.hostname) &&
+    !/^[0-9.]+$/.test(issuer.hostname) &&
+    (issuer.port === '' || issuer.port === '443') &&
+    issuer.hostname.split('.').every((part) => part.length <= 63 &&
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(part))
+  if ((!labIssuer && !productionIssuer) || !realm ||
       issuer.username || issuer.password || issuer.search || issuer.hash ||
-      issuer.pathname === '/' || issuer.href !== record.oidc_issuer ||
-      issuer.pathname.endsWith('/')) {
+      issuer.href !== record.oidc_issuer) {
     throw new Error('Invalid identity provider')
   }
   return { schema: 1, oidc_issuer: issuer.href }

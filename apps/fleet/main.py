@@ -63,7 +63,8 @@ class FleetSettings:
             roles_path = Path(roles_filename)
             _owner_file(roles_path, 1024 * 1024)
             verifier = OidcVerifier(issuer, roles_path, audience="sovereign-fleet",
-                                    authorized_client="sovereign-fleet-portal")
+                                    authorized_client="sovereign-fleet-portal",
+                                    allow_https_issuer=True)
             return cls(Path(database), None, import_key, verifier)
         path = Path(filename or "")
         _owner_file(path, 4096)
