@@ -234,6 +234,12 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
                                         headers=scoped_admin)).json()
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["code"], "CUST-LAB1")
+        self.assertEqual(events[0]["seq"], 1)
+        self.assertNotIn("chain_hash", events[0])
+        next_page = (await self.client.get("/api/fleet/audit?limit=1&after=1",
+                                           headers=scoped_admin)).json()
+        self.assertEqual(next_page[0]["seq"], 2)
+        self.assertEqual(next_page[0]["code"], "VSL-LAB1")
         self.assertTrue(all(item["code"] not in {"CUST-LAB2", "VSL-LAB2",
                                                    "TKT-LAB2", "REL-LAB1"}
                             for item in (await self.client.get(

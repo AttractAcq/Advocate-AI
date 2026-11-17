@@ -359,14 +359,23 @@ class FleetCatalog:
             self._verify(connection)
             rows = connection.execute("SELECT seq, at, action, kind, code, digest, "
                                       "chain_hash FROM audit WHERE seq>? "
-                                      "ORDER BY seq", (after,))
+                                      "ORDER BY seq", (after if allowed_customers is None else 0,))
             result = []
+            visible_index = 0
             for row in rows:
                 if allowed_customers is not None:
                     data = self._require(connection, row["kind"], row["code"])
                     if self._customer_of(connection, row["kind"], data) not in allowed_customers:
                         continue
-                result.append(dict(row))
+                    visible_index += 1
+                    if visible_index <= after:
+                        continue
+                    projected = {key: row[key] for key in
+                                 ("at", "action", "kind", "code", "digest")}
+                    projected["seq"] = visible_index
+                    result.append(projected)
+                else:
+                    result.append(dict(row))
                 if len(result) == limit:
                     break
             return result

@@ -65,6 +65,9 @@ The portal uses this same role matrix to show permitted controls and hide the
 audit view from support and viewer roles. The API enforces every action even
 when a client bypasses the portal. The API filters customer-linked records and
 audit events before pagination and rejects cross-customer changes and imports.
+Scoped audit pages use a visible-only sequence as their cursor and omit the
+global chain hash, so hidden company activity is not exposed through sequence
+gaps. The catalog still verifies the full chain before projecting a page.
 Release records and their audit events are global; only explicitly global
 administrators and release managers can see or transition them. This is a
 synthetic local scope model. MFA policy, named release approvers and approved
