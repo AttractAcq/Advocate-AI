@@ -17,6 +17,7 @@ from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError
 from infrastructure.deploy.fleet_runtime import (
     _health, start_verified_bundle, validate_config, verify_runtime_identity,
 )
+from scripts.phase8_fleet_oidc_rehearsal import _identity_material
 
 
 class FleetInstallerTests(unittest.TestCase):
@@ -37,6 +38,12 @@ class FleetInstallerTests(unittest.TestCase):
         ast.parse(commands[1][4])
         self.assertIn("lab token accepted in OIDC mode", commands[1][4])
         self.assertIn("/protocol/openid-connect/certs", commands[1][4])
+        commands.clear()
+        with patch("infrastructure.deploy.fleet_runtime._docker",
+                   side_effect=lambda *args: commands.append(args) or ""):
+            _health("a" * 64, issuer, custom_ca=True)
+        ast.parse(commands[1][4])
+        self.assertIn('cafile="/etc/fleet-ca.pem"', commands[1][4])
 
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -125,6 +132,7 @@ class FleetInstallerTests(unittest.TestCase):
         roles.write_text('{"users":[{"id":"admin","role":"fleet_admin",'
                          '"status":"active","customer_codes":["*"]}]}\n')
         roles.chmod(0o600)
+        _, ca, _ = _identity_material(self.base)
         linked = self.base / "linked-roles.json"
         linked.symlink_to(roles)
         with self.assertRaises(FleetInstallError):
@@ -149,13 +157,15 @@ class FleetInstallerTests(unittest.TestCase):
              patch("infrastructure.deploy.fleet_installer.stop_runtime"):
             first = install_fleet(self.first, self.trusted, self.crane,
                                   self.config, self.root, roles_file=roles,
-                                  identity_network="fleet-identity")
+                                  identity_network="fleet-identity", ca_file=ca)
             self.assertEqual(first["result"], "activated")
             self.assertFalse((self.root / "state" / "token").exists())
             self.assertEqual((self.root / "identity" / "roles.json").read_bytes(),
                              roles.read_bytes())
             self.assertEqual((self.root / "identity" / "roles.json").stat().st_mode & 0o777,
                              0o600)
+            self.assertEqual((self.root / "identity" / "ca.pem").read_bytes(),
+                             ca.read_bytes())
             with self.assertRaises(FleetInstallError):
                 install_fleet(self.second, self.trusted, self.crane,
                               self.config, self.root, identity_network="other-network")
@@ -174,6 +184,9 @@ class FleetInstallerTests(unittest.TestCase):
         state.mkdir(mode=0o700)
         identity = self.base / "identity"
         identity.mkdir(mode=0o700)
+        _, ca, _ = _identity_material(self.base)
+        (identity / "ca.pem").write_bytes(ca.read_bytes())
+        (identity / "ca.pem").chmod(0o600)
         (identity / "roles.json").write_text(
             '{"users":[{"id":"admin","role":"fleet_admin",'
             '"status":"active","customer_codes":["*"]}]}\n')
@@ -205,8 +218,10 @@ class FleetInstallerTests(unittest.TestCase):
         portal = next(args for args in commands if args[0] == "run" and "fleet-portal" in args)
         self.assertIn("SOVEREIGN_FLEET_ROLES_FILE=/etc/fleet-roles.json", api)
         self.assertIn("SOVEREIGN_FLEET_OIDC_ISSUER=https://identity.example.invalid/realms/fleet", api)
+        self.assertIn("SOVEREIGN_FLEET_CA_FILE=/etc/fleet-ca.pem", api)
         self.assertNotIn("SOVEREIGN_FLEET_TOKEN_FILE=/state/token", api)
         self.assertTrue(any("target=/etc/fleet-roles.json,readonly" in arg for arg in api))
+        self.assertTrue(any("target=/etc/fleet-ca.pem,readonly" in arg for arg in api))
         self.assertFalse(any("roles.json" in arg for arg in portal))
         self.assertIn(("network", "connect", "fleet-identity", "b" * 64), commands)
         with patch("infrastructure.deploy.fleet_runtime.verify_bundle",
@@ -232,6 +247,9 @@ class FleetInstallerTests(unittest.TestCase):
         state.mkdir(mode=0o700)
         identity = self.base / "identity"
         identity.mkdir(mode=0o700)
+        _, ca, _ = _identity_material(self.base)
+        (identity / "ca.pem").write_bytes(ca.read_bytes())
+        (identity / "ca.pem").chmod(0o600)
         roles = identity / "roles.json"
         roles.write_text('{"users":[{"id":"admin","role":"fleet_admin",'
                          '"status":"active","customer_codes":["*"]}]}')
@@ -248,13 +266,16 @@ class FleetInstallerTests(unittest.TestCase):
             "fleet-api": [{"Destination": "/state", "Type": "bind",
                            "Source": str(state.resolve()), "RW": True},
                           {"Destination": "/etc/fleet-roles.json", "Type": "bind",
-                           "Source": str(roles.resolve()), "RW": False}],
+                           "Source": str(roles.resolve()), "RW": False},
+                          {"Destination": "/etc/fleet-ca.pem", "Type": "bind",
+                           "Source": str((identity / "ca.pem").resolve()), "RW": False}],
             "fleet-portal": [{"Destination": "/srv/fleet-config.json", "Type": "bind",
                               "Source": str(self.config.resolve()), "RW": False}],
         }
         environment = ["SOVEREIGN_FLEET_DB=/state/fleet.db",
                        f"SOVEREIGN_FLEET_OIDC_ISSUER={issuer}",
-                       "SOVEREIGN_FLEET_ROLES_FILE=/etc/fleet-roles.json"]
+                       "SOVEREIGN_FLEET_ROLES_FILE=/etc/fleet-roles.json",
+                       "SOVEREIGN_FLEET_CA_FILE=/etc/fleet-ca.pem"]
 
         def docker(*args: str) -> str:
             if args[:2] == ("network", "inspect"):
@@ -293,6 +314,10 @@ class FleetInstallerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 verify_runtime_identity(handle, self.first, self.trusted, state, self.config)
             mounts["fleet-api"][1]["RW"] = False
+            mounts["fleet-api"][2]["RW"] = True
+            with self.assertRaises(RuntimeError):
+                verify_runtime_identity(handle, self.first, self.trusted, state, self.config)
+            mounts["fleet-api"][2]["RW"] = False
             environment.append("SOVEREIGN_FLEET_TOKEN_FILE=/state/token")
             with self.assertRaises(RuntimeError):
                 verify_runtime_identity(handle, self.first, self.trusted, state, self.config)

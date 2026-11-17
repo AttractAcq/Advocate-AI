@@ -84,13 +84,36 @@ docker network create --internal --label sovereign.fleet.identity=true fleet-ide
   --bundle /path/to/signed-fleet-bundle --trusted-key /protected/fleet-trust-key.pem \
   --crane /path/to/pinned/crane --config /path/to/fleet-https-config.json \
   --root /private/fleet-install --roles-file /protected/fleet-roles.json \
-  --identity-network fleet-identity
+  --identity-network fleet-identity --ca-file /protected/company-idp-ca.pem
 ```
+
+`--ca-file` is optional when the IdP certificate chains to the image's system
+trust store. When supplied, the installer copies the owner-only CA certificate
+into the private identity directory, mounts it read-only into the API, and
+uses it for JWKS verification and the activation health probe. The catalog
+backup excludes this CA and the roles file; recovery requires separate
+trusted copies. CA rotation and final company trust policy remain B-12 gates.
 
 The external identity endpoint and browser TLS ingress must exist before this
 command can pass health checks. The command does not create them. Production
 IdP configuration, certificate trust, MFA, operator ingress and network
 policy still require company approval and target validation under B-12.
+
+The actual-image CI release rehearsal also creates a temporary private CA and
+HTTPS JWKS service on a labelled internal identity network. It installs the
+same signed Fleet images in OIDC mode, checks a signed Fleet-audience token,
+rejects a Core-audience token, and confirms status fails when the IdP stops.
+The synthetic runner maps that temporary IdP hostname to its private network
+address because the hosted Linux Docker runner does not resolve its network
+alias from the two-network API container. This mapping is confined to the
+rehearsal; target DNS and network routing remain pilot acceptance checks.
+Ephemeral CA, keys and tokens are deleted; retained evidence contains only
+result codes. This synthetic service is not a Keycloak interoperability or
+browser TLS acceptance test.
+
+[PR #67's signed-image CI run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44150682876/job/134277834972)
+reports `oidc_runtime: synthetic-https-token-authorized`,
+`wrong_audience: denied` and `idp_outage: status-failed-closed`.
 
 [PR #61's retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44093561479)
 reports `fleet_bundle: verified`, `failed_candidate: previous-runtime-preserved`,
