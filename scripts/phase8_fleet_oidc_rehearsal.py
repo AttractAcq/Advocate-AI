@@ -146,18 +146,27 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             if not ipaddress.ip_address(server_ip).is_private:
                 raise AssertionError("synthetic IdP is outside the private identity network")
             original_docker = fleet_runtime._docker
+            last_probe_error = ""
 
             def synthetic_host_docker(*args: str) -> str:
-                if args and args[0] == "run" and "fleet-api" in args:
-                    return original_docker(*args[:-1], "--add-host",
-                                           f"{IDENTITY_HOST}:{server_ip}", args[-1])
-                return original_docker(*args)
+                nonlocal last_probe_error
+                try:
+                    if args and args[0] == "run" and "fleet-api" in args:
+                        return original_docker(*args[:-1], "--add-host",
+                                               f"{IDENTITY_HOST}:{server_ip}", args[-1])
+                    return original_docker(*args)
+                except RuntimeError as exc:
+                    if args and args[0] == "exec":
+                        last_probe_error = str(getattr(exc.__cause__, "stderr", ""))[-1000:]
+                    raise
 
             fleet_runtime._docker = synthetic_host_docker
             try:
                 installed = install_fleet(bundle, trusted, crane, config, install_root,
                                           roles_file=roles, identity_network=network,
                                           ca_file=ca)
+            except RuntimeError as exc:
+                raise AssertionError(f"synthetic Fleet activation failed: {last_probe_error}") from exc
             finally:
                 fleet_runtime._docker = original_docker
             if fleet_status(install_root, trusted)["active"] != installed["active"]:
