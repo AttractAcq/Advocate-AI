@@ -88,6 +88,12 @@ jobs:
           npm ci --ignore-scripts
           npm run test
           npm run build
+      - name: Build Fleet portal
+        working-directory: apps/fleet/web
+        run: |
+          npm ci --ignore-scripts
+          npm run test
+          npm run build
 
   secrets:
     runs-on: ubuntu-latest
@@ -131,6 +137,9 @@ jobs:
           uvx --from pip-audit==2.10.1 pip-audit -r "$RUNNER_TEMP/phase3-requirements.lock" --require-hashes --disable-pip --progress-spinner off
       - name: Scan Console dependency lock
         working-directory: apps/console/web
+        run: npm audit --audit-level=high
+      - name: Scan Fleet portal dependency lock
+        working-directory: apps/fleet/web
         run: npm audit --audit-level=high
 
   container-scan:
