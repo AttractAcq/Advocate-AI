@@ -219,3 +219,13 @@ with no stored content. They create authorised metadata and verify audit
 events, references and tamper detection. A real company portal, customer user
 accounts, approved lifecycle rules and role enforcement, approved offline handoff, support workflow,
 retention, network route proof and independent review remain open.
+
+The browser sign-in rehearsal builds the Fleet portal and serves it over a
+temporary HTTPS origin alongside a separate synthetic PKCE identity origin.
+Chrome follows the authorization redirect, submits a fictional account,
+exchanges the callback code, reads `/api/fleet/me`, clears callback state and
+returns to sign-in after logout. The browser accepts the temporary self-signed
+fixture certificates; this does not approve production browser CA trust.
+The separate Keycloak interoperability rehearsal covers actual OIDC protocol
+and signed-token verification by the Fleet API. Neither rehearsal closes the
+company IdP, MFA, target TLS/network or independent assessment gates.
