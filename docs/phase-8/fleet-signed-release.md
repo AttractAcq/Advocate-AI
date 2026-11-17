@@ -96,3 +96,8 @@ This synthetic software path uses owner-only staging but has no approved
 production backup media, retention, key custody or timed recovery runbook.
 Those remain B-12 gates. CI checks that a fictional customer survives a clean
 restore and that the restored signed runtime is healthy.
+
+[PR #62's retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44095382392)
+reports `encrypted_recovery: fictional-customer-restored` after a clean
+database restore and signed runtime activation. The same run retained the
+verified bundle, failed-candidate, update, rollback and recovery results.
