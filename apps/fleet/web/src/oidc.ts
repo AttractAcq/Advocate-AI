@@ -11,7 +11,7 @@ export function oidcEnabled(): boolean { return Boolean(configuredIssuer()) }
 
 export async function beginOidc(): Promise<void> {
   const issuer = configuredIssuer()
-  if (!issuer) throw new Error('Local identity provider is not configured')
+  if (!issuer) throw new Error('Fleet identity provider is not configured')
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)))
   const state = base64url(crypto.getRandomValues(new Uint8Array(24)))
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
@@ -43,9 +43,9 @@ export async function finishOidc(): Promise<string | null> {
     body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId,
       code, redirect_uri: window.location.origin + '/', code_verifier: verifier }),
   })
-  if (!response.ok) throw new Error('Local identity exchange failed')
+  if (!response.ok) throw new Error('Fleet identity exchange failed')
   const result = await response.json() as { access_token?: string }
-  if (!result.access_token) throw new Error('Local identity returned no access token')
+  if (!result.access_token) throw new Error('Fleet identity returned no access token')
   return result.access_token
 }
 

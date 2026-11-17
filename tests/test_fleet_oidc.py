@@ -281,6 +281,44 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
             create_app(FleetSettings(self.db, None, oidc_verifier=OidcVerifier(
                 self.issuer, self.roles_path, audience="sovereign-core")))
 
+    async def test_company_https_issuer_accepts_scoped_token_and_rejects_unsafe_hosts(self) -> None:
+        company_issuer = "https://identity.example.invalid/realms/fleet"
+        variables = {"SOVEREIGN_FLEET_DB": str(self.db),
+                     "SOVEREIGN_FLEET_OIDC_ISSUER": company_issuer,
+                     "SOVEREIGN_FLEET_ROLES_FILE": str(self.roles_path)}
+        with patch.dict(os.environ, variables, clear=True):
+            self.assertEqual(FleetSettings.from_env().oidc_verifier.issuer,
+                             company_issuer)
+        key = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.private.public_key()))
+        key.update(kid="fleet-company-key", alg="RS256", use="sig")
+        verifier = OidcVerifier(
+            company_issuer, self.roles_path, audience="sovereign-fleet",
+            authorized_client="sovereign-fleet-portal", allow_https_issuer=True,
+            transport=httpx.MockTransport(lambda request: httpx.Response(
+                200, json={"keys": [key]})))
+        app = create_app(FleetSettings(self.db, None, oidc_verifier=verifier))
+        claims = {"iss": company_issuer, "aud": "sovereign-fleet",
+                  "azp": "sovereign-fleet-portal", "typ": "Bearer", "sub": "company-viewer",
+                  "preferred_username": "viewer",
+                  "realm_access": {"roles": ["fleet_viewer"]},
+                  "iat": int(time.time()), "exp": int(time.time()) + 300}
+        token = jwt.encode(claims, self.private, algorithm="RS256",
+                           headers={"kid": "fleet-company-key"})
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="https://fleet.example.invalid") as client:
+            response = await client.get("/api/fleet/me", headers={"Authorization": "Bearer " + token})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["customer_codes"], ["CUST-LAB1"])
+            self.assertEqual((await client.get("/api/fleet/me", headers={
+                "X-Fleet-Lab-Token": "synthetic-fleet-admin-token-0123456789"})).status_code, 401)
+        for bad in ("http://identity.example.invalid/realms/fleet",
+                    "https://127.0.0.1/realms/fleet",
+                    "https://identity.example.invalid:8443/realms/fleet",
+                    "https://identity.example.invalid/realms/fleet?next=outside",
+                    "https://user:pass@identity.example.invalid/realms/fleet"):
+            with self.subTest(issuer=bad), self.assertRaises(ValueError):
+                OidcVerifier(bad, self.roles_path, allow_https_issuer=True)
+
 
 if __name__ == "__main__":
     unittest.main()
