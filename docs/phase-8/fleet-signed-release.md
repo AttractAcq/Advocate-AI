@@ -26,3 +26,12 @@ This is a local software candidate. The Fleet release signing authority,
 production vulnerability policy, company deployment topology and independent
 review remain under B-12. A schema-5 Fleet bundle cannot be imported as a
 schema-4 vessel release or passed to the vessel product installer.
+
+The CI Fleet image rehearsal builds the actual API and portal images, saves
+their archives, obtains manifest digests with crane, generates Syft inventory
+and an offline-database Trivy scan, then attempts the schema-5 signature. If
+either image has unresolved HIGH, CRITICAL or UNKNOWN findings, the expected
+result is `denied-findings` and no signed bundle. Its metadata-only result,
+scan and inventory files are retained as CI artifacts; temporary signing keys
+and image archives are not published by the rehearsal. This is evidence of
+the software path, not approval to distribute an image.
