@@ -142,6 +142,18 @@ read-only for the Fleet API's HTTPS JWKS check; it must be reprovisioned
 separately during restore. The
 separate `FleetApi.Dockerfile` and `FleetPortal.Dockerfile` now package the
 company API and built portal for an internal-network synthetic rehearsal.
+The Keycloak interoperability CI rehearsal uses the digest-pinned lab image,
+imports a Fleet realm with a separate public PKCE client and audience mapper,
+and completes an authorization-code exchange over temporary HTTPS before
+calling the built Fleet API through the portal. It uses synthetic credentials
+and an isolated network; it does not prove browser rendering, company IdP
+settings, MFA or vessel routing. The lab image's advisory triage remains B-11.
+The realm must also contain an enabled `sovereign-fleet` resource client with
+interactive flows disabled: Keycloak omits the mapped audience when that
+referenced client is absent.
+[PR #68's CI rehearsal](https://github.com/AttractAcq/Advocate-AI/actions/runs/44155962809/job/134296643100)
+reports an authorised PKCE exchange, a mapped `fleet_admin` identity and a
+denied lab token.
 The portal serves `/fleet-config.json` from an explicit read-only mount and
 proxies only `/api/fleet/` to the API image; `/api/models` is denied. Both
 images run as non-root with read-only roots and dropped capabilities in
