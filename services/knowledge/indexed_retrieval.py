@@ -8,7 +8,7 @@ import re
 import sqlite3
 
 from services.knowledge.acl import source_access
-from services.knowledge.paths import source_path
+from services.knowledge.paths import read_source_bytes
 from services.knowledge.manifest_io import load_manifest
 from services.policy.policy_file import PolicyUnavailable, load_policy
 
@@ -63,12 +63,10 @@ def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> l
                 continue
             relative = source["relative_path"]
             try:
-                path = source_path(base, relative)
+                payload = read_source_bytes(base, relative, 8 * 1024 * 1024)
             except (OSError, ValueError):
                 continue
-            if path.stat().st_size > 8 * 1024 * 1024:
-                continue
-            if hashlib.sha256(path.read_bytes()).hexdigest() != source["sha256"]:
+            if hashlib.sha256(payload).hexdigest() != source["sha256"]:
                 continue
             approved.append(source)
     return approved
