@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
 from services.policy.regular_file import read_regular_file
@@ -30,14 +31,22 @@ def _reject_constant(value: str) -> object:
 
 def read_policy_bytes(path: Path) -> bytes:
     try:
-        return read_regular_file(path, MAX_POLICY_BYTES)
+        pending = path.with_name(path.name + ".pending")
+        if os.path.lexists(pending):
+            raise PolicyUnavailable("role policy change is pending")
+        payload = read_regular_file(path, MAX_POLICY_BYTES)
+        if os.path.lexists(pending):
+            raise PolicyUnavailable("role policy change is pending")
+        return payload
+    except PolicyUnavailable:
+        raise
     except (OSError, ValueError) as exc:
         raise PolicyUnavailable("role policy unavailable") from exc
 
 
-def load_policy(path: Path) -> dict[str, object]:
+def parse_policy_bytes(raw: bytes) -> dict[str, object]:
     try:
-        policy = json.loads(read_policy_bytes(path), object_pairs_hook=_unique_pairs,
+        policy = json.loads(raw, object_pairs_hook=_unique_pairs,
                             parse_constant=_reject_constant)
     except PolicyUnavailable:
         raise
@@ -46,6 +55,10 @@ def load_policy(path: Path) -> dict[str, object]:
     if not isinstance(policy, dict):
         raise PolicyUnavailable("role policy unavailable")
     return policy
+
+
+def load_policy(path: Path) -> dict[str, object]:
+    return parse_policy_bytes(read_policy_bytes(path))
 
 
 def active_user(policy: dict[str, object], user_id: str, *,

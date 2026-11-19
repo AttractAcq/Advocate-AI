@@ -41,8 +41,10 @@ password grant for scripted tests; it must not be copied into production.
 6. A reviewer checks the resulting effective permissions and the denial
    regression. Roll back an unintended grant and record the corrective action.
 
-The current lab policy file supports immediate source denial and revocation,
-but lacks an approved administrative change API and two-person approval. The
+The current lab policy file supports immediate source denial and revocation.
+The [synthetic offline policy-change tool](policy-change-rehearsal.md) checks
+two distinct signatures and records an interrupted-change recovery packet,
+but it is not an owner-approved administrative process or deployed API. The
 local ACL test proves denial through API paths within 60 seconds after a policy
 file update; target NAS and identity propagation remain unmeasured.
 Core now reads that lab file through a 4 MiB regular-file-only boundary for
@@ -54,7 +56,7 @@ The shared active-user check also rejects duplicate identities and expired or
 malformed `expires_at` values. A lab token is bound to the role at sign-in, so
 a later role change requires a new login; OIDC still checks the current local
 role against the signed token role on each request. These are prerequisites for
-the proposed emergency workflow, not an activation or two-person approval.
+the proposed emergency workflow, not emergency activation.
 
 ## Emergency access drill to implement before pilot
 
