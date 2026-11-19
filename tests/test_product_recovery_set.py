@@ -14,6 +14,7 @@ from infrastructure.deploy.product_recovery_set import (
     RecoverySetError, _require_stopped, create_product_recovery_set,
     restore_product_recovery_set, verify_product_recovery_set,
 )
+from services.policy.audit import AuditLog
 from services.knowledge.upload_staging import stage_upload
 
 
@@ -29,6 +30,9 @@ class ProductRecoverySetTests(unittest.TestCase):
         (state / "sources").mkdir()
         for name in ("roles.json", "manifest.csv", "history.db"):
             (state / name).write_text("synthetic")
+        AuditLog(state / "audit.jsonl").append(
+            actor="synthetic-installer", action="install", resource="core-state",
+            decision="allow", policy_version="a" * 64)
         (state / "sources" / "ENG-001.txt").write_text("fictional")
         password = self.base / "lab-password"
         password.write_text("fictional-lab-password\n")
@@ -70,7 +74,8 @@ class ProductRecoverySetTests(unittest.TestCase):
         def core(spec: Path, *_args) -> dict[str, object]:
             names = [row["name"] for row in json.loads(spec.read_text())["files"]]
             self.assertEqual(set(names), {"roles.json", "manifest.csv",
-                                          "history.db", "sources/ENG-001.txt"})
+                                          "history.db", "audit.jsonl",
+                                          "sources/ENG-001.txt"})
             return {"snapshot_id": "1" * 64}
 
         with patch("infrastructure.deploy.product_recovery_set._require_stopped") as stopped, \
@@ -103,6 +108,22 @@ class ProductRecoverySetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "upload backup failed"):
                 self._create()
         self.assertFalse(self.receipt.exists())
+
+    def test_missing_or_tampered_audit_prevents_capture(self) -> None:
+        audit = self.install / "core-state" / "audit.jsonl"
+        for mutation in (lambda: audit.unlink(),
+                         lambda: audit.write_text("tampered\n")):
+            if not audit.exists():
+                AuditLog(audit).append(actor="synthetic-installer", action="install",
+                                       resource="core-state", decision="allow",
+                                       policy_version="a" * 64)
+            mutation()
+            with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+                 patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+                with self.assertRaisesRegex(ValueError, "audit"):
+                    self._create()
+            backup.assert_not_called()
+            self.assertFalse(self.receipt.exists())
 
     def test_tampered_receipt_is_rejected(self) -> None:
         with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \

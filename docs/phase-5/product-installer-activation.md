@@ -88,6 +88,15 @@ can make and check a bounded encrypted snapshot while Core writes are stopped.
 Coordinated scheduling and an approved retention policy remain open before
 vessel use.
 
+When installing with external Core state, the installer initialises an
+owner-only hash-chained `audit.jsonl` if this is a clean legacy snapshot. The
+signed Core receives `SOVEREIGN_AUDIT_PATH` inside the state mount. `status`,
+update and recovery reject a missing, exposed or invalid audit trail. New
+[coordinated recovery sets](product-recovery-set.md) include that trail and
+require it on receipt-bound restore; the actual-image rehearsal checks audit
+continuity after the second installation. This local chain is not externally
+anchored and has no approved retention or off-host custody yet.
+
 For a synthetic Core state restored from restic, the first `install` can also
 specify `--core-state /path/to/restored` and
 `--lab-password-file /path/to/owner-only-lab-password`. An optional separate

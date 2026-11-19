@@ -33,6 +33,7 @@ from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from services.policy.audit import verify as verify_audit
 from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
 
 _UPLOAD_PROBE = r'''
@@ -376,6 +377,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     core_repository = state_root / "coordinated-core-repository"
                     upload_repository = state_root / "upload-repository"
                     receipt_path = root / "coordinated-recovery-set.json"
+                    audit_before = (state / "audit.jsonl").read_bytes()
+                    audit_count, _ = verify_audit(state / "audit.jsonl")
+                    if audit_count < 1:
+                        raise AssertionError("installed Core did not record audited requests")
                     created_set = create_product_recovery_set(
                         install_root, core_repository, upload_repository,
                         backup_password, backup_password, restic, restic_sha256,
@@ -395,7 +400,12 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         recovered_upload = json.loads(_docker(
                             "exec", recovered_core, "python", "-c", _UPLOAD_PROBE,
                             "late", staged_id))
-                        if (combined["restored_upload_files"] != 2 or
+                        recovered_audit = recovered_root / "core-state" / "audit.jsonl"
+                        recovered_count, _ = verify_audit(recovered_audit)
+                        if (combined["restored_files"] != 5 or
+                                not recovered_audit.read_bytes().startswith(audit_before) or
+                                recovered_count <= audit_count or
+                                combined["restored_upload_files"] != 2 or
                                 recovered_upload["upload_id"] != staged_id or
                                 product_status(recovered_root, trusted)["active"] != combined["active"]):
                             raise AssertionError("checked upload restore did not activate")
@@ -404,6 +414,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             "core_snapshot_id": recovery_set["core_snapshot_id"],
                             "upload_snapshot_id": recovery_set["upload_snapshot_id"],
                             "signed_receipt": "verified",
+                            "audit_continuity": "verified",
                         }
                     finally:
                         recovered_state = json.loads((recovered_root / "product-state.json").read_text())

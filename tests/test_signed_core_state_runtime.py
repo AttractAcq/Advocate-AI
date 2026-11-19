@@ -34,6 +34,7 @@ class SignedCoreStateMountTests(unittest.TestCase):
         options = _core_state_options(self.state, self.credential)
         self.assertIn("SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign", options)
         self.assertIn("SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password", options)
+        self.assertIn("SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl", options)
         self.assertTrue(any("target=/var/lib/sovereign" in item for item in options))
         self.assertTrue(any("target=/run/secrets/lab-password,readonly" in item
                             for item in options))
@@ -55,6 +56,7 @@ class SignedCoreStateMountTests(unittest.TestCase):
         ]
         environment = ["SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
                        "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                       "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                        "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                        "SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads"]
 
@@ -109,6 +111,17 @@ class SignedCoreStateMountTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _core_state_options(self.state, self.credential)
 
+    def test_existing_audit_trail_must_be_private_regular_file(self) -> None:
+        audit = self.state / "audit.jsonl"
+        audit.write_text("synthetic")
+        audit.chmod(0o644)
+        with self.assertRaisesRegex(RuntimeError, "audit trail"):
+            _core_state_options(self.state, self.credential)
+        audit.unlink()
+        audit.symlink_to(self.state / "roles.json")
+        with self.assertRaisesRegex(RuntimeError, "audit trail"):
+            _core_state_options(self.state, self.credential)
+
     def test_emergency_secret_is_separate_owner_only_and_read_only(self) -> None:
         emergency = self.root / "emergency-password"
         emergency.write_text(secrets.token_urlsafe(24) + "\n")
@@ -150,6 +163,7 @@ class SignedCoreStateMountTests(unittest.TestCase):
         ]
         environment = ["SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
                        "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                       "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                        "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                        "SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password"]
         mounted_digest = hashlib.sha256(emergency.read_bytes()).hexdigest()
@@ -196,6 +210,7 @@ class SignedCoreStateMountTests(unittest.TestCase):
         ]
         environment = ["SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
                        "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                       "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                        "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"]
 
         def docker(*args: str, timeout: int = 120) -> str:

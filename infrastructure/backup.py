@@ -125,6 +125,7 @@ def _snapshot(spec: dict[str, object], base: Path, stage: Path, key_path: Path,
                 raise BackupError("SQLite snapshot failed") from exc
         else:
             shutil.copyfile(source, destination)
+        destination.chmod(0o600)
         size = destination.stat().st_size
         total += size
         if size > max_file or total > MAX_TOTAL:

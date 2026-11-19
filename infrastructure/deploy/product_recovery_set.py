@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 from infrastructure.deploy.product_installer import (
     _identifier, _installation_id, _lock, _mount_config, _owner_directory,
-    _state, restore_install_product,
+    _require_audit, _state, restore_install_product,
 )
 from infrastructure.restic_repository import create_snapshot
 from infrastructure.release.bundle import verify_bundle
@@ -152,6 +152,7 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
         runtime = state_record["runtime"]
         _require_stopped(runtime)
         source = _source_file(state)
+        _require_audit(state)
         started = datetime.now(timezone.utc)
         with policy_directory_lock(state / "roles.json", exclusive=True), \
                 quarantine_directory_lock(uploads, exclusive=False):
@@ -163,6 +164,7 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                     {"name": "roles.json", "kind": "file", "source": str(state / "roles.json")},
                     {"name": "manifest.csv", "kind": "file", "source": str(state / "manifest.csv")},
                     {"name": "history.db", "kind": "sqlite", "source": str(state / "history.db")},
+                    {"name": "audit.jsonl", "kind": "file", "source": str(state / "audit.jsonl")},
                     {"name": f"sources/{source.name}", "kind": "file", "source": str(source)},
                 ]}))
                 core = create_snapshot(spec, core_repository, core_password_file,
@@ -241,7 +243,7 @@ def restore_product_recovery_set(receipt: Path, receipt_trusted_key: Path,
         emergency_password_file, enable_uploads=True,
         upload_snapshot_id=str(recovery_set["upload_snapshot_id"]),
         upload_repository=Path(str(recovery_set["upload_repository"])),
-        upload_password_file=upload_password_file)
+        upload_password_file=upload_password_file, require_audit=True)
     return {**restored, "recovery_set": "signed-pair-verified"}
 
 
