@@ -18,7 +18,8 @@ from apps.api.main import Settings, create_app
 from services.knowledge.ingestion import sync_manifest
 from services.knowledge.indexed_retrieval import approved_rows, preview_index, search_index
 from services.knowledge.embedding import build_vectors, vector_search
-from services.knowledge.postgres_index import _connect, initialize_schema
+from services.knowledge.postgres_index import (_connect, initialize_schema,
+                                               verify_knowledge_snapshot)
 
 
 class FakeEmbedder:
@@ -80,6 +81,9 @@ class PostgresKnowledgeTests(unittest.TestCase):
         self.assertIsNone(preview_index(self.root, self.manifest, self.dsn, "deckhand", "ENG-001"))
         self.assertEqual(build_vectors(self.dsn, FakeEmbedder()), 2)
         self.assertEqual(build_vectors(self.dsn, FakeEmbedder()), 0)
+        self.assertEqual(verify_knowledge_snapshot(self.root, self.manifest, self.dsn,
+                                                   expected_model=FakeEmbedder.model),
+                         {"sources": 2, "passages": 2})
         self.assertEqual([hit["document_id"] for hit in vector_search(
             self.root, self.manifest, self.dsn, "engineer", "generator", FakeEmbedder())], ["ENG-001"])
         self.assertEqual(vector_search(self.root, self.manifest, self.dsn,
@@ -114,6 +118,22 @@ class PostgresKnowledgeTests(unittest.TestCase):
             search_index(self.root, self.manifest,
                          "postgresql://postgres:secret@127.0.0.1:55439/postgres",
                          "engineer", "generator inspection")
+
+    def test_snapshot_verifier_rejects_fabricated_passage(self) -> None:
+        with _connect(self.dsn) as db:
+            db.execute("""UPDATE knowledge_passages SET text='fabricated secret'
+                WHERE document_id='ENG-001' AND ordinal=0""")
+        with self.assertRaisesRegex(ValueError, "passage mismatch"):
+            verify_knowledge_snapshot(self.root, self.manifest, self.dsn)
+
+    def test_snapshot_verifier_rejects_missing_vector(self) -> None:
+        build_vectors(self.dsn, FakeEmbedder())
+        with _connect(self.dsn) as db:
+            db.execute("""DELETE FROM knowledge_vectors
+                WHERE document_id='ENG-001' AND ordinal=0""")
+        with self.assertRaisesRegex(ValueError, "vector set mismatch"):
+            verify_knowledge_snapshot(self.root, self.manifest, self.dsn,
+                                      expected_model=FakeEmbedder.model)
 
     def test_core_search_preview_and_chat_use_postgres(self) -> None:
         app = create_app(Settings(fixture_root=self.root,

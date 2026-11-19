@@ -41,10 +41,12 @@ The synthetic Core API can use the same URI together with
 until the approved model is present locally. The tests use a deterministic
 synthetic embedder and do not require a model download.
 
-This is a software candidate, not the Phase 3 target gate. PostgreSQL is not
-yet included in the signed vessel runtime or coordinated full-stack recovery
-set. Index ownership, database credentials, extension migration, backup and
-restore, failure handling, target network isolation, NAS access propagation,
+An [encrypted knowledge recovery rehearsal](../phase-5/pgvector-knowledge-recovery.md)
+now captures the database with its manifest, policy and source bytes and
+checks a clean restore. This is a software candidate, not the Phase 3 target
+gate. PostgreSQL is not yet included in the signed vessel runtime or
+coordinated full-stack recovery set. Index ownership, database credentials,
+extension migration, target backup and restore, failure handling, target network isolation, NAS access propagation,
 semantic quality and independent security review remain open. The current
 vector query uses exact pgvector cosine ranking on policy-filtered candidate
 documents; the exact-term guard still limits semantic recall.
