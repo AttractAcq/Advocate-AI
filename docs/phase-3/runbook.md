@@ -82,6 +82,7 @@ or credential should be placed in this lab.
    SOVEREIGN_KNOWLEDGE_DB=infrastructure/lab/runtime/phase3-knowledge/index.sqlite3 \
    SOVEREIGN_AUDIT_PATH=infrastructure/lab/runtime/phase3-audit/events.jsonl \
    SOVEREIGN_HISTORY_DB=infrastructure/lab/runtime/phase3-history/conversations.sqlite3 \
+   SOVEREIGN_UPLOAD_ROOT="$PWD/infrastructure/lab/runtime/phase3-uploads" \
    SOVEREIGN_OIDC_ISSUER=http://127.0.0.1:18086/realms/sovereign-lab \
    .venv/bin/uvicorn apps.api.main:app --host 127.0.0.1 --port 18100
    ```
@@ -99,6 +100,17 @@ or credential should be placed in this lab.
    Open `http://127.0.0.1:18101/`. The browser uses Keycloak's authorization
    code flow with PKCE. The local container's generated credentials are in
    ignored `infrastructure/lab/runtime/phase3-identity/test-credentials.json`.
+
+   The optional `SOVEREIGN_UPLOAD_ROOT` enables the Console's submission form.
+   It must be an absolute path outside the approved fixture/source tree, with
+   an existing parent writable by the Core service. Core creates a private
+   `0700` directory and stores each submission as a `0600` blob and metadata
+   record. Only the submitting user can list the metadata. Each file is capped
+   at 8 MiB; the area holds at most 100 pending submissions. Submission does
+   not parse, index, approve or expose the file to search or inference. An
+   authorised offline reviewer must inspect it and separately update the
+   approved-source manifest under the vessel's approved process. Until that
+   process is designed and reviewed, use synthetic files only.
 
 6. Run source access and audit tests with `make test`. The indexed search API
    accepts `POST /api/search` with `query`, `mode` (`lexical` or `vector`),

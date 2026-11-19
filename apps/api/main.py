@@ -27,6 +27,8 @@ from services.knowledge.paths import read_source_bytes
 from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows, preview_index, search_index
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
+from services.knowledge.upload_staging import discard_upload, list_uploads, stage_upload
+from services.knowledge.ingestion import MAX_BYTES
 from services.policy.audit import AuditLog, verify as verify_audit
 from services.policy.policy_file import (PolicyUnavailable, load_policy,
                                          policy_directory_lock, read_policy_bytes)
@@ -73,6 +75,7 @@ class Settings:
     model_name: str = "qwen3.5:2b"
     knowledge_manifest: Path | None = None
     knowledge_db: Path | None = None
+    upload_root: Path | None = None
     audit_path: Path | None = None
     oidc_issuer: str | None = None
     embedding_endpoint: str = "http://127.0.0.1:11434"
@@ -96,6 +99,7 @@ class Settings:
             model_name=os.environ.get("SOVEREIGN_MODEL_NAME", cls.model_name),
             knowledge_manifest=Path(os.environ["SOVEREIGN_KNOWLEDGE_MANIFEST"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_MANIFEST") else None,
             knowledge_db=Path(os.environ["SOVEREIGN_KNOWLEDGE_DB"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_DB") else None,
+            upload_root=Path(os.environ["SOVEREIGN_UPLOAD_ROOT"]) if os.environ.get("SOVEREIGN_UPLOAD_ROOT") else None,
             audit_path=Path(os.environ["SOVEREIGN_AUDIT_PATH"]) if os.environ.get("SOVEREIGN_AUDIT_PATH") else None,
             oidc_issuer=os.environ.get("SOVEREIGN_OIDC_ISSUER"),
             embedding_endpoint=os.environ.get("SOVEREIGN_EMBEDDING_ENDPOINT", cls.embedding_endpoint),
@@ -134,6 +138,12 @@ class SearchRequest(BaseModel):
 
 def create_app(settings: Settings | None = None, model: LocalModel | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    if settings.upload_root is not None:
+        if (not settings.upload_root.is_absolute() or settings.upload_root.is_symlink() or
+                settings.upload_root.resolve() == settings.fixture_root.resolve() or
+                settings.fixture_root.resolve() in settings.upload_root.resolve().parents or
+                settings.upload_root.resolve() in settings.fixture_root.resolve().parents):
+            raise ValueError("upload area must be separate from approved sources")
     model = model or LocalModel(settings.inference_endpoint, settings.model_name)
     sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password,
                            settings.history_db, settings.emergency_password_file)
@@ -216,17 +226,19 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     @app.middleware("http")
     async def limit_request_body(request: Request, call_next):
         if request.method in {"POST", "PUT", "PATCH"}:
+            upload = request.url.path == "/api/documents/stage" and request.method == "POST"
+            ceiling = MAX_BYTES if upload else 16 * 1024
             try:
                 declared_length = int(request.headers.get("content-length", "0"))
             except ValueError:
                 return JSONResponse({"detail": "invalid content length"}, status_code=400)
-            if declared_length > 16 * 1024:
+            if declared_length > ceiling:
                 return JSONResponse({"detail": "request body too large"}, status_code=413)
             chunks: list[bytes] = []
             size = 0
             async for chunk in request.stream():
                 size += len(chunk)
-                if size > 16 * 1024:
+                if size > ceiling:
                     return JSONResponse({"detail": "request body too large"}, status_code=413)
                 chunks.append(chunk)
             request._body = b"".join(chunks)
@@ -338,6 +350,39 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     @app.get("/api/models")
     def models(_: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, list[str]]:
         return {"models": [settings.model_name]}
+
+    @app.get("/api/documents/staged")
+    def staged_documents(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
+        if settings.upload_root is None:
+            return {"uploads": [], "enabled": False}
+        try:
+            items = list_uploads(settings.upload_root, identity[1]["id"])
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "upload area unavailable") from exc
+        return {"uploads": items, "enabled": True}
+
+    @app.post("/api/documents/stage", status_code=201)
+    async def stage_document(request: Request, x_filename: str | None = Header(default=None),
+                             identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
+        if settings.upload_root is None:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "upload area unavailable")
+        if request.headers.get("content-type", "").split(";", 1)[0] != "application/octet-stream":
+            raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "binary upload required")
+        if not limiter.allow(f"upload:{identity[1]['id']}", maximum=10):
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "upload rate limit reached")
+        try:
+            revalidate_identity(identity)
+            item = stage_upload(settings.upload_root, identity[1]["id"], x_filename or "", await request.body())
+            try:
+                record_decision(identity[1]["id"], "stage-upload", str(item["id"]), "pending")
+            except Exception:
+                discard_upload(settings.upload_root, str(item["id"]))
+                raise
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "upload area unavailable") from exc
+        return {"upload": item}
 
     @app.get("/api/emergency/status")
     def emergency_status(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
