@@ -69,6 +69,14 @@ when a client bypasses the portal. The API filters customer-linked records and
 audit events before pagination and rejects cross-customer changes and imports.
 Record lookups return the same not-found response for absent and out-of-scope
 codes.
+`GET /api/fleet/overview` counts all visible coded records after full catalog
+and audit verification, then returns at most 100 ranked attention items. It
+flags active licences outside their date window or ending within 30 days,
+overdue planned maintenance, and unresolved P1/P2 tickets. The response
+includes the exact visible attention total; a scoped user sees neither global
+release counts nor another customer's records. These are synthetic review
+prompts and never change stored status. Production alert windows and escalation
+ownership remain B-12.
 Scoped audit pages use a visible-only sequence as their cursor and omit the
 global chain hash, so hidden company activity is not exposed through sequence
 gaps. The catalog still verifies the full chain before projecting a page.
@@ -115,7 +123,9 @@ npm run dev
 The development server listens on `127.0.0.1:18801` and proxies only
 `/api/fleet` to the loopback Fleet API on port 18800. It shows company
 customers, verified release metadata, deployments, licences, coded support
-and maintenance, signed receipt results and audit events. It can create
+and maintenance, signed receipt results and audit events. The overview shows
+the server's exact scope-filtered counts and dated attention queue, rather
+than estimating totals from the first paginated list response. It can create
 strictly structured customer, deployment, licence, ticket and maintenance
 records and use the lab status-transition routes. Release import remains a
 local signed-bundle operation. With `SOVEREIGN_FLEET_TOKEN_FILE`, the portal
