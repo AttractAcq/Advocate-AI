@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { fleetApi } from './api'
-import type { FleetAuthMode, FleetRow } from './api'
+import { fleetApi, parseFleetOverview } from './api'
+import type { FleetAuthMode, FleetOverview, FleetRow, RecordKind } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 import { signedReceiptEnvelope } from './receipt'
 import type { ReceiptInput } from './receipt'
@@ -11,12 +11,6 @@ type Section = 'overview' | 'customers' | 'releases' | 'deployments' |
 type Field = { name: string; label: string; type?: 'date'; options?: string[] }
 type FleetRole = 'fleet_admin' | 'fleet_release_manager' | 'fleet_support' | 'fleet_viewer'
 type Identity = { id: string; role: FleetRole; customer_codes: string[] }
-type RecordKind = 'customer' | 'release' | 'deployment' | 'licence' |
-  'ticket' | 'maintenance' | 'receipt'
-type Overview = { as_of: string; counts: Record<RecordKind, number>;
-  attention_total: number; attention: { kind: RecordKind; code: string;
-    customer_code: string; vessel_code: string; reason: string; due_on: string | null }[] }
-
 const sectionKinds: Partial<Record<Section, RecordKind>> = {
   customers: 'customer', releases: 'release', deployments: 'deployment',
   licences: 'licence', tickets: 'ticket', maintenance: 'maintenance', receipts: 'receipt',
@@ -113,7 +107,7 @@ export default function App() {
   const [entryToken, setEntryToken] = useState('')
   const [section, setSection] = useState<Section>('overview')
   const [rows, setRows] = useState<Record<string, FleetRow[]>>({})
-  const [overview, setOverview] = useState<Overview | null>(null)
+  const [overview, setOverview] = useState<FleetOverview | null>(null)
   const [hasMore, setHasMore] = useState<Record<string, boolean>>({})
   const [form, setForm] = useState<Record<string, string>>({})
   const [receiptForm, setReceiptForm] = useState<ReceiptInput>(emptyReceipt)
@@ -126,13 +120,13 @@ export default function App() {
     setError('')
     try {
       const [summary, entries] = await Promise.all([
-        fleetApi<Overview>('/api/fleet/overview', activeToken, undefined, authMode),
+        fleetApi<unknown>('/api/fleet/overview', activeToken, undefined, authMode),
         Promise.all(sections.filter((item) =>
           item.endpoint && (item.id !== 'audit' || mayReadAudit(role))).map(async (item) =>
           [item.id, await fleetApi<FleetRow[]>(`/api/fleet/${item.endpoint}`, activeToken,
                                        undefined, authMode)] as const)),
       ])
-      setOverview(summary)
+      setOverview(parseFleetOverview(summary))
       setRows(Object.fromEntries(entries))
       setHasMore(Object.fromEntries(entries.map(([id, values]) => [id, values.length === 100])))
     } catch (cause) {

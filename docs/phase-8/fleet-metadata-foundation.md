@@ -125,7 +125,8 @@ The development server listens on `127.0.0.1:18801` and proxies only
 customers, verified release metadata, deployments, licences, coded support
 and maintenance, signed receipt results and audit events. The overview shows
 the server's exact scope-filtered counts and dated attention queue, rather
-than estimating totals from the first paginated list response. It can create
+than estimating totals from the first paginated list response. The portal
+validates the bounded overview response before rendering it. It can create
 strictly structured customer, deployment, licence, ticket and maintenance
 records and use the lab status-transition routes. Release import remains a
 local signed-bundle operation. With `SOVEREIGN_FLEET_TOKEN_FILE`, the portal
