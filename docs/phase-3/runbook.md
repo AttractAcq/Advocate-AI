@@ -31,7 +31,8 @@ or credential should be placed in this lab.
 
    This writes the SQLite index under ignored `infrastructure/lab/runtime/`
    and the per-case report to [evaluation.json](evaluation.json). The index is
-   a Mac simulation; the target PostgreSQL/pgvector service is not deployed.
+   a Mac simulation. A local [PostgreSQL/pgvector index candidate](postgres-pgvector-index.md)
+   can be selected separately; the target service is not deployed.
 
    With the already installed `qwen3.5:2b` served by Ollama on loopback, the
    Core API answer and citation rehearsal is:

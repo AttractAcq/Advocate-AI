@@ -61,8 +61,11 @@ def _unpack(payload: bytes) -> array:
     return vector
 
 
-def build_vectors(database: Path, embedder: Embedder) -> int:
+def build_vectors(database: Path | str, embedder: Embedder) -> int:
     """Embed indexed passages. Source changes delete old vectors transactionally."""
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import build_vectors_pg
+        return build_vectors_pg(database, embedder)
     with sqlite3.connect(database) as db:
         db.execute("PRAGMA foreign_keys=ON")
         db.executescript("""
@@ -88,11 +91,15 @@ def build_vectors(database: Path, embedder: Embedder) -> int:
         return total
 
 
-def vector_search(root: Path, manifest: Path, database: Path, user_id: str, query: str,
+def vector_search(root: Path, manifest: Path, database: Path | str, user_id: str, query: str,
                   embedder: Embedder, *, limit: int = 3,
                   document_ids: set[str] | None = None,
                   collections: set[str] | None = None) -> list[dict[str, object]]:
     """Authorise sources before reading or scoring passage vectors."""
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import vector_search_pg
+        return vector_search_pg(root, manifest, database, user_id, query, embedder,
+                                limit=limit, document_ids=document_ids, collections=collections)
     if not query.strip() or len(query) > 1000 or not 1 <= limit <= 10:
         raise ValueError("invalid vector query")
     wanted = _terms(query)
