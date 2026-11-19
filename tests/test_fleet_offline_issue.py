@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
+import httpx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from apps.fleet.main import FleetSettings, create_app
+from services.fleet.catalog import Customer, Deployment, FleetCatalog, Release
 from services.fleet.offline_import import SignedDeploymentReceipt, verify_signed_receipt
 from services.fleet.offline_issue import issue_receipt
 
@@ -69,6 +75,47 @@ class OfflineIssueTests(unittest.TestCase):
         with self.assertRaises(OSError):
             issue_receipt(alias, self.key_path, self.output)
         self.assertFalse(self.output.exists())
+
+    def test_cli_envelope_imports_through_authenticated_fleet_api(self) -> None:
+        command = subprocess.run(
+            [sys.executable, "-m", "services.fleet.offline_issue",
+             "--record", str(self.record), "--signing-key", str(self.key_path),
+             "--output", str(self.output)],
+            capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(command.stdout)["code"], "RCP-LAB01")
+        database = self.root / "fleet.db"
+        catalog = FleetCatalog(database)
+        catalog.add("release", Release(code="REL-LAB01", version="1.0.0",
+                                       manifest_sha256="a" * 64,
+                                       signing_key_id="b" * 64,
+                                       status="approved"))
+        catalog.add("customer", Customer(code="CUST-LAB01",
+                                         category="owner_manager"))
+        catalog.add("deployment", Deployment(
+            code="VSL-LAB01", customer_code="CUST-LAB01",
+            release_code="REL-LAB01", hardware_profile="pilot_gpu",
+            status="pilot"))
+        token = "synthetic-fleet-admin-token-0123456789"
+        app = create_app(FleetSettings(database, token, self.key.public_key()))
+
+        async def import_envelope():
+            async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://fleet.invalid",
+                    headers={"X-Fleet-Lab-Token": token}) as client:
+                body = json.loads(self.output.read_text())
+                response = await client.post(
+                    "/api/fleet/import/deployment-receipts", json=body)
+                self.assertEqual(response.status_code, 201, response.text)
+                self.assertEqual(response.json()["code"], "RCP-LAB01")
+                audit = (await client.get("/api/fleet/audit")).json()
+                self.assertEqual(audit[-1]["action"],
+                                 "import-signed:" + body["key_id"])
+                replay = await client.post(
+                    "/api/fleet/import/deployment-receipts", json=body)
+                self.assertEqual(replay.status_code, 409)
+
+        asyncio.run(import_envelope())
 
 
 if __name__ == "__main__":
