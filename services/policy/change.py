@@ -99,7 +99,7 @@ def _timestamp(value: object) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _validate_policy(policy: dict[str, object]) -> None:
+def _validate_policy(policy: dict[str, object], *, now: datetime) -> None:
     users = policy.get("users")
     allowed = policy.get("allow")
     rules = policy.get("document_rules", {})
@@ -117,6 +117,13 @@ def _validate_policy(policy: dict[str, object]) -> None:
             raise PolicyChangeError("candidate role policy has unmapped role")
         if "expires_at" in user:
             _timestamp(user["expires_at"])
+        if user["role"] == "emergency_recovery" and status == "active":
+            incident = user.get("emergency_incident")
+            if (not isinstance(incident, str) or
+                    not re.fullmatch(r"INC-[A-Z0-9-]{4,40}", incident) or
+                    "expires_at" not in user or
+                    not now < _timestamp(user["expires_at"]) <= now + timedelta(minutes=60)):
+                raise PolicyChangeError("emergency activation requires incident and short expiry")
     for role, collections in allowed.items():
         if (not isinstance(role, str) or not isinstance(collections, list) or
                 any(not isinstance(collection, str) for collection in collections)):
@@ -166,11 +173,11 @@ def create_proposal(current_path: Path, candidate_path: Path, requester: str,
         raise PolicyChangeError("invalid policy change request")
     current = read_policy_bytes(current_path)
     candidate = _read(candidate_path, MAX_POLICY_BYTES)
-    _validate_policy(parse_policy_bytes(candidate))
     issued = now or datetime.now(timezone.utc)
     if issued.tzinfo is None:
         raise PolicyChangeError("policy change timestamp must be aware")
     issued = issued.astimezone(timezone.utc)
+    _validate_policy(parse_policy_bytes(candidate), now=issued)
     return _canonical({
         "schema": 1, "request_id": secrets.token_hex(16), "requested_by": requester,
         "reason": reason, "issued_at": issued.isoformat(),
@@ -299,7 +306,7 @@ def apply_change(policy_path: Path, candidate_path: Path, proposal_path: Path,
                               trust_raw, proposal["requested_by"])
     old = read_policy_bytes(policy_path)
     candidate = _read(candidate_path, MAX_POLICY_BYTES)
-    _validate_policy(parse_policy_bytes(candidate))
+    _validate_policy(parse_policy_bytes(candidate), now=current_time)
     old_hash = hashlib.sha256(old).hexdigest()
     new_hash = hashlib.sha256(candidate).hexdigest()
     if old_hash != proposal["current_sha256"] or new_hash != proposal["candidate_sha256"]:

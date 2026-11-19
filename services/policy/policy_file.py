@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
+import re
 
 from services.policy.regular_file import read_regular_file
 
@@ -73,7 +74,11 @@ def active_user(policy: dict[str, object], user_id: str, *,
     user = matches[0]
     if user.get("status") != "active" or not isinstance(user.get("role"), str) or not user["role"]:
         return None
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        return None
     expiry = user.get("expires_at")
+    deadline: datetime | None = None
     if expiry is not None:
         if not isinstance(expiry, str):
             return None
@@ -81,6 +86,12 @@ def active_user(policy: dict[str, object], user_id: str, *,
             deadline = datetime.fromisoformat(expiry)
         except ValueError:
             return None
-        if deadline.tzinfo is None or (now or datetime.now(timezone.utc)) >= deadline:
+        if deadline.tzinfo is None or current >= deadline:
+            return None
+    if user["role"] == "emergency_recovery":
+        incident = user.get("emergency_incident")
+        if (deadline is None or deadline - current > timedelta(minutes=60) or
+                not isinstance(incident, str) or
+                not re.fullmatch(r"INC-[A-Z0-9-]{4,40}", incident)):
             return None
     return user

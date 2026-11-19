@@ -67,6 +67,7 @@ def _fixture_root_from_env() -> Path:
 class Settings:
     fixture_root: Path = ROOT / "fixtures"
     lab_password: str | None = None
+    emergency_password_file: Path | None = None
     inference_endpoint: str = "http://127.0.0.1:11434/v1"
     model_name: str = "qwen3.5:2b"
     knowledge_manifest: Path | None = None
@@ -88,6 +89,8 @@ class Settings:
         return cls(
             fixture_root=_fixture_root_from_env(),
             lab_password=_lab_password_from_env(),
+            emergency_password_file=Path(os.environ["SOVEREIGN_EMERGENCY_PASSWORD_FILE"])
+            if os.environ.get("SOVEREIGN_EMERGENCY_PASSWORD_FILE") else None,
             inference_endpoint=os.environ.get("SOVEREIGN_MODEL_ENDPOINT", cls.inference_endpoint),
             model_name=os.environ.get("SOVEREIGN_MODEL_NAME", cls.model_name),
             knowledge_manifest=Path(os.environ["SOVEREIGN_KNOWLEDGE_MANIFEST"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_MANIFEST") else None,
@@ -131,7 +134,8 @@ class SearchRequest(BaseModel):
 def create_app(settings: Settings | None = None, model: LocalModel | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     model = model or LocalModel(settings.inference_endpoint, settings.model_name)
-    sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password, settings.history_db)
+    sessions = LabSessions(settings.fixture_root / "roles.json", settings.lab_password,
+                           settings.history_db, settings.emergency_password_file)
     oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json",
                         revocations_path=settings.oidc_revocations or
                         ROOT / "infrastructure/lab/runtime/phase3-identity/revoked-tokens.jsonl") if settings.oidc_issuer else None
@@ -227,13 +231,16 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             request._body = b"".join(chunks)
         return await call_next(request)
 
-    def current_identity(authorization: str | None = Header(default=None)) -> tuple[str, dict[str, str]]:
+    def current_identity(request: Request, authorization: str | None = Header(default=None)) -> tuple[str, dict[str, str]]:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
         token = authorization[7:]
         user = oidc.user_for(token) if oidc else sessions.user_for(token)
         if not user:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
+        if user["role"] == "emergency_recovery" and request.url.path not in {
+                "/api/me", "/api/logout", "/api/emergency/status"}:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "recovery identity has restricted scope")
         return token, user
 
     def security_identity(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> tuple[str, dict[str, str]]:
@@ -306,6 +313,15 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     @app.get("/api/models")
     def models(_: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, list[str]]:
         return {"models": [settings.model_name]}
+
+    @app.get("/api/emergency/status")
+    def emergency_status(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
+        if identity[1]["role"] != "emergency_recovery":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "recovery scope required")
+        if audit is None:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "recovery audit unavailable")
+        return {"mode": "synthetic-recovery-diagnostics", "audit_records": verify_audit(audit.path)[0],
+                "expires_at": identity[1].get("expires_at"), "document_access": "denied"}
 
     @app.get("/api/tools")
     def tools(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:

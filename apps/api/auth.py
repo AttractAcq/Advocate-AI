@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import deque
+import hashlib
 import json
 import os
 from pathlib import Path
 import secrets
 import sqlite3
+import stat
 from threading import RLock
 import time
 
@@ -30,14 +32,17 @@ class LoginSession:
     user_id: str
     role: str
     expires_at: float
+    credential_hash: str | None = None
 
 
 class LabSessions:
     def __init__(self, roles_path: Path, password: str | None,
-                 history_db: Path | None = None) -> None:
+                 history_db: Path | None = None,
+                 emergency_password_file: Path | None = None) -> None:
         self.roles_path = roles_path
         self.password = password
         self.history_db = history_db
+        self.emergency_password_file = emergency_password_file
         self._tokens: dict[str, LoginSession] = {}
         self._conversations: dict[str, Conversation] = {}
         self._lock = RLock()
@@ -66,17 +71,46 @@ class LabSessions:
             return None
         return active_user(policy, user_id)
 
+    def _emergency_secret(self) -> tuple[str, str] | None:
+        if self.emergency_password_file is None:
+            return None
+        try:
+            descriptor = os.open(self.emergency_password_file,
+                                 os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+            with os.fdopen(descriptor, "rb") as stream:
+                details = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid() or
+                        stat.S_IMODE(details.st_mode) & 0o077 or details.st_size > 4096):
+                    return None
+                raw = stream.read(4097)
+            if len(raw) > 4096:
+                return None
+            value = raw.decode("utf-8").rstrip("\n")
+            if not 16 <= len(value) <= 200 or "\n" in value or "\r" in value:
+                return None
+            return value, hashlib.sha256(raw).hexdigest()
+        except (OSError, UnicodeError, ValueError):
+            return None
+
     def login(self, user_id: str, password: str) -> str | None:
-        if not self.password or len(self.password) < 12:
-            return None
-        if not secrets.compare_digest(password, self.password):
-            return None
         user = self._active_user(user_id)
         if user is None:
             return None
+        credential_hash: str | None = None
+        if user["role"] == "emergency_recovery":
+            emergency = self._emergency_secret()
+            if emergency is None or (self.password and secrets.compare_digest(emergency[0], self.password)):
+                return None
+            if not secrets.compare_digest(password, emergency[0]):
+                return None
+            credential_hash = emergency[1]
+        elif (not self.password or len(self.password) < 12 or
+              not secrets.compare_digest(password, self.password)):
+            return None
         token = secrets.token_urlsafe(32)
         with self._lock:
-            self._tokens[token] = LoginSession(user_id, str(user["role"]), time.time() + 1800)
+            self._tokens[token] = LoginSession(user_id, str(user["role"]), time.time() + 1800,
+                                               credential_hash)
         return token
 
     def user_for(self, token: str) -> dict[str, str] | None:
@@ -89,6 +123,11 @@ class LabSessions:
         if not user or user["role"] != session.role:
             self.logout(token)
             return None
+        if session.role == "emergency_recovery":
+            emergency = self._emergency_secret()
+            if emergency is None or emergency[1] != session.credential_hash:
+                self.logout(token)
+                return None
         return user
 
     def logout(self, token: str) -> None:

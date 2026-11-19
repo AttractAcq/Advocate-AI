@@ -35,7 +35,8 @@ class RolePolicyFileTests(unittest.TestCase):
     def test_duplicate_and_expired_identity_is_never_active(self) -> None:
         now = datetime.now(timezone.utc)
         user = {"id": "fictional-emergency", "role": "emergency_recovery",
-                "status": "active", "expires_at": (now + timedelta(minutes=5)).isoformat()}
+                "status": "active", "expires_at": (now + timedelta(minutes=5)).isoformat(),
+                "emergency_incident": "INC-SYNTH-001"}
         policy = {"users": [user], "allow": {"emergency_recovery": []}}
         self.assertEqual(active_user(policy, user["id"], now=now), user)
         self.assertIsNone(active_user(policy, user["id"], now=now + timedelta(minutes=5)))
