@@ -38,6 +38,55 @@ class SignedCoreStateMountTests(unittest.TestCase):
         self.assertTrue(any("target=/run/secrets/lab-password,readonly" in item
                             for item in options))
 
+    def test_upload_quarantine_mount_and_identity_are_enforced(self) -> None:
+        upload = self.root / "uploads"
+        upload.mkdir(mode=0o700)
+        options = _core_state_options(self.state, self.credential, upload_root=upload)
+        self.assertIn("SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads", options)
+        self.assertTrue(any("target=/var/lib/sovereign-uploads" in item for item in options))
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        mounts = [
+            {"Destination": "/var/lib/sovereign", "Type": "bind",
+             "Source": str(self.state.resolve()), "RW": True},
+            {"Destination": "/run/secrets/lab-password", "Type": "bind",
+             "Source": str(self.credential.resolve()), "RW": False},
+            {"Destination": "/var/lib/sovereign-uploads", "Type": "bind",
+             "Source": str(upload.resolve()), "RW": True},
+        ]
+        environment = ["SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
+                       "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                       "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
+                       "SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads"]
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[-1] == "{{json .Mounts}}":
+                return json.dumps(mounts)
+            if args[-1] == "{{json .Config.Env}}":
+                return json.dumps(environment)
+            if args[-1] == "{{.Config.User}}":
+                return f"{os.getuid()}:{os.getgid()}"
+            raise AssertionError("unexpected Docker inspection")
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            _verify_core_state_runtime(handle, self.state, self.credential,
+                                       upload_root=upload)
+            mounts[2]["RW"] = False
+            with self.assertRaises(RuntimeError):
+                _verify_core_state_runtime(handle, self.state, self.credential,
+                                           upload_root=upload)
+            mounts[2]["RW"] = True
+            environment.pop()
+            with self.assertRaises(RuntimeError):
+                _verify_core_state_runtime(handle, self.state, self.credential,
+                                           upload_root=upload)
+        linked = self.root / "linked-uploads"
+        linked.symlink_to(upload, target_is_directory=True)
+        with self.assertRaises(RuntimeError):
+            _core_state_options(self.state, self.credential, upload_root=linked)
+        with self.assertRaises(RuntimeError):
+            _core_state_options(self.state, self.credential,
+                                upload_root=self.state / "sources")
+
     def test_missing_or_linked_state_and_credential_fail(self) -> None:
         with self.assertRaises(RuntimeError):
             _core_state_options(self.state, None)

@@ -31,6 +31,34 @@ from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
 from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
 
+_UPLOAD_PROBE = r'''
+import hashlib, json, sys, urllib.request
+phase, expected_id = sys.argv[1:3]
+base = "http://127.0.0.1:18100"
+password = open("/run/secrets/lab-password", encoding="utf-8").read().strip()
+body = json.dumps({"user_id":"lab-chief_engineer-1", "password":password}).encode()
+login = urllib.request.Request(base + "/api/login", data=body,
+                               headers={"Content-Type":"application/json"})
+token = json.load(urllib.request.urlopen(login, timeout=5))["access_token"]
+headers = {"Authorization":"Bearer " + token}
+if phase == "stage":
+    payload = b"synthetic product upload boundary"
+    request = urllib.request.Request(base + "/api/documents/stage", data=payload,
+                                     headers={**headers, "Content-Type":"application/octet-stream",
+                                              "X-Filename":"synthetic-note.txt"})
+    item = json.load(urllib.request.urlopen(request, timeout=5))["upload"]
+    expected_id = item["id"]
+    assert item["sha256"] == hashlib.sha256(payload).hexdigest()
+uploads = json.load(urllib.request.urlopen(
+    urllib.request.Request(base + "/api/documents/staged", headers=headers), timeout=5))["uploads"]
+assert len(uploads) == 1 and uploads[0]["id"] == expected_id and uploads[0]["status"] == "pending"
+sources = json.load(urllib.request.urlopen(
+    urllib.request.Request(base + "/api/sources", headers=headers), timeout=5))["sources"]
+assert all(item["document_id"] != "synthetic-note" for item in sources)
+assert len(sources) == (0 if phase == "late" else 1)
+print(json.dumps({"upload_id":expected_id, "status":"pending", "source_count":len(sources)}))
+'''
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -198,7 +226,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     first = restore_install_product(
                         product_bundle, trusted, crane, config, install_root,
                         snapshot_id, repository, backup_password, restic,
-                        restic_sha256, lab_credential, emergency_credential)
+                        restic_sha256, lab_credential, emergency_credential,
+                        enable_uploads=True)
                     state = install_root / "core-state"
                     try:
                         def active_core() -> str:
@@ -206,6 +235,14 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             return str(active["runtime"]["core_id"])
 
                         before = _probe(active_core(), conversation_id, "before")
+                        staged = json.loads(_docker("exec", active_core(), "python", "-c",
+                                                    _UPLOAD_PROBE, "stage", "-"))
+                        staged_id = staged["upload_id"]
+                        if (not isinstance(staged_id, str) or len(staged_id) != 32 or
+                                not (install_root / "product-uploads" / f"{staged_id}.blob").is_file() or
+                                staged["source_count"] != 1):
+                            raise AssertionError("signed Core upload quarantine failed")
+                        result["upload_quarantine"] = "staged-and-not-indexed"
                         old_core = active_core()
                         initial_digest = _sha256(emergency_credential)
                         if _mounted_emergency_digest(old_core) != initial_digest:
@@ -238,6 +275,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         else:
                             raise AssertionError("old Core survived emergency refresh")
                         result["emergency_rotation"] = "atomic-file-rebound"
+                        retained = json.loads(_docker("exec", active_core(), "python", "-c",
+                                                      _UPLOAD_PROBE, "verify", staged_id))
+                        if retained["upload_id"] != staged_id:
+                            raise AssertionError("upload quarantine did not survive runtime refresh")
                         roles = json.loads((state / "roles.json").read_text())
                         roles["allow"]["chief_engineer"] = ["deck"]
                         (state / "roles.json").write_text(json.dumps(roles))
@@ -312,6 +353,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                                 product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("stopped runtime did not recover from staged bundle")
                         _probe(active_core(), conversation_id, "after")
+                        late_upload = json.loads(_docker("exec", active_core(), "python", "-c",
+                                                        _UPLOAD_PROBE, "late", staged_id))
+                        if late_upload["upload_id"] != staged_id:
+                            raise AssertionError("upload quarantine did not survive release recovery")
                         try:
                             _docker("inspect", stopped_runtime.core_id)
                         except subprocess.CalledProcessError:

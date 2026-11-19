@@ -37,9 +37,10 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
 def _core_state_options(state: Path | None, password_file: Path | None,
-                        emergency_file: Path | None = None) -> list[str]:
+                        emergency_file: Path | None = None,
+                        upload_root: Path | None = None) -> list[str]:
     """Validate and mount disposable, restored lab state outside signed images."""
-    if state is None and password_file is None and emergency_file is None:
+    if state is None and password_file is None and emergency_file is None and upload_root is None:
         return []
     if state is None or password_file is None:
         raise RuntimeError("Core state and lab credential must be supplied together")
@@ -72,6 +73,13 @@ def _core_state_options(state: Path | None, password_file: Path | None,
             emergency_file.resolve().is_relative_to(state.resolve()) or
             os.path.samefile(emergency_file, password_file)):
         raise RuntimeError("invalid separate emergency credential")
+    if upload_root is not None and (
+            not upload_root.is_absolute() or upload_root.is_symlink() or
+            not upload_root.is_dir() or upload_root.stat().st_uid != os.getuid() or
+            stat.S_IMODE(upload_root.stat().st_mode) & 0o077 or
+            upload_root.resolve().is_relative_to(state.resolve()) or
+            state.resolve().is_relative_to(upload_root.resolve())):
+        raise RuntimeError("invalid separate upload quarantine")
     options = ["--user", f"{os.getuid()}:{os.getgid()}",
             "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign",
             "--mount", (f"type=bind,source={password_file.resolve()},"
@@ -83,6 +91,10 @@ def _core_state_options(state: Path | None, password_file: Path | None,
         options += ["--mount", (f"type=bind,source={emergency_file.resolve()},"
                                  "target=/run/secrets/emergency-password,readonly"),
                     "-e", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password"]
+    if upload_root is not None:
+        options += ["--mount", (f"type=bind,source={upload_root.resolve()},"
+                                 "target=/var/lib/sovereign-uploads"),
+                    "-e", "SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads"]
     return options
 
 
@@ -299,9 +311,11 @@ def verify_runtime_identity(handle: RuntimeHandle) -> None:
 def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
                                lab_password_file: Path | None,
                                emergency_password_file: Path | None = None,
-                               *, allow_stale_emergency: bool = False) -> None:
+                               *, upload_root: Path | None = None,
+                               allow_stale_emergency: bool = False) -> None:
     """Check that a running Core still uses the installation's declared mounts."""
-    _core_state_options(core_state, lab_password_file, emergency_password_file)
+    _core_state_options(core_state, lab_password_file, emergency_password_file,
+                        upload_root)
     try:
         mounts = json.loads(_docker("inspect", handle.core_id, "--format", "{{json .Mounts}}"))
         environment = json.loads(_docker("inspect", handle.core_id, "--format",
@@ -311,11 +325,12 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
     if not isinstance(mounts, list) or not isinstance(environment, list):
         raise RuntimeError("invalid Core runtime mount metadata")
     targets = {"/var/lib/sovereign", "/run/secrets/lab-password",
-               "/run/secrets/emergency-password"}
+               "/run/secrets/emergency-password", "/var/lib/sovereign-uploads"}
     selected = [item for item in mounts if isinstance(item, dict)
                 and item.get("Destination") in targets]
     prefixes = ("SOVEREIGN_FIXTURE_ROOT=", "SOVEREIGN_HISTORY_DB=",
-                "SOVEREIGN_LAB_PASSWORD_FILE=", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=")
+                "SOVEREIGN_LAB_PASSWORD_FILE=", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=",
+                "SOVEREIGN_UPLOAD_ROOT=")
     relevant = [item for item in environment if isinstance(item, str)
                 and item.startswith(prefixes)]
     if core_state is None:
@@ -327,6 +342,9 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
     if emergency_password_file is not None:
         expected["/run/secrets/emergency-password"] = (
             "bind", str(emergency_password_file.resolve()), False)
+    if upload_root is not None:
+        expected["/var/lib/sovereign-uploads"] = (
+            "bind", str(upload_root.resolve()), True)
     if (len(selected) != len(expected) or
             {item["Destination"]: (item.get("Type"), item.get("Source"), item.get("RW"))
              for item in selected} != expected or
@@ -338,6 +356,8 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
                 "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"}
     if emergency_password_file is not None:
         required.add("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password")
+    if upload_root is not None:
+        required.add("SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads")
     if len(relevant) != len(required) or set(relevant) != required:
         raise RuntimeError("Core state environment mismatch")
     if emergency_password_file is not None and not allow_stale_emergency:
@@ -352,7 +372,8 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
 def probe_runtime(handle: RuntimeHandle, core_state: Path | None = None,
                   lab_password_file: Path | None = None,
                   emergency_password_file: Path | None = None,
-                  *, allow_stale_emergency: bool = False) -> None:
+                  *, upload_root: Path | None = None,
+                  allow_stale_emergency: bool = False) -> None:
     """Fail if the current Core and Console no longer satisfy lab health checks."""
     verify_runtime_identity(handle)
     for identifier in (handle.core_id, handle.console_id):
@@ -360,6 +381,7 @@ def probe_runtime(handle: RuntimeHandle, core_state: Path | None = None,
             raise RuntimeError("synthetic runtime is stopped")
     _verify_core_state_runtime(handle, core_state, lab_password_file,
                                emergency_password_file,
+                               upload_root=upload_root,
                                allow_stale_emergency=allow_stale_emergency)
     _health(handle.core_id)
 
@@ -449,7 +471,8 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
                           installation_id: str | None = None,
                           core_state: Path | None = None,
                           lab_password_file: Path | None = None,
-                          emergency_password_file: Path | None = None) -> RuntimeHandle:
+                          emergency_password_file: Path | None = None,
+                          upload_root: Path | None = None) -> RuntimeHandle:
     """Load exact signed archives, launch two isolated services and check them."""
     manifest = verify_bundle(bundle, trusted_key)
     if manifest["schema"] != 4:
@@ -458,7 +481,7 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
     if installation_id is not None and not re.fullmatch(r"[0-9a-f]{32}", installation_id):
         raise RuntimeError("invalid synthetic installation identifier")
     core_options = _core_state_options(core_state, lab_password_file,
-                                       emergency_password_file)
+                                       emergency_password_file, upload_root)
     images = manifest["images"]
     ids = {role: _image_id(bundle, role, images[role], crane)
            for role in ("core", "console")}
