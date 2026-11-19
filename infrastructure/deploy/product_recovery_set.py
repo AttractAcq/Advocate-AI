@@ -67,7 +67,13 @@ def _require_stopped(runtime: dict[str, str]) -> None:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RecoverySetError("product runtime state unavailable") from exc
         if checked.returncode:
-            if "No such object" not in checked.stderr and "No such container" not in checked.stderr:
+            try:
+                present = subprocess.run(
+                    ["docker", "ps", "-a", "--no-trunc", "--filter", f"id={identifier}",
+                     "--format", "{{.ID}}"], capture_output=True, text=True, timeout=20)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise RecoverySetError("product runtime state unavailable") from exc
+            if present.returncode or present.stdout.strip():
                 raise RecoverySetError("product runtime state unavailable")
         elif checked.stdout.strip() != "false":
             raise RecoverySetError("product runtime must be stopped before backup")

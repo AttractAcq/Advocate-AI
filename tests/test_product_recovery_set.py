@@ -131,9 +131,15 @@ class ProductRecoverySetTests(unittest.TestCase):
                 _require_stopped(runtime)
         with patch("infrastructure.deploy.product_recovery_set.subprocess.run",
                    side_effect=[completed(0, "daemon"),
-                                completed(1, err="No such object"),
+                                completed(1, err="not found"),
+                                completed(0),
                                 completed(0, "false")]):
             _require_stopped(runtime)
+        with patch("infrastructure.deploy.product_recovery_set.subprocess.run",
+                   side_effect=[completed(0, "daemon"), completed(1),
+                                completed(1, err="daemon lost")]):
+            with self.assertRaisesRegex(RecoverySetError, "state unavailable"):
+                _require_stopped(runtime)
 
 
 if __name__ == "__main__":
