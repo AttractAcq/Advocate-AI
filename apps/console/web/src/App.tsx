@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api } from './api'
-import type { AdminStatus, ChatResult, Citation, Identity, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, Turn } from './api'
+import { api, stageDocument } from './api'
+import type { AdminStatus, ChatResult, Citation, Identity, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, StagedUpload, Turn } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 
 type View = 'chat' | 'documents' | 'security' | 'administration'
@@ -22,6 +22,10 @@ export default function App() {
   const [password, setPassword] = useState('')
   const [view, setView] = useState<View>('chat')
   const [sources, setSources] = useState<Source[]>([])
+  const [uploads, setUploads] = useState<StagedUpload[]>([])
+  const [uploadsEnabled, setUploadsEnabled] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadMessage, setUploadMessage] = useState('')
   const [models, setModels] = useState<string[]>([])
   const [selectedSources, setSelectedSources] = useState<string[]>([])
   const [workspace, setWorkspace] = useState('')
@@ -58,16 +62,19 @@ export default function App() {
   ), [sources, workspace, filter])
 
   async function loadSession(bearer: string) {
-      const [me, files, modelList, sessions] = await Promise.all([
+      const [me, files, modelList, sessions, staged] = await Promise.all([
         api<Identity>('/me', bearer),
         api<{ sources: Source[] }>('/sources', bearer),
         api<{ models: string[] }>('/models', bearer),
         api<{ conversation_ids: string[] }>('/conversations', bearer),
+        api<{ uploads: StagedUpload[]; enabled: boolean }>('/documents/staged', bearer),
       ])
       setToken(bearer)
       setIdentity(me)
       setPreview(null)
       setSources(files.sources)
+      setUploads(staged.uploads)
+      setUploadsEnabled(staged.enabled)
       setModels(modelList.models)
       setConversationIds(sessions.conversation_ids)
       setPassword('')
@@ -99,6 +106,9 @@ export default function App() {
     setConversationIds([])
     setTurns([])
     setSources([])
+    setUploads([])
+    setUploadFile(null)
+    setUploadMessage('')
     setSelectedSources([])
     setAdmin(null)
     setIncidents([])
@@ -409,6 +419,16 @@ export default function App() {
             </label>)}
             {visibleSources.length === 0 && <p className="text-sm text-[#5d7380]">No permitted sources match this filter.</p>}
           </div>
+          {uploadsEnabled && <div className="mt-8 border-t border-[#e0e7e5] pt-6">
+            <h3 className="text-lg font-semibold">Submit a document for review</h3>
+            <p className="mt-1 text-sm text-[#5d7380]">PDF, DOCX, XLSX or TXT, up to 8 MB. Submitted files stay private and unavailable to AI search until separately approved.</p>
+            <form className="mt-4 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); if (!token || !uploadFile) return; setPending(true); setUploadMessage(''); void stageDocument(token, uploadFile).then((item) => { setUploads((items) => [item, ...items]); setUploadFile(null); setUploadMessage('Submitted for review. This file is not searchable.'); }).catch((cause) => setUploadMessage(cause instanceof Error ? cause.message : 'Upload failed')).finally(() => setPending(false)) }}>
+              <label className="text-sm font-medium">Document file<input className="field mt-1" type="file" accept=".pdf,.docx,.xlsx,.txt" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} /></label>
+              <button className="primary-button" type="submit" disabled={!uploadFile || pending}>Submit</button>
+            </form>
+            {uploadMessage && <p role="status" className="mt-3 text-sm">{uploadMessage}</p>}
+            {uploads.length > 0 && <ul className="mt-4 space-y-2 text-sm">{uploads.map((item) => <li key={item.id} className="rounded-xl border border-[#e3ebea] p-3">{item.filename} · pending review · {Math.ceil(item.size / 1024)} KB</li>)}</ul>}
+          </div>}
         </section>}
 
         {view === 'security' && identity.role === 'avit_admin' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-7 shadow-sm">
