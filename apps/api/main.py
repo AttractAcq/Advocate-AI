@@ -28,7 +28,8 @@ from services.knowledge.indexed_retrieval import SourceManifestError, approved_r
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
 from services.policy.audit import AuditLog, verify as verify_audit
-from services.policy.policy_file import PolicyUnavailable, load_policy, read_policy_bytes
+from services.policy.policy_file import (PolicyUnavailable, load_policy,
+                                         policy_directory_lock, read_policy_bytes)
 from services.connectors.wazuh import WazuhIndexerReader, WazuhUnavailable, parse_incident_id
 from services.intelligence.assets import AssetRegistry
 from services.intelligence.engine import load_fixture_incidents, safe_incident_analysis, supported_incidents
@@ -230,6 +231,21 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 chunks.append(chunk)
             request._body = b"".join(chunks)
         return await call_next(request)
+
+    @app.middleware("http")
+    async def policy_request_gate(request: Request, call_next):
+        if not (request.url.path.startswith("/api/") or request.url.path == "/health"):
+            return await call_next(request)
+        try:
+            policy_path = settings.fixture_root / "roles.json"
+            with policy_directory_lock(policy_path):
+                if request.url.path == "/health":
+                    read_policy_bytes(policy_path)
+                elif os.path.lexists(policy_path.with_name(policy_path.name + ".pending")):
+                    raise PolicyUnavailable("role policy change is pending")
+                return await call_next(request)
+        except (OSError, PolicyUnavailable):
+            return JSONResponse({"detail": "role policy unavailable"}, status_code=503)
 
     def current_identity(request: Request, authorization: str | None = Header(default=None)) -> tuple[str, dict[str, str]]:
         if not authorization or not authorization.startswith("Bearer "):

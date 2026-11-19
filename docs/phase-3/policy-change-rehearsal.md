@@ -42,9 +42,16 @@ context to the model and again after a model call. A role change or revocation
 at either checkpoint denies the chat or incident-explanation response; a
 discarded chat answer is not stored. The local regression changes the policy
 after retrieval and during model completion. This closes those two observed
-windows, but an external policy writer can still change the file between a
-checkpoint and model dispatch. A full policy-change request drain and target
-storage rehearsal remain open.
+windows. Core also holds a cooperative shared lock on the policy directory
+for each API or health request. The offline change tool creates the pending
+marker first, then waits up to 30 seconds for those requests to finish before
+taking an exclusive directory lock, replacing the file and clearing the marker.
+New requests fail closed while pending or while the writer owns the lock. A
+timeout leaves the marker in place for investigated recovery. The local
+concurrency test verifies that the old policy remains active until an existing
+reader releases its lock. Direct file writers that ignore the lock can still
+bypass this drain; target storage locking and a controlled administrative
+service remain open.
 
 Before vessel use, management must approve the signer roster and access model,
 separate and protect private keys, establish MFA and maintenance quiescence,

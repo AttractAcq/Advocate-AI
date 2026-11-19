@@ -17,7 +17,8 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from services.policy.audit import AuditLog
-from services.policy.policy_file import MAX_POLICY_BYTES, parse_policy_bytes, read_policy_bytes
+from services.policy.policy_file import (MAX_POLICY_BYTES, parse_policy_bytes,
+                                         policy_directory_lock, read_policy_bytes)
 from services.policy.regular_file import read_regular_file
 
 MAX_PROPOSAL_BYTES = 8192
@@ -329,14 +330,15 @@ def apply_change(policy_path: Path, candidate_path: Path, proposal_path: Path,
                  policy_version=old_hash)
     _create_pending(pending_path, pending)
     # A crash after this point leaves Core fail-closed until recover_change runs.
-    if hashlib.sha256(_read(policy_path, MAX_POLICY_BYTES)).hexdigest() != old_hash:
-        raise PolicyChangeError("role policy changed during activation")
-    _replace_policy(policy_path, candidate)
-    audit.append(actor=proposal["requested_by"], action="policy-change-applied",
-                 resource=proposal["request_id"], decision="allow",
-                 policy_version=new_hash)
-    os.unlink(pending_path)
-    _sync_directory(policy_path.parent)
+    with policy_directory_lock(policy_path, exclusive=True):
+        if hashlib.sha256(_read(policy_path, MAX_POLICY_BYTES)).hexdigest() != old_hash:
+            raise PolicyChangeError("role policy changed during activation")
+        _replace_policy(policy_path, candidate)
+        audit.append(actor=proposal["requested_by"], action="policy-change-applied",
+                     resource=proposal["request_id"], decision="allow",
+                     policy_version=new_hash)
+        os.unlink(pending_path)
+        _sync_directory(policy_path.parent)
     return proposal["request_id"]
 
 
@@ -380,10 +382,14 @@ def recover_change(policy_path: Path, audit_path: Path) -> str:
         raise PolicyChangeError("unexpected policy state during recovery")
     audit = AuditLog(audit_path)
     audit.check_clock()
-    _replace_policy(policy_path, old)
-    audit.append(actor="offline-recovery", action="policy-change-recovered",
-                 resource=record["request_id"], decision="rollback",
-                 policy_version=record["old_sha256"])
-    os.unlink(pending_path)
-    _sync_directory(policy_path.parent)
+    with policy_directory_lock(policy_path, exclusive=True):
+        if hashlib.sha256(_read(policy_path, MAX_POLICY_BYTES)).hexdigest() not in {
+                record["old_sha256"], record["new_sha256"]}:
+            raise PolicyChangeError("unexpected policy state during recovery")
+        _replace_policy(policy_path, old)
+        audit.append(actor="offline-recovery", action="policy-change-recovered",
+                     resource=record["request_id"], decision="rollback",
+                     policy_version=record["old_sha256"])
+        os.unlink(pending_path)
+        _sync_directory(policy_path.parent)
     return record["request_id"]

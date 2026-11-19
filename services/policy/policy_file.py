@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
+import time
 
 from services.policy.regular_file import read_regular_file
 
@@ -15,6 +18,31 @@ MAX_POLICY_BYTES = 4 * 1024 * 1024
 
 class PolicyUnavailable(ValueError):
     pass
+
+
+@contextmanager
+def policy_directory_lock(path: Path, *, exclusive: bool = False,
+                          timeout_seconds: float = 30.0):
+    """Cooperative directory-inode lock across Core and the offline writer."""
+    try:
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY |
+                             os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as exc:
+        raise PolicyUnavailable("role policy directory unavailable") from exc
+    try:
+        deadline = time.monotonic() + timeout_seconds
+        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        while True:
+            try:
+                fcntl.flock(descriptor, mode | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                if not exclusive or time.monotonic() >= deadline:
+                    raise PolicyUnavailable("role policy request drain unavailable") from exc
+                time.sleep(0.05)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:

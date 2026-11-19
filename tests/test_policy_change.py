@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -19,7 +20,8 @@ from apps.api.auth import LabSessions
 from services.policy.audit import verify
 from services.policy.change import (PolicyChangeError, apply_change, create_proposal,
                                     recover_change, sign_proposal)
-from services.policy.policy_file import PolicyUnavailable, load_policy
+from services.policy.policy_file import (PolicyUnavailable, load_policy,
+                                         policy_directory_lock, read_policy_bytes)
 
 
 class PolicyChangeTests(unittest.TestCase):
@@ -127,6 +129,37 @@ class PolicyChangeTests(unittest.TestCase):
         self.assertEqual(verify(self.audit)[0], 2)
         with self.assertRaisesRegex(PolicyChangeError, "already recorded"):
             self.apply()
+
+    def test_policy_change_waits_for_existing_request_before_replacement(self) -> None:
+        from services.policy import change
+        created = threading.Event()
+        errors: list[Exception] = []
+        real_create = change._create_pending
+
+        def observed_create(path: Path, payload: bytes) -> None:
+            real_create(path, payload)
+            if path.name == "roles.json.pending":
+                created.set()
+
+        def writer() -> None:
+            try:
+                self.apply()
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=writer)
+        with patch("services.policy.change._create_pending", side_effect=observed_create):
+            with policy_directory_lock(self.policy):
+                thread.start()
+                self.assertTrue(created.wait(10), "writer did not publish pending marker")
+                self.assertTrue(thread.is_alive())
+                self.assertEqual(json.loads(self.policy.read_text()), self.old)
+                with self.assertRaisesRegex(PolicyUnavailable, "pending"):
+                    read_policy_bytes(self.policy)
+            thread.join(timeout=10)
+        self.assertFalse(thread.is_alive(), "policy writer did not finish after drain")
+        self.assertEqual(errors, [])
+        self.assertEqual(load_policy(self.policy), self.new)
 
     def test_offline_cli_requires_owner_only_signer_key(self) -> None:
         proposal = self.root / "cli-proposal.json"
