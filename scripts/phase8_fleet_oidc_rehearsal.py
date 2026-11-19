@@ -59,7 +59,7 @@ def _private(path: Path, value: bytes) -> None:
         os.fsync(stream.fileno())
 
 
-def _identity_material(root: Path) -> tuple[Path, Path, rsa.RSAPrivateKey]:
+def _identity_material(root: Path, kid: str = "fleet-synthetic-https") -> tuple[Path, Path, rsa.RSAPrivateKey]:
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -92,7 +92,7 @@ def _identity_material(root: Path) -> tuple[Path, Path, rsa.RSAPrivateKey]:
                                 critical=False)
                  .sign(ca_key, hashes.SHA256()))
     idp = root / "synthetic-idp"
-    idp.mkdir(mode=0o700)
+    idp.mkdir(mode=0o700, parents=True)
     ca = root / "synthetic-ca.pem"
     _private(ca, ca_cert.public_bytes(serialization.Encoding.PEM))
     _private(idp / "cert.pem", leaf_cert.public_bytes(serialization.Encoding.PEM))
@@ -100,19 +100,58 @@ def _identity_material(root: Path) -> tuple[Path, Path, rsa.RSAPrivateKey]:
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption()))
     jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(signing_key.public_key()))
-    jwk.update(kid="fleet-synthetic-https", alg="RS256", use="sig")
+    jwk.update(kid=kid, alg="RS256", use="sig")
     _private(idp / "jwks.json", json.dumps({"keys": [jwk]}).encode())
     return idp, ca, signing_key
 
 
-def _token(key: rsa.RSAPrivateKey, *, audience: str = "sovereign-fleet") -> str:
+def _token(key: rsa.RSAPrivateKey, *, audience: str = "sovereign-fleet",
+           kid: str = "fleet-synthetic-https") -> str:
     now = int(time.time())
     return jwt.encode({"iss": ISSUER, "aud": audience,
                        "azp": "sovereign-fleet-portal", "typ": "Bearer",
                        "sub": "synthetic-company-admin", "preferred_username": "admin",
                        "realm_access": {"roles": ["fleet_admin"]},
                        "iat": now, "exp": now + 300}, key,
-                      algorithm="RS256", headers={"kid": "fleet-synthetic-https"})
+                      algorithm="RS256", headers={"kid": kid})
+
+
+def _replace_mounted(path: Path, data: bytes) -> None:
+    """Update a synthetic bind-mounted file without changing its inode."""
+    descriptor = os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _expect_token(api_id: str, token: str, allowed: bool) -> None:
+    url = "http://fleet-portal:8080/api/fleet/me"
+    script = ('import json,urllib.error,urllib.request\n'
+              f'r=urllib.request.Request({url!r},headers={{"Authorization":"Bearer {token}"}})\n'
+              'try:\n u=json.load(urllib.request.urlopen(r,timeout=5))\n'
+              'except urllib.error.HTTPError as e:\n'
+              + (' raise AssertionError("valid token denied")\n' if allowed else
+                 ' assert e.code==401\n')
+              + 'else:\n'
+              + (' assert u=={"id":"admin","role":"fleet_admin","customer_codes":["*"]}\n'
+                 if allowed else ' raise AssertionError("stale token accepted")\n'))
+    _run("docker", "exec", api_id, "python", "-c", script)
+
+
+def _restart_ready(container: str, *, api: bool) -> None:
+    _run("docker", "restart", container)
+    probe = ("import urllib.request; "
+             "assert urllib.request.urlopen('http://127.0.0.1:18800/health',timeout=2).status==200"
+             if api else
+             "import socket; socket.create_connection(('127.0.0.1',443),timeout=2).close()")
+    for _ in range(20):
+        ready = subprocess.run(["docker", "exec", container, "python", "-c", probe],
+                               capture_output=True, timeout=5)
+        if ready.returncode == 0:
+            return
+        time.sleep(0.5)
+    raise AssertionError("synthetic identity rotation container did not become ready")
 
 
 def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
@@ -198,20 +237,70 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             handle = FleetRuntime(**state["runtime"])
             if handle.identity_network_name != network:
                 raise AssertionError("OIDC identity network was not retained")
-            url = "http://fleet-portal:8080/api/fleet/me"
             valid = _token(signing_key)
-            script = ('import json,urllib.request\n'
-                      f'r=urllib.request.Request({url!r},headers={{"Authorization":"Bearer {valid}"}})\n'
-                      'u=json.load(urllib.request.urlopen(r,timeout=5))\n'
-                      'assert u=={"id":"admin","role":"fleet_admin","customer_codes":["*"]}')
-            _run("docker", "exec", handle.api_id, "python", "-c", script)
+            _expect_token(handle.api_id, valid, True)
             wrong = _token(signing_key, audience="sovereign-core")
-            deny = ('import urllib.request,urllib.error\n'
-                    f'r=urllib.request.Request({url!r},headers={{"Authorization":"Bearer {wrong}"}})\n'
-                    'try:\n urllib.request.urlopen(r,timeout=5)\n'
-                    'except urllib.error.HTTPError as e:\n assert e.code==401\n'
-                    'else:\n raise AssertionError("wrong audience accepted")')
-            _run("docker", "exec", handle.api_id, "python", "-c", deny)
+            _expect_token(handle.api_id, wrong, False)
+
+            # Simulate the operator's staged trust change on the actual mounted
+            # files. Restarting the API clears its bounded JWKS cache at cutover.
+            next_idp, next_ca, next_signing = _identity_material(
+                root / "next-identity", "fleet-synthetic-next")
+            installed_ca = install_root / "identity" / "ca.pem"
+            old_ca = ca.read_bytes()
+            new_ca = next_ca.read_bytes()
+            next_jwk = json.loads((next_idp / "jwks.json").read_text())["keys"][0]
+            old_jwk = json.loads((idp / "jwks.json").read_text())["keys"][0]
+            rotated = _token(next_signing, kid="fleet-synthetic-next")
+
+            _replace_mounted(installed_ca, new_ca)
+            _restart_ready(handle.api_id, api=True)
+            try:
+                fleet_status(install_root, trusted)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("untrusted CA rotation remained healthy")
+            _replace_mounted(installed_ca, old_ca)
+            _restart_ready(handle.api_id, api=True)
+            if fleet_status(install_root, trusted)["result"] != "healthy":
+                raise AssertionError("failed CA rotation did not recover")
+            _expect_token(handle.api_id, valid, True)
+
+            _replace_mounted(installed_ca, old_ca + new_ca)
+            _restart_ready(handle.api_id, api=True)
+            if fleet_status(install_root, trusted)["result"] != "healthy":
+                raise AssertionError("CA overlap denied old issuer")
+            _replace_mounted(idp / "jwks.json", json.dumps({"keys": [old_jwk, next_jwk]}).encode())
+            _expect_token(handle.api_id, rotated, True)
+            _expect_token(handle.api_id, valid, True)
+            _replace_mounted(idp / "cert.pem", (next_idp / "cert.pem").read_bytes())
+            _replace_mounted(idp / "key.pem", (next_idp / "key.pem").read_bytes())
+            _restart_ready(server, api=False)
+            if fleet_status(install_root, trusted)["result"] != "healthy":
+                raise AssertionError("CA overlap denied new issuer")
+            _expect_token(handle.api_id, rotated, True)
+
+            _replace_mounted(idp / "jwks.json", json.dumps({"keys": [next_jwk]}).encode())
+            _replace_mounted(installed_ca, new_ca)
+            _restart_ready(handle.api_id, api=True)
+            if fleet_status(install_root, trusted)["result"] != "healthy":
+                raise AssertionError("new trust did not survive cutover")
+            _expect_token(handle.api_id, rotated, True)
+            _expect_token(handle.api_id, valid, False)
+            _replace_mounted(installed_ca, old_ca)
+            _restart_ready(handle.api_id, api=True)
+            try:
+                fleet_status(install_root, trusted)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("stale CA trusted new issuer")
+            _replace_mounted(installed_ca, new_ca)
+            _restart_ready(handle.api_id, api=True)
+            if fleet_status(install_root, trusted)["result"] != "healthy":
+                raise AssertionError("stale CA recovery failed")
+            _expect_token(handle.api_id, rotated, True)
             _run("docker", "stop", server)
             try:
                 fleet_status(install_root, trusted)
@@ -220,7 +309,8 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             else:
                 raise AssertionError("Fleet status passed without its identity provider")
             return {"oidc_runtime": "synthetic-https-token-authorized",
-                    "wrong_audience": "denied", "idp_outage": "status-failed-closed"}
+                    "wrong_audience": "denied", "idp_outage": "status-failed-closed",
+                    "trust_rotation": "overlap-cutover-stale-trust-and-recovery"}
         finally:
             state_file = install_root / "fleet-state.json"
             if state_file.exists():

@@ -5,7 +5,7 @@ RUN npm ci --ignore-scripts
 COPY apps/fleet/web/ ./
 RUN npm run build
 
-FROM docker.io/library/nginx:1.30.6-alpine-slim@sha256:e2355aa95529a7999dad94ddcb45a8768abf6fb0b204c93b1a3ffce477d7b893
+FROM docker.io/library/nginx:1.30.7-alpine-slim@sha256:b6c9aa217a1a855d53b0fb502a9a19f356404584e0bd1fc3d62a989e8dfcb6ca
 COPY infrastructure/containers/fleet-nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /workspace/dist /srv
 USER 10001:10001

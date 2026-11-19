@@ -103,6 +103,14 @@ The actual-image CI release rehearsal also creates a temporary private CA and
 HTTPS JWKS service on a labelled internal identity network. It installs the
 same signed Fleet images in OIDC mode, checks a signed Fleet-audience token,
 rejects a Core-audience token, and confirms status fails when the IdP stops.
+The synthetic rotation rehearsal first proves that replacing the installed CA
+before the IdP changes fails closed and recovers when the old trust is restored.
+It then overlaps old and new CA certificates and JWKS signing keys, verifies
+both tokens, switches the IdP certificate, removes the old trust, restarts the
+API to clear its five-minute JWKS cache, and verifies that the old token and
+old CA are rejected. The test directly updates temporary bind-mounted files;
+it is evidence for a rotation sequence, not an operator-facing production
+rotation command or an approved company trust policy.
 The synthetic runner maps that temporary IdP hostname to its private network
 address because the hosted Linux Docker runner does not resolve its network
 alias from the two-network API container. This mapping is confined to the
