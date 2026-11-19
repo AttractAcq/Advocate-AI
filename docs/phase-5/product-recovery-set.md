@@ -8,7 +8,9 @@ policy and upload directory locks throughout capture. The snapshots use
 separate encrypted restic repositories. The command writes a private Ed25519
 signed receipt containing both exact snapshot IDs, repositories, installation
 and release IDs, runtime IDs, and the UTC capture window. `verify` checks the
-signature and payload before an operator selects the pair for restore.
+signature and payload. `restore` checks the signed receipt and the product
+bundle's release identity, then passes exactly those snapshot IDs and
+repositories to the clean installer.
 
 The actual-image CI rehearsal verifies the receipt and restores that pair into
 a clean second signed product installation. A failed second snapshot leaves no

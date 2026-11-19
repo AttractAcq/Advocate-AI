@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.product_recovery_set import (
     RecoverySetError, _require_stopped, create_product_recovery_set,
-    verify_product_recovery_set,
+    restore_product_recovery_set, verify_product_recovery_set,
 )
 from services.knowledge.upload_staging import stage_upload
 
@@ -140,6 +140,37 @@ class ProductRecoverySetTests(unittest.TestCase):
                                 completed(1, err="daemon lost")]):
             with self.assertRaisesRegex(RecoverySetError, "state unavailable"):
                 _require_stopped(runtime)
+
+    def test_restore_uses_only_signed_pair_and_matching_release(self) -> None:
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot",
+                   return_value={"snapshot_id": "1" * 64}), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            self._create()
+        args = (self.receipt, self.public_key, self.base / "bundle",
+                self.public_key, self.base / "crane", self.base / "config",
+                self.base / "fresh-install", self.base / "core-password",
+                self.base / "upload-password", self.base / "restic",
+                "e" * 64, self.base / "lab-password")
+        with patch("infrastructure.deploy.product_recovery_set.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_recovery_set._identifier",
+                   return_value="f" * 24), \
+             patch("infrastructure.deploy.product_recovery_set.restore_install_product") as install:
+            with self.assertRaisesRegex(RecoverySetError, "does not match"):
+                restore_product_recovery_set(*args)
+            install.assert_not_called()
+        with patch("infrastructure.deploy.product_recovery_set.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_recovery_set._identifier",
+                   return_value="a" * 24), \
+             patch("infrastructure.deploy.product_recovery_set.restore_install_product",
+                   return_value={"active": "a" * 24}) as install:
+            result = restore_product_recovery_set(*args)
+            self.assertEqual(result["recovery_set"], "signed-pair-verified")
+            self.assertEqual(install.call_args.args[5], "1" * 64)
+            self.assertEqual(install.call_args.kwargs["upload_snapshot_id"], "2" * 64)
 
 
 if __name__ == "__main__":
