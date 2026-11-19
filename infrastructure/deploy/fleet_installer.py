@@ -18,7 +18,7 @@ import tempfile
 from cryptography import x509
 
 from infrastructure.deploy.fleet_runtime import (
-    FleetRuntime, RuntimeError as FleetRuntimeError, probe_runtime,
+    FleetRuntime, RuntimeError as FleetRuntimeError, _import_trust, probe_runtime,
     start_verified_bundle, stop_runtime, validate_config, validate_state,
     verify_runtime_identity,
 )
@@ -258,6 +258,23 @@ def _provision_identity(root: Path, issuer: str | None,
     validate_state(state, issuer)
 
 
+def _provision_receipt_trust(root: Path, source: Path | None) -> None:
+    if source is None:
+        return
+    target = root / "receipt-import"
+    if (target.exists() or target.is_symlink() or not source.is_absolute() or
+            source.is_symlink() or not source.is_dir() or
+            source.stat().st_uid != os.getuid() or
+            stat.S_IMODE(source.stat().st_mode) & 0o077):
+        raise FleetInstallError("invalid or already provisioned Fleet receipt trust")
+    try:
+        shutil.copytree(source, target, symlinks=True)
+        _import_trust(root / "state")
+    except Exception:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+
+
 def _activate(root: Path, identifier: str, stage: Path,
               trusted_key: Path, crane: Path,
               identity_network: str | None = None) -> dict[str, object]:
@@ -293,7 +310,8 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
                   token_file: Path | None = None,
                   roles_file: Path | None = None,
                   identity_network: str | None = None,
-                  ca_file: Path | None = None) -> dict[str, object]:
+                  ca_file: Path | None = None,
+                  receipt_trust_dir: Path | None = None) -> dict[str, object]:
     _owner_directory(root, create=True)
     with _lock(root):
         if _read_ca_journal(root) is not None:
@@ -304,6 +322,7 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
             identity_network = _handle(current).identity_network_name
         if (issuer is None) != (identity_network is None):
             raise FleetInstallError("Fleet identity mode requires matching network")
+        _provision_receipt_trust(root, receipt_trust_dir)
         _provision_identity(root, issuer, token_file, roles_file, ca_file)
         identifier, stage = _stage(root, bundle, config, trusted_key)
         return _activate(root, identifier, stage, trusted_key, crane, identity_network)
@@ -314,7 +333,8 @@ def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
                           archive: Path, backup_key: Path,
                           roles_file: Path | None = None,
                           identity_network: str | None = None,
-                          ca_file: Path | None = None) -> dict[str, object]:
+                          ca_file: Path | None = None,
+                          receipt_trust_dir: Path | None = None) -> dict[str, object]:
     """Clean-restore the audited Fleet database before signed activation."""
     if not root.is_absolute() or root.exists() or root.is_symlink():
         raise FleetInstallError("Fleet restore-install requires a new absolute root")
@@ -323,7 +343,8 @@ def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
     try:
         restored = restore_fleet(archive, backup_key, root / "state")
         installed = install_fleet(bundle, trusted_key, crane, config, root,
-                                  token_file, roles_file, identity_network, ca_file)
+                                  token_file, roles_file, identity_network, ca_file,
+                                  receipt_trust_dir)
         return {**installed, "restored_files": restored["files"]}
     except Exception:
         if not (root / "fleet-state.json").exists() and not root.is_symlink():
@@ -604,6 +625,7 @@ def main() -> None:
             command.add_argument("--roles-file", type=Path)
             command.add_argument("--identity-network")
             command.add_argument("--ca-file", type=Path)
+            command.add_argument("--receipt-trust-dir", type=Path)
         if name == "restore-install":
             command.add_argument("--archive", required=True, type=Path)
             command.add_argument("--backup-key", required=True, type=Path)
@@ -614,14 +636,16 @@ def main() -> None:
         if args.command == "install":
             result = install_fleet(args.bundle, args.trusted_key, args.crane,
                                    args.config, args.root, args.token_file,
-                                   args.roles_file, args.identity_network, args.ca_file)
+                                   args.roles_file, args.identity_network, args.ca_file,
+                                   args.receipt_trust_dir)
         elif args.command == "restore-install":
             if (args.token_file is None) == (args.roles_file is None):
                 raise FleetInstallError("Fleet restore-install requires one identity source")
             result = restore_install_fleet(args.bundle, args.trusted_key, args.crane,
                                            args.config, args.root, args.token_file,
                                            args.archive, args.backup_key,
-                                           args.roles_file, args.identity_network, args.ca_file)
+                                           args.roles_file, args.identity_network, args.ca_file,
+                                           args.receipt_trust_dir)
         elif args.command == "status":
             result = fleet_status(args.root, args.trusted_key)
         elif args.command == "rotate-ca":

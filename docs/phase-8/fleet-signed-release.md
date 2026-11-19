@@ -53,7 +53,8 @@ lab token source. Later updates reuse the installed token and database:
 .venv/bin/python -m infrastructure.deploy.fleet_installer install \
   --bundle /path/to/signed-fleet-bundle --trusted-key /protected/fleet-trust-key.pem \
   --crane /path/to/pinned/crane --config /path/to/fleet-config.json \
-  --root /private/fleet-install --token-file /protected/fleet-lab-token
+  --root /private/fleet-install --token-file /protected/fleet-lab-token \
+  --receipt-trust-dir /protected/receipt-issuers
 .venv/bin/python -m infrastructure.deploy.fleet_installer status \
   --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem
 .venv/bin/python -m infrastructure.deploy.fleet_installer rollback \
@@ -64,6 +65,21 @@ lab token source. Later updates reuse the installed token and database:
 The local runtime publishes no host port. The CI image rehearsal uses the
 no-issuer lab configuration and exercises install, rejected candidate, update,
 rollback and recovery only when both images pass intake.
+
+To enable signed offline receipt import on an installed Fleet API, prepare an
+owner-only `--receipt-trust-dir` before the first install or a clean
+`restore-install`. It must contain only `trusted-issuers.json` and one to four
+owner-only Ed25519 public PEM files named `issuer-1.pem` through
+`issuer-N.pem`. The JSON array must list their container paths in that order,
+for example `["/etc/fleet-import/issuer-1.pem", "/etc/fleet-import/issuer-2.pem"]`.
+The installer copies and validates this directory under its private root.
+The API container sees it at `/etc/fleet-import` through a read-only bind
+mount, and runtime identity checks reject mount or environment drift. The
+private signing keys stay on the offline issuer workstation. Receipt trust is
+outside the encrypted Fleet catalog backup, so supply the approved trust
+directory again during a clean restore. Trust changes to a running installation
+need a separate controlled rotation operation; changing installed files in
+place is rejected by the runtime identity check.
 
 The OIDC runtime candidate accepts a company HTTPS issuer in
 `fleet-config.json`. Before installation, a company administrator provisions a
