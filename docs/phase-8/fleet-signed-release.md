@@ -81,6 +81,10 @@ outside the encrypted Fleet catalog backup, so supply the approved trust
 directory again during a clean restore. Trust changes to a running installation
 need a separate controlled rotation operation; changing installed files in
 place is rejected by the runtime identity check.
+The signed Fleet image CI rehearsal now provisions a fictional issuer,
+submits its CLI-signed coded receipt through the running API container, and
+checks that the receipt survives encrypted catalog restore with separately
+reprovisioned trust. This remains a synthetic offline handoff rehearsal.
 
 The OIDC runtime candidate accepts a company HTTPS issuer in
 `fleet-config.json`. Before installation, a company administrator provisions a

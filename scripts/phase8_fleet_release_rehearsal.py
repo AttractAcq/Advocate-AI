@@ -22,7 +22,8 @@ from infrastructure.deploy.fleet_installer import (
 from infrastructure.deploy.fleet_runtime import FleetRuntime, stop_runtime
 from infrastructure.deploy.fleet_backup import backup_fleet
 from infrastructure.backup import generate_key
-from services.fleet.catalog import Customer, FleetCatalog
+from services.fleet.catalog import Customer, Deployment, FleetCatalog, Release
+from services.fleet.offline_issue import issue_receipt
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -35,6 +36,22 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _post_receipt(api_id: str, envelope: Path) -> None:
+    script = (
+        'import sys, urllib.request\n'
+        'token=open("/state/token").read().strip()\n'
+        'request=urllib.request.Request('
+        '"http://127.0.0.1:18800/api/fleet/import/deployment-receipts",'
+        'data=sys.stdin.buffer.read(),method="POST",'
+        'headers={"Content-Type":"application/json","X-Fleet-Lab-Token":token})\n'
+        'print(urllib.request.urlopen(request,timeout=10).status)\n')
+    response = subprocess.run(["docker", "exec", "-i", api_id, "python", "-c", script],
+                              input=envelope.read_bytes(), capture_output=True,
+                              check=True, timeout=30)
+    if response.stdout.strip() != b"201":
+        raise AssertionError("signed Fleet receipt was not imported")
 
 
 def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
@@ -128,13 +145,56 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 token = root / "fleet-token"
                 token.write_text("synthetic-fleet-admin-token-0123456789\n")
                 token.chmod(0o600)
+                issuer_key = Ed25519PrivateKey.generate()
+                issuer_private = root / "receipt-issuer-private.pem"
+                issuer_private.write_bytes(issuer_key.private_bytes(
+                    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption()))
+                issuer_private.chmod(0o600)
+                receipt_trust = root / "receipt-trust"
+                receipt_trust.mkdir(mode=0o700)
+                issuer_public = receipt_trust / "issuer-1.pem"
+                issuer_public.write_bytes(issuer_key.public_key().public_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PublicFormat.SubjectPublicKeyInfo))
+                issuer_public.chmod(0o600)
+                issuer_manifest = receipt_trust / "trusted-issuers.json"
+                issuer_manifest.write_text('["/etc/fleet-import/issuer-1.pem"]')
+                issuer_manifest.chmod(0o600)
                 install_root = root / "fleet-install"
                 active_runtime: FleetRuntime | None = None
                 try:
                     first = install_fleet(bundle, trusted, crane, config,
-                                          install_root, token)
+                                          install_root, token,
+                                          receipt_trust_dir=receipt_trust)
                     if fleet_status(install_root, trusted)["active"] != first["active"]:
                         raise AssertionError("Fleet first install is not healthy")
+                    catalog = FleetCatalog(install_root / "state" / "fleet.db")
+                    catalog.add("release", Release(
+                        code="REL-LAB01", version="1.0.0",
+                        manifest_sha256="a" * 64, signing_key_id="b" * 64,
+                        status="approved"))
+                    catalog.add("customer", Customer(code="CUST-LAB1",
+                                                     category="owner_manager"))
+                    catalog.add("deployment", Deployment(
+                        code="VSL-LAB01", customer_code="CUST-LAB1",
+                        release_code="REL-LAB01", hardware_profile="pilot_gpu",
+                        status="pilot"))
+                    receipt_record = root / "receipt-record.json"
+                    receipt_record.write_text(json.dumps({
+                        "code": "RCP-LAB01", "vessel_code": "VSL-LAB01",
+                        "release_code": "REL-LAB01",
+                        "source": "approved_offline_admin",
+                        "observed_on": "2026-11-19", "health": "healthy"}))
+                    receipt_record.chmod(0o600)
+                    envelope = root / "signed-receipt.json"
+                    issue_receipt(receipt_record, issuer_private, envelope)
+                    first_runtime = json.loads(
+                        (install_root / "fleet-state.json").read_text())["runtime"]
+                    _post_receipt(first_runtime["api_id"], envelope)
+                    if [row["code"] for row in catalog.list("receipt")] != ["RCP-LAB01"]:
+                        raise AssertionError("signed receipt is missing from Fleet catalog")
+                    result["receipt_import"] = "signed-image-authorized"
                     try:
                         install_fleet(root / "missing-bundle", trusted, crane,
                                       config, install_root)
@@ -172,9 +232,6 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                             status["active"] != first["active"]):
                         raise AssertionError("Fleet stopped portal did not recover")
                     result["recovery"] = "signed-release-restarted"
-                    catalog = FleetCatalog(install_root / "state" / "fleet.db")
-                    catalog.add("customer", Customer(code="CUST-LAB1",
-                                                     category="owner_manager"))
                     backup_key = root / "fleet-backup.key"
                     generate_key(backup_key)
                     archive = root / "fleet-backup.svb"
@@ -184,14 +241,19 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     try:
                         restored = restore_install_fleet(
                             bundle, trusted, crane, config, restored_root,
-                            token, archive, backup_key)
+                            token, archive, backup_key,
+                            receipt_trust_dir=receipt_trust)
                         rows = FleetCatalog(restored_root / "state" / "fleet.db").list(
                             "customer")
                         if (restored["restored_files"] != 1 or
                                 [row["code"] for row in rows] != ["CUST-LAB1"] or
+                                [row["code"] for row in FleetCatalog(
+                                    restored_root / "state" / "fleet.db").list(
+                                        "receipt")] != ["RCP-LAB01"] or
                                 fleet_status(restored_root, trusted)["result"] != "healthy"):
                             raise AssertionError("Fleet restored catalog is not healthy")
                         result["encrypted_recovery"] = "fictional-customer-restored"
+                        result["receipt_restore"] = "signed-receipt-and-trust-reprovisioned"
                     finally:
                         restored_state = restored_root / "fleet-state.json"
                         if restored_state.exists():
