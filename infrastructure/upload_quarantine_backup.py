@@ -13,7 +13,7 @@ import stat
 import tempfile
 import zipfile
 
-from infrastructure.restic_repository import create_snapshot, restore_snapshot
+from infrastructure.restic_repository import MANIFEST, create_snapshot, restore_snapshot
 from services.knowledge.upload_staging import MAX_PENDING
 
 _ID = re.compile(r"[0-9a-f]{32}\Z")
@@ -186,7 +186,7 @@ def restore_upload_snapshot(snapshot_id: str, repository: Path, password_file: P
         restored = Path(temporary) / "restored"
         result = restore_snapshot(snapshot_id, repository, password_file, restic,
                                   restic_sha256, restored)
-        if set(os.listdir(restored)) != {ARCHIVE} or result["files"] != 1:
+        if set(os.listdir(restored)) != {ARCHIVE, MANIFEST} or result["files"] != 1:
             raise UploadBackupError("not an upload quarantine snapshot")
         count = _extract_archive(restored / ARCHIVE, destination)
     return {"status": "restored", "snapshot_id": snapshot_id, "quarantine_files": count}

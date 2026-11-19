@@ -100,6 +100,25 @@ class UploadQuarantineBackupTests(unittest.TestCase):
                     destination)
         self.assertFalse(destination.exists())
 
+    def test_restore_accepts_restic_manifest_only_alongside_archive(self) -> None:
+        files, rows = _read_inventory(self.uploads)
+
+        def fake_restore(snapshot: str, repository: Path, password: Path,
+                         restic: Path, digest: str, target: Path) -> dict[str, object]:
+            target.mkdir()
+            _write_archive(target / "upload-quarantine.zip", files, rows)
+            (target / "sovereign-snapshot-manifest.json").write_text("checked by adapter")
+            return {"files": 1}
+
+        destination = self.root / "restored"
+        with patch("infrastructure.upload_quarantine_backup.restore_snapshot",
+                   side_effect=fake_restore):
+            result = restore_upload_snapshot("a" * 64, self.root / "repo",
+                self.root / "password", self.root / "restic", "b" * 64,
+                destination)
+        self.assertEqual(result["quarantine_files"], 2)
+        self.assertEqual(_read_inventory(destination), (files, rows))
+
 
 if __name__ == "__main__":
     unittest.main()
