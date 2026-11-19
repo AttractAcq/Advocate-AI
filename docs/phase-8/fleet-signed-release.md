@@ -75,8 +75,8 @@ for example `["/etc/fleet-import/issuer-1.pem", "/etc/fleet-import/issuer-2.pem"
 The installer copies and validates this directory under its private root.
 The API container sees it at `/etc/fleet-import` through a read-only bind
 mount, and runtime identity checks reject mount, environment or public-key
-content drift. The
-private signing keys stay on the offline issuer workstation. Receipt trust is
+content drift. The private signing keys stay on the offline issuer
+workstation. Receipt trust is
 outside the encrypted Fleet catalog backup, so supply the approved trust
 directory again during a clean restore. Trust changes to a running installation
 use `rotate-receipt-trust` with a new approved directory. The command copies
@@ -100,6 +100,7 @@ only the new public key. Keep each source directory owner-only and separate
 from the installed trust directory. This local operation does not establish
 company issuer approval, revocation timing, protected media or target-host
 reboot recovery; those remain B-12.
+
 The signed-image CI rehearsal now attempts both rotations against actual
 Fleet containers. It imports receipts from both issuers during overlap,
 rejects an old-issuer receipt after retirement, then checks update, rollback,
@@ -108,6 +109,14 @@ The signed Fleet image CI rehearsal now provisions a fictional issuer,
 submits its CLI-signed coded receipt through the running API container, and
 checks that the receipt survives encrypted catalog restore with separately
 reprovisioned trust. This remains a synthetic offline handoff rehearsal.
+
+The OIDC signed-image rehearsal also installs the same receipt trust in the
+company identity mode. It submits a CLI-signed receipt to the running Fleet
+API with a signed company administrator token, rejects a wrong-audience token,
+and checks that the receipt is stored. A local scoped-role test additionally
+denies support users, foreign-customer imports, unknown issuers and replay.
+These tests use fictional company identities and do not close B-12 identity
+or offline handoff governance.
 
 The OIDC runtime candidate accepts a company HTTPS issuer in
 `fleet-config.json`. Before installation, a company administrator provisions a
