@@ -37,7 +37,7 @@ def _metadata(root: Path, name: str) -> dict[str, object]:
             raise ValueError("invalid upload record")
         with os.fdopen(fd, "rb", closefd=False) as stream:
             value = json.loads(stream.read(2049))
-        if not isinstance(value, dict) or value.get("status") != "pending":
+        if not isinstance(value, dict) or value.get("status") not in {"pending", "approved"}:
             raise ValueError("invalid upload record")
         return value
     finally:
@@ -58,7 +58,8 @@ def stage_upload(root: Path, actor: str, filename: str, payload: bytes) -> dict[
         raise ValueError("invalid upload size")
     _directory(root)
     with _LOCK:
-        if sum(bool(re.fullmatch(r"[0-9a-f]{32}\.json", name)) for name in os.listdir(root)) >= MAX_PENDING:
+        if sum(_metadata(root, name).get("status") == "pending" for name in os.listdir(root)
+               if re.fullmatch(r"[0-9a-f]{32}\.json", name)) >= MAX_PENDING:
             raise ValueError("upload area is full")
         identifier = uuid4().hex
         record: dict[str, object] = {
