@@ -1,5 +1,6 @@
 """Fail closed before Docker receives untrusted restored-state mount paths."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -102,8 +103,11 @@ class SignedCoreStateMountTests(unittest.TestCase):
                        "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                        "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                        "SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password"]
+        mounted_digest = hashlib.sha256(emergency.read_bytes()).hexdigest()
 
         def docker(*args: str, timeout: int = 120) -> str:
+            if args[0] == "exec":
+                return mounted_digest
             if args[-1] == "{{json .Mounts}}":
                 return json.dumps(mounts)
             if args[-1] == "{{json .Config.Env}}":
@@ -121,6 +125,17 @@ class SignedCoreStateMountTests(unittest.TestCase):
             environment.pop()
             with self.assertRaises(RuntimeError):
                 _verify_core_state_runtime(handle, self.state, self.credential, emergency)
+            environment.append("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password")
+            replacement = self.root / "replacement"
+            replacement.write_text(secrets.token_urlsafe(24) + "\n")
+            replacement.chmod(0o600)
+            replacement.replace(emergency)
+            with self.assertRaisesRegex(RuntimeError, "stale"):
+                _verify_core_state_runtime(handle, self.state, self.credential, emergency)
+            _verify_core_state_runtime(handle, self.state, self.credential, emergency,
+                                       allow_stale_emergency=True)
+            mounted_digest = hashlib.sha256(emergency.read_bytes()).hexdigest()
+            _verify_core_state_runtime(handle, self.state, self.credential, emergency)
 
     def test_runtime_mount_identity_catches_replaced_state(self) -> None:
         handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
