@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import base64
+import ast
 import unittest
 
-from scripts.phase8_fleet_keycloak_rehearsal import _realm, _totp
+from scripts.phase8_fleet_keycloak_rehearsal import _ADMIN_ROTATE, _realm, _totp
 
 
 class FleetKeycloakMfaTests(unittest.TestCase):
@@ -21,6 +22,13 @@ class FleetKeycloakMfaTests(unittest.TestCase):
         self.assertEqual(normal["users"][0]["requiredActions"], [])
         self.assertEqual(protected["users"][0]["requiredActions"], ["CONFIGURE_TOTP"])
         self.assertEqual(protected["otpPolicyType"], "totp")
+
+    def test_keycloak_admin_rotation_probe_is_valid_python(self) -> None:
+        script = _ADMIN_ROTATE
+        for marker in ("__ISSUER__", "__PASSWORD__", "__ACTION__",
+                       "__OLD_KID__", "__OLD_PROVIDER__", "__NEW_KID__"):
+            script = script.replace(marker, repr("synthetic-value"))
+        ast.parse(script)
 
 
 if __name__ == "__main__":

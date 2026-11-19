@@ -230,6 +230,16 @@ The separate Keycloak interoperability rehearsal covers actual OIDC protocol
 and signed-token verification by the Fleet API. Neither rehearsal closes the
 company IdP, MFA, target TLS/network or independent assessment gates.
 
+The protocol rehearsal also bootstraps a temporary lab administrator in the
+pinned Keycloak container. It uses the admin REST API to add a higher-priority
+generated RSA signing provider, obtains a second Fleet token, and verifies
+that both old and new tokens remain authorised during overlap. It then
+retires the old provider, restarts the Fleet API to clear its bounded JWKS
+cache, rejects the old token and accepts the new token. Only result codes are
+retained; the fictional administrator password and access tokens are not
+included in CI evidence. Company signing-key custody, token lifetime and
+rollover schedule remain B-12 decisions.
+
 The combined browser rehearsal also connects Chrome to the actual lab
 Keycloak and built Fleet API through loopback-only HTTPS ports. It checks the
 Keycloak login form, PKCE callback, company role, cleared callback state and
