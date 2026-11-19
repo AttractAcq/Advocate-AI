@@ -298,6 +298,11 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
+        try:
+            catalog.check_clock()
+        except (FleetError, OSError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Fleet store integrity check failed") from exc
         return {"status": "ok"}
 
     return app

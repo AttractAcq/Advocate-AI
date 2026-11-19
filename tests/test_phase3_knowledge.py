@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
@@ -236,6 +238,19 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('"action":"retrieve"', audit_path.read_text())
             self.assertNotIn("generator inspection secret marker", audit_path.read_text())
             self.assertNotIn("synthetic-test-passphrase", audit_path.read_text())
+            class PastClock(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return cls(2020, 1, 1, tzinfo=tz or timezone.utc)
+            before = len(self.model.contexts)
+            with patch("services.policy.audit.datetime", PastClock):
+                denied_clock = await client.post("/api/chat", headers=headers,
+                                                 json={"message": "generator inspection"})
+                unhealthy_clock = await client.get("/health")
+            self.assertEqual(denied_clock.status_code, 503)
+            self.assertEqual(unhealthy_clock.status_code, 503)
+            self.assertEqual(len(self.model.contexts), before)
+            self.assertEqual((await client.get("/health")).status_code, 200)
             text = audit_path.read_text().replace('"decision":"allow"', '"decision":"deny"', 1)
             audit_path.write_text(text)
             with self.assertRaises(ValueError):
