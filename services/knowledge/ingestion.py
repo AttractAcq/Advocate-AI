@@ -19,6 +19,7 @@ from typing import Callable
 from zipfile import BadZipFile, ZipFile
 
 from services.knowledge.paths import source_path
+from services.knowledge.manifest_io import read_manifest_bytes
 
 SUPPORTED = {".pdf", ".docx", ".xlsx", ".txt"}
 MAX_BYTES = 8 * 1024 * 1024
@@ -202,7 +203,7 @@ def sync_manifest(
     are opened. Deletions are reconciled in the same transaction as additions.
     """
     base = root.resolve(strict=True)
-    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload = json.loads(read_manifest_bytes(manifest))
     if not isinstance(payload, dict) or payload.get("schema") != 1 or not isinstance(payload.get("sources"), list):
         raise ValueError("invalid ingestion manifest")
     sources = payload["sources"]

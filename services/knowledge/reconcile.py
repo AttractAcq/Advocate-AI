@@ -8,6 +8,7 @@ import time
 from typing import Callable
 
 from services.knowledge.ingestion import sync_manifest
+from services.knowledge.manifest_io import read_manifest_bytes
 
 
 class ManifestReconciler:
@@ -28,7 +29,7 @@ class ManifestReconciler:
         """Reconcile after a manifest change or a bounded full-scan interval."""
         when = time.monotonic() if now is None else now
         try:
-            digest = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+            digest = hashlib.sha256(read_manifest_bytes(self.manifest)).hexdigest()
             if (self._last_scan is not None and digest == self._last_digest and
                     when - self._last_scan < self.full_scan_seconds):
                 return None
