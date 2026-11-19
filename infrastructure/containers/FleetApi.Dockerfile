@@ -10,6 +10,7 @@ COPY apps/__init__.py ./apps/__init__.py
 COPY apps/api/__init__.py apps/api/oidc.py ./apps/api/
 COPY apps/fleet ./apps/fleet
 COPY services/__init__.py ./services/__init__.py
+COPY services/policy/__init__.py services/policy/policy_file.py services/policy/regular_file.py ./services/policy/
 COPY services/fleet ./services/fleet
 USER 10001:10001
 EXPOSE 18800

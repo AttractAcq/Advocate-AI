@@ -45,6 +45,11 @@ The current lab policy file supports immediate source denial and revocation,
 but lacks an approved administrative change API and two-person approval. The
 local ACL test proves denial through API paths within 60 seconds after a policy
 file update; target NAS and identity propagation remain unmeasured.
+Core now reads that lab file through a 4 MiB regular-file-only boundary for
+authentication, retrieval and audit policy hashes. Symlinks, duplicate JSON
+keys and oversized content fail closed. A lab session invalidated during a
+policy-file fault needs a new sign-in after repair. These software checks do
+not approve the file's production ownership, change process or role map.
 
 ## Emergency access drill to implement before pilot
 

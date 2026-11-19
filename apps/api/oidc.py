@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 import httpx
 import jwt
 
+from services.policy.policy_file import load_policy
+
 
 class OidcVerifier:
     def __init__(self, issuer: str, roles_path: Path, audience: str = "sovereign-core",
@@ -155,7 +157,7 @@ class OidcVerifier:
             username = claims.get("preferred_username")
             if not isinstance(username, str):
                 return None
-            policy = json.loads(self.roles_path.read_text(encoding="utf-8"))
+            policy = load_policy(self.roles_path)
             if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
                 return None
             user = next((item for item in policy.get("users", []) if isinstance(item, dict)
