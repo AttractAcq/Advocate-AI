@@ -60,6 +60,8 @@ class ResticRepositoryTests(unittest.TestCase):
                                   self.restic, self.restic_sha256, restored)
         self.assertEqual(result["status"], "restored")
         self.assertEqual((restored / "config.json").read_text(), '{"fictional":true}\n')
+        self.assertEqual((restored / "config.json").stat().st_mode & 0o077, 0)
+        self.assertEqual((restored / "knowledge.db").stat().st_mode & 0o077, 0)
         with sqlite3.connect(restored / "knowledge.db") as connection:
             self.assertEqual(connection.execute("SELECT value FROM records").fetchone(),
                              ("fictional entry",))
