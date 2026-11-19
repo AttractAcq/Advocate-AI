@@ -23,6 +23,7 @@ from infrastructure.deploy.container_runtime import (
     _core_state_options, cleanup_orphan_runtimes, probe_runtime, start_verified_bundle, stop_runtime,
     verify_runtime_identity,
 )
+from infrastructure.deploy.core_state_inventory import source_files
 from infrastructure.release.bundle import BundleError, verify_bundle
 from infrastructure.restic_repository import restore_snapshot
 from infrastructure.upload_quarantine_backup import restore_upload_snapshot
@@ -380,13 +381,23 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
     try:
         restored = restore_snapshot(snapshot_id, repository, restic_password_file,
                                     restic, restic_sha256, root / "core-state")
-        if restored["files"] not in (4, 5, 6, 7) or (require_audit and restored["files"] not in (5, 7)):
+        if require_audit:
+            try:
+                sources = source_files(root / "core-state")
+            except ValueError as exc:
+                raise ProductInstallError("unexpected synthetic Core snapshot contents") from exc
+            if restored["files"] != len(sources) + 4 + (2 if (root / "core-state" / "knowledge-manifest.json").exists() else 0):
+                raise ProductInstallError("unexpected synthetic Core snapshot contents")
+        elif restored["files"] not in (4, 5, 6, 7):
             raise ProductInstallError("unexpected synthetic Core snapshot contents")
         knowledge = root / "core-state" / "knowledge-manifest.json"
         knowledge_db = root / "core-state" / "knowledge.db"
-        if (restored["files"] in (6, 7)) != (knowledge.is_file() and knowledge_db.is_file()):
+        if knowledge.exists() != knowledge_db.exists() or (knowledge.exists() and
+                (not knowledge.is_file() or not knowledge_db.is_file())):
             raise ProductInstallError("unexpected Core knowledge snapshot contents")
-        if restored["files"] in (5, 7):
+        if not require_audit and (restored["files"] in (6, 7)) != knowledge.is_file():
+            raise ProductInstallError("unexpected Core knowledge snapshot contents")
+        if require_audit or restored["files"] in (5, 7):
             _require_audit(root / "core-state")
             if (audit_checkpoint is not None and
                     verify_audit(root / "core-state" / "audit.jsonl",

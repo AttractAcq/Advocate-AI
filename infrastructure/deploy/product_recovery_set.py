@@ -21,6 +21,7 @@ from infrastructure.deploy.product_installer import (
     _identifier, _installation_id, _lock, _mount_config, _owner_directory,
     _require_audit, _state, restore_install_product,
 )
+from infrastructure.deploy.core_state_inventory import source_files
 from infrastructure.restic_repository import create_snapshot
 from infrastructure.release.bundle import verify_bundle
 from infrastructure.upload_quarantine_backup import create_upload_snapshot
@@ -82,15 +83,6 @@ def _require_stopped(runtime: dict[str, str]) -> None:
                 raise RecoverySetError("product runtime state unavailable")
         elif checked.stdout.strip() != "false":
             raise RecoverySetError("product runtime must be stopped before backup")
-
-
-def _source_file(state: Path) -> Path:
-    source_dir = state / "sources"
-    files = list(source_dir.iterdir())
-    if (len(files) != 1 or files[0].is_symlink() or not files[0].is_file()
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}", files[0].name)):
-        raise RecoverySetError("synthetic Core snapshot requires one regular source")
-    return files[0]
 
 
 def _payload(value: object) -> dict[str, object]:
@@ -156,7 +148,7 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
             raise RecoverySetError("installed synthetic Core and uploads are required")
         runtime = state_record["runtime"]
         _require_stopped(runtime)
-        source = _source_file(state)
+        sources = source_files(state)
         started = datetime.now(timezone.utc)
         with policy_directory_lock(state / "roles.json", exclusive=True), \
                 quarantine_directory_lock(uploads, exclusive=False):
@@ -171,8 +163,9 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                     {"name": "manifest.csv", "kind": "file", "source": str(state / "manifest.csv")},
                     {"name": "history.db", "kind": "sqlite", "source": str(state / "history.db")},
                     {"name": "audit.jsonl", "kind": "file", "source": str(state / "audit.jsonl")},
-                    {"name": f"sources/{source.name}", "kind": "file", "source": str(source)},
                 ]
+                files.extend({"name": f"sources/{source.name}", "kind": "file",
+                              "source": str(source)} for source in sources)
                 if (state / "knowledge-manifest.json").exists():
                     files.extend([
                         {"name": "knowledge-manifest.json", "kind": "file",
@@ -187,6 +180,7 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                                                 upload_password_file, restic,
                                                 restic_sha256, staging_parent)
             _require_stopped(runtime)
+            source_files(state)
             if verify_audit(state / "audit.jsonl", require_current_clock=True) != audit_checkpoint:
                 raise RecoverySetError("Core audit trail changed during capture")
             value = _payload({

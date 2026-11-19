@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import csv
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -28,12 +30,18 @@ class ProductRecoverySetTests(unittest.TestCase):
         state = self.install / "core-state"
         state.mkdir(mode=0o700)
         (state / "sources").mkdir()
-        for name in ("roles.json", "manifest.csv", "history.db"):
+        for name in ("roles.json", "history.db"):
             (state / name).write_text("synthetic")
         AuditLog(state / "audit.jsonl").append(
             actor="synthetic-installer", action="install", resource="core-state",
             decision="allow", policy_version="a" * 64)
         (state / "sources" / "ENG-001.txt").write_text("fictional")
+        with (state / "manifest.csv").open("w", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(("document_id", "relative_path", "collection", "classification",
+                             "version", "sha256", "owner", "source_type"))
+            writer.writerow(("ENG-001", "sources/ENG-001.txt", "engineering", "C0_SYNTHETIC",
+                             "1", hashlib.sha256(b"fictional").hexdigest(), "fictional", "synthetic-local"))
         password = self.base / "lab-password"
         password.write_text("fictional-lab-password\n")
         password.chmod(0o600)
@@ -110,6 +118,42 @@ class ProductRecoverySetTests(unittest.TestCase):
              patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
                    return_value={"snapshot_id": "2" * 64}):
             self._create()
+
+    def test_manifest_inventory_captures_all_sources(self) -> None:
+        state = self.install / "core-state"
+        with (state / "manifest.csv").open("a", newline="") as stream:
+            writer = csv.writer(stream)
+            for index in range(2, 101):
+                name = f"ENG-{index:03d}.txt"
+                payload = f"fictional source {index}".encode()
+                (state / "sources" / name).write_bytes(payload)
+                writer.writerow((f"ENG-{index:03d}", f"sources/{name}", "engineering",
+                                 "C0_SYNTHETIC", "1", hashlib.sha256(payload).hexdigest(),
+                                 "fictional", "synthetic-local"))
+        def core(spec: Path, *_args) -> dict[str, object]:
+            names = {row["name"] for row in json.loads(spec.read_text())["files"]}
+            self.assertEqual(len(names), 104)
+            self.assertIn("sources/ENG-100.txt", names)
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            self._create()
+
+    def test_manifest_inventory_rejects_changed_missing_and_extra_sources(self) -> None:
+        state = self.install / "core-state"
+        source = state / "sources" / "ENG-001.txt"
+        for mutation in (lambda: source.write_text("changed"), source.unlink,
+                         lambda: (state / "sources" / "EXTRA.txt").write_text("extra")):
+            source.write_text("fictional")
+            mutation()
+            with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+                 patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+                with self.assertRaises(ValueError):
+                    self._create()
+            backup.assert_not_called()
+            (state / "sources" / "EXTRA.txt").unlink(missing_ok=True)
 
     def test_running_product_or_second_backup_failure_leaves_no_receipt(self) -> None:
         with patch("infrastructure.deploy.product_recovery_set._require_stopped",
