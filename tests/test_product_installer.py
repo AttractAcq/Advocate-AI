@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import secrets
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -13,7 +14,7 @@ from infrastructure.deploy.product_installer import (
     refresh_emergency_product, restore_install_product, rollback_product,
 )
 from services.knowledge.upload_staging import stage_upload
-from services.policy.audit import verify as verify_audit
+from services.policy.audit import AuditLog, verify as verify_audit
 
 
 class ProductInstallerTests(unittest.TestCase):
@@ -247,6 +248,45 @@ class ProductInstallerTests(unittest.TestCase):
             self.assertEqual(restored.call_count, 2)
             self.assertEqual(started.call_args.kwargs["core_state"],
                              (self.root / "core-state").resolve())
+
+    def test_audit_checkpoint_is_checked_before_runtime_activation(self) -> None:
+        _, credential = self._external_state()
+        seed = self.base / "audit-seed.jsonl"
+        AuditLog(seed).append(actor="synthetic-installer", action="install",
+                              resource="core-state", decision="allow",
+                              policy_version="a" * 64)
+        checkpoint = verify_audit(seed)
+
+        def restore(_snapshot, _repository, _password, _restic, _digest,
+                    destination: Path) -> dict[str, object]:
+            destination.mkdir(mode=0o700)
+            (destination / "sources").mkdir()
+            for name in ("roles.json", "manifest.csv", "history.db"):
+                item = destination / name
+                item.write_text("synthetic")
+                item.chmod(0o600)
+            shutil.copyfile(seed, destination / "audit.jsonl")
+            (destination / "audit.jsonl").chmod(0o600)
+            return {"files": 5}
+
+        args = (self.first, self.key, self.crane, self.config, self.root,
+                "a" * 64, self.base / "repository", self.base / "password",
+                self.base / "restic", "b" * 64, credential)
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_snapshot",
+                   side_effect=restore), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old) as started:
+            with self.assertRaisesRegex(ProductInstallError, "checkpoint mismatch"):
+                restore_install_product(*args, require_audit=True,
+                                        audit_checkpoint=(1, "0" * 64))
+            started.assert_not_called()
+            self.assertFalse(self.root.exists())
+            result = restore_install_product(*args, require_audit=True,
+                                             audit_checkpoint=checkpoint)
+            self.assertEqual(result["restored_files"], 5)
+            started.assert_called_once()
 
     def test_restore_install_rejects_existing_root_and_failed_restore(self) -> None:
         _, credential = self._external_state()

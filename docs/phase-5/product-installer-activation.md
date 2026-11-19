@@ -94,8 +94,9 @@ signed Core receives `SOVEREIGN_AUDIT_PATH` inside the state mount. `status`,
 update and recovery reject a missing, exposed or invalid audit trail. New
 [coordinated recovery sets](product-recovery-set.md) include that trail and
 require it on receipt-bound restore; the actual-image rehearsal checks audit
-continuity after the second installation. This local chain is not externally
-anchored and has no approved retention or off-host custody yet.
+continuity after the second installation. The version 2 recovery receipt also
+signs the audit sequence and tail hash, which the clean installer checks before
+activation. Approved retention and off-host custody remain open.
 
 For a synthetic Core state restored from restic, the first `install` can also
 specify `--core-state /path/to/restored` and

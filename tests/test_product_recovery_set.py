@@ -14,7 +14,7 @@ from infrastructure.deploy.product_recovery_set import (
     RecoverySetError, _require_stopped, create_product_recovery_set,
     restore_product_recovery_set, verify_product_recovery_set,
 )
-from services.policy.audit import AuditLog
+from services.policy.audit import AuditLog, verify as verify_audit
 from services.knowledge.upload_staging import stage_upload
 
 
@@ -89,6 +89,8 @@ class ProductRecoverySetTests(unittest.TestCase):
         upload_backup.assert_called_once()
         self.assertEqual(result["core_snapshot_id"], "1" * 64)
         self.assertEqual(result["upload_snapshot_id"], "2" * 64)
+        self.assertEqual((result["audit_count"], result["audit_tail_hash"]),
+                         verify_audit(self.install / "core-state" / "audit.jsonl"))
         self.assertEqual(verify_product_recovery_set(self.receipt, self.public_key), result)
         self.assertEqual(self.receipt.stat().st_mode & 0o077, 0)
 
@@ -124,6 +126,22 @@ class ProductRecoverySetTests(unittest.TestCase):
                     self._create()
             backup.assert_not_called()
             self.assertFalse(self.receipt.exists())
+
+    def test_audit_change_during_capture_leaves_no_signed_receipt(self) -> None:
+        audit = self.install / "core-state" / "audit.jsonl"
+        def change_audit(*_args) -> dict[str, object]:
+            AuditLog(audit).append(actor="synthetic-installer", action="changed",
+                                   resource="core-state", decision="allow",
+                                   policy_version="a" * 64)
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot",
+                   side_effect=change_audit), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(RecoverySetError, "changed during capture"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
 
     def test_tampered_receipt_is_rejected(self) -> None:
         with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
@@ -192,6 +210,8 @@ class ProductRecoverySetTests(unittest.TestCase):
             self.assertEqual(result["recovery_set"], "signed-pair-verified")
             self.assertEqual(install.call_args.args[5], "1" * 64)
             self.assertEqual(install.call_args.kwargs["upload_snapshot_id"], "2" * 64)
+            self.assertEqual(install.call_args.kwargs["audit_checkpoint"],
+                             verify_audit(self.install / "core-state" / "audit.jsonl"))
 
 
 if __name__ == "__main__":
