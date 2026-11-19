@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 import jwt
 
-from infrastructure.deploy.fleet_installer import fleet_status, install_fleet
+from infrastructure.deploy.fleet_installer import fleet_status, install_fleet, rotate_fleet_ca
 from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError, stop_runtime
 import infrastructure.deploy.fleet_runtime as fleet_runtime
 
@@ -242,33 +242,43 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             wrong = _token(signing_key, audience="sovereign-core")
             _expect_token(handle.api_id, wrong, False)
 
-            # Simulate the operator's staged trust change on the actual mounted
-            # files. Restarting the API clears its bounded JWKS cache at cutover.
+            # The installer stages trust into a new signed candidate. A failed
+            # candidate leaves the old container and mounted CA untouched.
             next_idp, next_ca, next_signing = _identity_material(
                 root / "next-identity", "fleet-synthetic-next")
-            installed_ca = install_root / "identity" / "ca.pem"
             old_ca = ca.read_bytes()
             new_ca = next_ca.read_bytes()
+            overlap_ca = root / "synthetic-overlap-ca.pem"
+            _private(overlap_ca, old_ca + new_ca)
             next_jwk = json.loads((next_idp / "jwks.json").read_text())["keys"][0]
             old_jwk = json.loads((idp / "jwks.json").read_text())["keys"][0]
             rotated = _token(next_signing, kid="fleet-synthetic-next")
 
-            _replace_mounted(installed_ca, new_ca)
-            _restart_ready(handle.api_id, api=True)
+            def rotate(source: Path) -> dict[str, object]:
+                fleet_runtime._docker = synthetic_host_docker
+                try:
+                    return rotate_fleet_ca(install_root, trusted, crane, source)
+                finally:
+                    fleet_runtime._docker = original_docker
+
+            def active_handle() -> FleetRuntime:
+                state = json.loads((install_root / "fleet-state.json").read_text())
+                return FleetRuntime(**state["runtime"])
+
             try:
-                fleet_status(install_root, trusted)
+                rotate(next_ca)
             except RuntimeError:
                 pass
             else:
-                raise AssertionError("untrusted CA rotation remained healthy")
-            _replace_mounted(installed_ca, old_ca)
-            _restart_ready(handle.api_id, api=True)
+                raise AssertionError("untrusted CA candidate activated")
+            if active_handle().api_id != handle.api_id:
+                raise AssertionError("failed CA rotation changed active runtime")
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("failed CA rotation did not recover")
             _expect_token(handle.api_id, valid, True)
 
-            _replace_mounted(installed_ca, old_ca + new_ca)
-            _restart_ready(handle.api_id, api=True)
+            rotate(overlap_ca)
+            handle = active_handle()
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("CA overlap denied old issuer")
             _replace_mounted(idp / "jwks.json", json.dumps({"keys": [old_jwk, next_jwk]}).encode())
@@ -282,22 +292,20 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             _expect_token(handle.api_id, rotated, True)
 
             _replace_mounted(idp / "jwks.json", json.dumps({"keys": [next_jwk]}).encode())
-            _replace_mounted(installed_ca, new_ca)
-            _restart_ready(handle.api_id, api=True)
+            rotate(next_ca)
+            handle = active_handle()
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("new trust did not survive cutover")
             _expect_token(handle.api_id, rotated, True)
             _expect_token(handle.api_id, valid, False)
-            _replace_mounted(installed_ca, old_ca)
-            _restart_ready(handle.api_id, api=True)
             try:
-                fleet_status(install_root, trusted)
+                rotate(ca)
             except RuntimeError:
                 pass
             else:
-                raise AssertionError("stale CA trusted new issuer")
-            _replace_mounted(installed_ca, new_ca)
-            _restart_ready(handle.api_id, api=True)
+                raise AssertionError("stale CA candidate activated")
+            if active_handle().api_id != handle.api_id:
+                raise AssertionError("stale CA changed active runtime")
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("stale CA recovery failed")
             _expect_token(handle.api_id, rotated, True)
@@ -310,7 +318,7 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
                 raise AssertionError("Fleet status passed without its identity provider")
             return {"oidc_runtime": "synthetic-https-token-authorized",
                     "wrong_audience": "denied", "idp_outage": "status-failed-closed",
-                    "trust_rotation": "overlap-cutover-stale-trust-and-recovery"}
+                    "trust_rotation": "signed-candidate-overlap-cutover-and-rollback"}
         finally:
             state_file = install_root / "fleet-state.json"
             if state_file.exists():

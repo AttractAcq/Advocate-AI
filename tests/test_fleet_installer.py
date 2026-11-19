@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from infrastructure.deploy.fleet_installer import (
     FleetInstallError, fleet_status, install_fleet, recover_fleet, rollback_fleet,
+    rotate_fleet_ca, _state, _write_ca_journal, _write_state,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError
 from infrastructure.deploy.fleet_runtime import (
@@ -176,6 +177,103 @@ class FleetInstallerTests(unittest.TestCase):
                                     self.config, self.root)
             self.assertEqual(updated["previous"], first["active"])
             self.assertEqual(launch.call_args.args[-1], "fleet-identity")
+
+    def test_ca_rotation_preserves_runtime_on_failure_then_activates_candidate(self) -> None:
+        self.config.write_text('{"schema":1,"oidc_issuer":'
+                               '"https://identity.example.invalid/realms/fleet"}\n')
+        roles = self.base / "roles.json"
+        roles.write_text('{"users":[{"id":"admin","role":"fleet_admin",'
+                         '"status":"active","customer_codes":["*"]}]}\n')
+        roles.chmod(0o600)
+        _, old_ca, _ = _identity_material(self.base)
+        _, new_ca, _ = _identity_material(self.base / "next")
+        first_handle = FleetRuntime("a" * 64, "b" * 64, "c" * 64,
+                                    "9" * 64, "fleet-identity")
+        second_handle = FleetRuntime("d" * 64, "e" * 64, "f" * 64,
+                                     "9" * 64, "fleet-identity")
+        stopped: list[FleetRuntime] = []
+        with patch("infrastructure.deploy.fleet_installer.verify_bundle",
+                   return_value={"schema": 5, "target": "fleet"}), \
+             patch("infrastructure.deploy.fleet_installer.start_verified_bundle",
+                   side_effect=[first_handle, RuntimeError("candidate denied"),
+                                second_handle]) as launch, \
+             patch("infrastructure.deploy.fleet_installer.probe_runtime"), \
+             patch("infrastructure.deploy.fleet_installer.stop_runtime",
+                   side_effect=stopped.append):
+            installed = install_fleet(self.first, self.trusted, self.crane,
+                                      self.config, self.root, roles_file=roles,
+                                      identity_network="fleet-identity", ca_file=old_ca)
+            active_ca = self.root / "identity" / "ca.pem"
+            source = self.base / "invalid-ca.pem"
+            source.write_text("not a certificate")
+            source.chmod(0o600)
+            with self.assertRaises(FleetInstallError):
+                rotate_fleet_ca(self.root, self.trusted, self.crane, source)
+            source.write_bytes(new_ca.read_bytes())
+            source.chmod(0o644)
+            with self.assertRaises(FleetInstallError):
+                rotate_fleet_ca(self.root, self.trusted, self.crane, source)
+            source.chmod(0o600)
+            with self.assertRaises(RuntimeError):
+                rotate_fleet_ca(self.root, self.trusted, self.crane, source)
+            self.assertEqual(active_ca.read_bytes(), old_ca.read_bytes())
+            self.assertEqual(fleet_status(self.root, self.trusted)["active"],
+                             installed["active"])
+            self.assertEqual(stopped, [])
+            _write_ca_journal(self.root, _state(self.root), old_ca.read_bytes())
+            active_ca.write_bytes(new_ca.read_bytes())
+            with self.assertRaises(FleetInstallError):
+                fleet_status(self.root, self.trusted)
+            self.assertEqual(recover_fleet(self.root, self.trusted, self.crane)["result"],
+                             "already_healthy")
+            self.assertEqual(active_ca.read_bytes(), old_ca.read_bytes())
+            self.assertFalse((self.root / "identity" / ".ca-rotation.json").exists())
+            rotated = rotate_fleet_ca(self.root, self.trusted, self.crane, source)
+            self.assertEqual(rotated["result"], "identity_rotated")
+            self.assertEqual(rotated["active"], installed["active"])
+            self.assertEqual(active_ca.read_bytes(), new_ca.read_bytes())
+            self.assertEqual(active_ca.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(stopped, [first_handle])
+            self.assertEqual(launch.call_args.args[-1], "fleet-identity")
+
+    def test_committed_ca_rotation_journal_verifies_candidate_before_cleanup(self) -> None:
+        self.config.write_text('{"schema":1,"oidc_issuer":'
+                               '"https://identity.example.invalid/realms/fleet"}\n')
+        roles = self.base / "roles.json"
+        roles.write_text('{"users":[{"id":"admin","role":"fleet_admin",'
+                         '"status":"active","customer_codes":["*"]}]}\n')
+        roles.chmod(0o600)
+        _, old_ca, _ = _identity_material(self.base)
+        _, new_ca, _ = _identity_material(self.base / "next")
+        old_handle = FleetRuntime("a" * 64, "b" * 64, "c" * 64,
+                                  "9" * 64, "fleet-identity")
+        new_handle = FleetRuntime("d" * 64, "e" * 64, "f" * 64,
+                                  "9" * 64, "fleet-identity")
+        with patch("infrastructure.deploy.fleet_installer.verify_bundle",
+                   return_value={"schema": 5, "target": "fleet"}), \
+             patch("infrastructure.deploy.fleet_installer.start_verified_bundle",
+                   return_value=old_handle), \
+             patch("infrastructure.deploy.fleet_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.fleet_installer.stop_runtime") as stop:
+            installed = install_fleet(self.first, self.trusted, self.crane,
+                                      self.config, self.root, roles_file=roles,
+                                      identity_network="fleet-identity", ca_file=old_ca)
+            old_state = _state(self.root)
+            _write_ca_journal(self.root, old_state, old_ca.read_bytes())
+            (self.root / "identity" / "ca.pem").write_bytes(new_ca.read_bytes())
+            _write_state(self.root, installed["active"], None, new_handle)
+            with self.assertRaises(FleetInstallError):
+                fleet_status(self.root, self.trusted)
+            probe.side_effect = RuntimeError("new candidate unhealthy")
+            with self.assertRaises(RuntimeError):
+                recover_fleet(self.root, self.trusted, self.crane)
+            self.assertTrue((self.root / "identity" / ".ca-rotation.json").exists())
+            stop.assert_not_called()
+            probe.side_effect = None
+            self.assertEqual(recover_fleet(self.root, self.trusted, self.crane)["result"],
+                             "already_healthy")
+            stop.assert_called_once_with(old_handle)
+            self.assertFalse((self.root / "identity" / ".ca-rotation.json").exists())
 
     def test_oidc_runtime_attaches_only_api_to_labelled_network(self) -> None:
         self.config.write_text('{"schema":1,"oidc_issuer":'
