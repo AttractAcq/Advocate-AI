@@ -24,6 +24,7 @@ def main() -> None:
     propose.add_argument("--classification", required=True)
     propose.add_argument("--owner", required=True)
     propose.add_argument("--version", default="1")
+    propose.add_argument("--scan-profile", type=Path, required=True)
     propose.add_argument("--out", type=Path, required=True)
     sign = sub.add_parser("sign")
     sign.add_argument("--proposal", type=Path, required=True)
@@ -38,6 +39,7 @@ def main() -> None:
     apply.add_argument("--approval", type=Path, action="append", required=True)
     apply.add_argument("--trust", type=Path, required=True)
     apply.add_argument("--audit", type=Path, required=True)
+    apply.add_argument("--scan-profile", type=Path, required=True)
     recover = sub.add_parser("recover")
     recover.add_argument("--sources", type=Path, required=True)
     recover.add_argument("--manifest", type=Path, required=True)
@@ -47,7 +49,7 @@ def main() -> None:
         _write_new(args.out, create_proposal(args.sources, args.uploads, args.manifest,
                    args.upload_id, requester=args.requester, document_id=args.document_id,
                    collection=args.collection, classification=args.classification,
-                   owner=args.owner, version=args.version))
+                   owner=args.owner, version=args.version, scan_profile=args.scan_profile))
     elif args.operation == "sign":
         _write_new(args.out, sign_proposal(read_regular_file(args.proposal, 4096),
                                            args.signer_id, _private_key(args.key)))
@@ -57,7 +59,7 @@ def main() -> None:
         print(apply_promotion(args.sources, args.uploads, args.manifest,
               read_regular_file(args.proposal, 4096),
               tuple(read_regular_file(path, 2048) for path in args.approval),
-              args.trust, args.audit))
+              args.trust, args.audit, args.scan_profile))
     else:
         print(recover_promotion(args.sources, args.manifest, args.audit))
 
