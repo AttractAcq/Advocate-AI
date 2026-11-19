@@ -236,3 +236,6 @@ Keycloak login form, PKCE callback, company role, cleared callback state and
 logout in one flow. A separate API probe in the same run rejects the lab token.
 The temporary browser certificates are accepted only by this synthetic Chrome
 session; target ingress certificates and trust policy require later validation.
+The CI fixture uses a temporary Docker browser ingress network for Keycloak
+and the portal while the Fleet API stays on its internal networks. This
+browser fixture is not a zero-egress network proof.

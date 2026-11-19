@@ -203,6 +203,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
     suffix = uuid.uuid4().hex[:8]
     identity_network = "fleet-keycloak-identity-" + suffix
     app_network = "fleet-keycloak-app-" + suffix
+    browser_network = "fleet-keycloak-browser-" + suffix
     keycloak = "fleet-keycloak-" + suffix
     api = "fleet-keycloak-api-" + suffix
     portal = "fleet-keycloak-portal-" + suffix
@@ -232,9 +233,15 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
         _run("docker", "network", "create", "--internal", "--label",
              "sovereign.fleet.identity=true", identity_network)
         _run("docker", "network", "create", "--internal", app_network)
+        if browser:
+            # This test-only bridge permits host loopback ingress. The API
+            # remains exclusively on the two internal application networks.
+            _run("docker", "network", "create", "--label",
+                 "sovereign.fleet.browser-test=true", browser_network)
         try:
             _run("docker", "run", "-d", "--name", keycloak,
-                 "--network", identity_network, "--network-alias", IDENTITY_HOST,
+                 "--network", browser_network if browser else identity_network,
+                 *([] if browser else ["--network-alias", IDENTITY_HOST]),
                  *(["--publish", "127.0.0.3:443:443"] if browser else []),
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
                  "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
@@ -243,6 +250,9 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                  "--hostname=" + ISSUER.removesuffix("/realms/fleet"),
                  "--https-port=443", "--https-certificate-file=/tmp/fleet-cert.pem",
                  "--https-certificate-key-file=/tmp/fleet-key.pem")
+            if browser:
+                _run("docker", "network", "connect", "--alias", IDENTITY_HOST,
+                     identity_network, keycloak)
             settings = json.loads(_run("docker", "inspect", keycloak, "--format",
                                        "{{json .NetworkSettings.Networks}}"))
             keycloak_ip = settings[identity_network]["IPAddress"]
@@ -262,12 +272,16 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                  "sovereign-fleet-api:synthetic")
             _run("docker", "network", "connect", identity_network, api)
             _run("docker", "run", "-d", "--name", portal,
-                 "--network", app_network, "--network-alias", "fleet-portal",
+                 "--network", browser_network if browser else app_network,
+                 *([] if browser else ["--network-alias", "fleet-portal"]),
                  *(["--publish", "127.0.0.1:18080:8080"] if browser else []),
                  "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                  "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                  "--mount", f"type=bind,source={config},target=/srv/fleet-config.json,readonly",
                  "sovereign-fleet-portal:synthetic")
+            if browser:
+                _run("docker", "network", "connect", "--alias", "fleet-portal",
+                     app_network, portal)
             ready = False
             for _ in range(90):
                 status = subprocess.run(
@@ -325,7 +339,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                     proxy.wait(timeout=5)
             for name in (portal, api, keycloak):
                 subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-            for name in (app_network, identity_network):
+            for name in (app_network, identity_network, *([browser_network] if browser else [])):
                 subprocess.run(["docker", "network", "rm", name], capture_output=True)
 
 
