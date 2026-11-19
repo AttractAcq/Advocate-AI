@@ -24,6 +24,7 @@ from infrastructure.deploy.container_runtime import (
     verify_runtime_identity,
 )
 from infrastructure.deploy.core_state_inventory import source_files
+from infrastructure.deploy.knowledge_state_inventory import verify_knowledge_pair
 from infrastructure.release.bundle import BundleError, verify_bundle
 from infrastructure.restic_repository import restore_snapshot
 from infrastructure.upload_quarantine_backup import restore_upload_snapshot
@@ -397,6 +398,11 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
             raise ProductInstallError("unexpected Core knowledge snapshot contents")
         if not require_audit and (restored["files"] in (6, 7)) != knowledge.is_file():
             raise ProductInstallError("unexpected Core knowledge snapshot contents")
+        if knowledge.is_file():
+            try:
+                verify_knowledge_pair(root / "core-state")
+            except (OSError, ValueError) as exc:
+                raise ProductInstallError("restored Core knowledge index is inconsistent") from exc
         if require_audit or restored["files"] in (5, 7):
             _require_audit(root / "core-state")
             if (audit_checkpoint is not None and

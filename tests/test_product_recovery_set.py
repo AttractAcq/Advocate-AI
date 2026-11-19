@@ -4,6 +4,7 @@ import json
 import csv
 import hashlib
 from pathlib import Path
+import sqlite3
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -17,6 +18,8 @@ from infrastructure.deploy.product_recovery_set import (
     RecoverySetError, _require_stopped, create_product_recovery_set,
     restore_product_recovery_set, verify_product_recovery_set,
 )
+from infrastructure.deploy.knowledge_state_inventory import verify_knowledge_pair
+from services.knowledge.ingestion import sync_manifest
 from services.policy.audit import AuditLog, verify as verify_audit
 from services.knowledge.upload_staging import stage_upload
 
@@ -105,13 +108,21 @@ class ProductRecoverySetTests(unittest.TestCase):
 
     def test_indexed_knowledge_pair_is_included_in_core_snapshot(self) -> None:
         state = self.install / "core-state"
-        (state / "knowledge-manifest.json").write_text('{"schema":1,"sources":[]}')
-        (state / "knowledge.db").write_bytes(b"synthetic")
+        with (state / "manifest.csv").open(newline="") as stream:
+            row = next(csv.DictReader(stream))
+        manifest = state / "knowledge-manifest.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [row]}))
+        indexed = sync_manifest(state, manifest, state / "knowledge.db")
+        self.assertEqual(indexed["indexed"], ["ENG-001"])
         def core(spec: Path, *_args) -> dict[str, object]:
-            names = {row["name"] for row in json.loads(spec.read_text())["files"]}
+            files = json.loads(spec.read_text())["files"]
+            names = {row["name"] for row in files}
             self.assertEqual(names, {"roles.json", "manifest.csv", "history.db",
                                      "audit.jsonl", "sources/ENG-001.txt",
                                      "knowledge-manifest.json", "knowledge.db"})
+            sources = {row["name"]: Path(row["source"]) for row in files}
+            self.assertNotEqual(sources["knowledge.db"], state / "knowledge.db")
+            self.assertEqual(verify_knowledge_pair(sources["knowledge.db"].parent), 1)
             return {"snapshot_id": "1" * 64}
         with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
              patch("infrastructure.deploy.product_recovery_set.create_snapshot",
@@ -119,6 +130,56 @@ class ProductRecoverySetTests(unittest.TestCase):
              patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
                    return_value={"snapshot_id": "2" * 64}):
             self._create()
+
+    def test_inconsistent_knowledge_pair_denies_capture(self) -> None:
+        state = self.install / "core-state"
+        (state / "knowledge-manifest.json").write_text(
+            json.dumps({"schema": 1, "sources": [{"document_id": "ENG-001",
+                "relative_path": "sources/WRONG.txt"}]}))
+        (state / "knowledge.db").write_bytes(b"not a SQLite database")
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+            with self.assertRaises(ValueError):
+                self._create()
+        backup.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
+    def test_stale_knowledge_index_row_denies_capture(self) -> None:
+        state = self.install / "core-state"
+        with (state / "manifest.csv").open(newline="") as stream:
+            row = next(csv.DictReader(stream))
+        manifest = state / "knowledge-manifest.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [row]}))
+        database = state / "knowledge.db"
+        sync_manifest(state, manifest, database)
+        with sqlite3.connect(database) as connection:
+            connection.execute("UPDATE sources SET sha256=? WHERE document_id=?",
+                               ("0" * 64, "ENG-001"))
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+            with self.assertRaisesRegex(ValueError, "knowledge index differs"):
+                self._create()
+        backup.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
+    def test_knowledge_manifest_change_during_capture_leaves_no_receipt(self) -> None:
+        state = self.install / "core-state"
+        with (state / "manifest.csv").open(newline="") as stream:
+            row = next(csv.DictReader(stream))
+        manifest = state / "knowledge-manifest.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [row]}))
+        sync_manifest(state, manifest, state / "knowledge.db")
+        def core(*_args) -> dict[str, object]:
+            manifest.write_text(json.dumps({"schema": 1, "sources": [row]}, indent=2))
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot",
+                   side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(RecoverySetError, "knowledge manifest changed"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
 
     def test_manifest_inventory_captures_all_sources(self) -> None:
         state = self.install / "core-state"
