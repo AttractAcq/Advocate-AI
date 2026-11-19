@@ -28,6 +28,11 @@ repeats the semantic check before starting Core. An invalid or incomplete
 knowledge pair denies capture or activation. A later external update to the
 live index may differ from this captured point in time; a coordinated vessel
 data freeze remains a production gate.
+For each ready source, recovery verification also re-parses the approved bytes
+through the same bounded Phase 3 parser and compares every stored passage and
+ordinal. A fabricated or stale passage denies capture or activation. Parser
+version control, protected parse staging and target-host timing remain gates
+for production use.
 The Core source inventory comes from its synthetic `manifest.csv`. Capture
 requires every listed source to be a regular flat file with the listed SHA-256,
 rejects missing or extra files, and includes each listed source in the encrypted
