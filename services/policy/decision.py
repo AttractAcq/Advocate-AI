@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from services.policy.policy_file import active_user
+
 
 def may_read_document(user_id: str, source: Mapping[str, str], policy: Mapping[str, object]) -> bool:
     """Apply source classification and vessel-approved per-document overrides.
@@ -24,9 +26,8 @@ def may_read_document(user_id: str, source: Mapping[str, str], policy: Mapping[s
         return True
     if not isinstance(rule, dict):
         return False
-    users = policy.get("users", [])
-    user = next((item for item in users if isinstance(item, dict) and item.get("id") == user_id), None)
-    if not isinstance(user, dict):
+    user = active_user(dict(policy), user_id)
+    if user is None:
         return False
     denied = rule.get("deny_users", [])
     allowed = rule.get("allow_roles")
@@ -41,12 +42,8 @@ def may_read_document(user_id: str, source: Mapping[str, str], policy: Mapping[s
 def may_read(user_id: str, collection: str, policy: Mapping[str, object]) -> bool:
     if collection == "restricted" or not user_id or not collection:
         return False
-    users = policy.get("users", [])
-    if not isinstance(users, list):
-        return False
-    user = next((item for item in users
-                 if isinstance(item, dict) and item.get("id") == user_id), None)
-    if user is None or user.get("status") != "active":
+    user = active_user(dict(policy), user_id)
+    if user is None:
         return False
     allowed = policy.get("allow", {})
     if not isinstance(allowed, dict):

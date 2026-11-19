@@ -50,6 +50,11 @@ authentication, retrieval and audit policy hashes. Symlinks, duplicate JSON
 keys and oversized content fail closed. A lab session invalidated during a
 policy-file fault needs a new sign-in after repair. These software checks do
 not approve the file's production ownership, change process or role map.
+The shared active-user check also rejects duplicate identities and expired or
+malformed `expires_at` values. A lab token is bound to the role at sign-in, so
+a later role change requires a new login; OIDC still checks the current local
+role against the signed token role on each request. These are prerequisites for
+the proposed emergency workflow, not an activation or two-person approval.
 
 ## Emergency access drill to implement before pilot
 
