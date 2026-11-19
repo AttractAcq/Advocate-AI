@@ -51,14 +51,19 @@ def _serve_parser(pipe) -> None:
     import os
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    from services.knowledge.parse_worker import convert
+    from services.knowledge.parse_worker import (configure_linux_limits, convert,
+                                                 set_linux_cpu_budget)
+    configure_linux_limits()
+    cold = True
     while True:
         try:
             path = pipe.recv()
         except EOFError:
             return
         try:
+            set_linux_cpu_budget((COLD_PARSE_SECONDS if cold else WARM_PARSE_SECONDS) + 15)
             pipe.send((True, convert(Path(path))))
+            cold = False
         except Exception as exc:
             pipe.send((False, type(exc).__name__))
 
@@ -94,7 +99,7 @@ def parse_local(path: Path) -> str:
             success, value = pipe.recv()
         except EOFError as exc:
             raise ValueError("parser worker stopped") from exc
-        _PARSER_WARM = True
+        _PARSER_WARM = success
         if not success or len(value) > MAX_TEXT:
             raise ValueError("parser failed or exceeded output limit")
         return value

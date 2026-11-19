@@ -21,8 +21,13 @@ macro binaries, ActiveX/embedded content and external Office relationships
 before parser invocation; post-index retrieval rechecks the no-symlink rule.
 PDF and Office conversion runs in a persistent offline worker with
 a 120-second first-request budget for Docling cold initialization, a 45-second
-subsequent request timeout and a parsed-text size limit. This is a bounded
-lab parser, not an OS-level memory/CPU sandbox. Scanned PDFs, OCR, encrypted
+subsequent request timeout and a parsed-text size limit. On Linux the worker
+also caps virtual address space at 8 GiB and cumulative CPU at 1,800 seconds,
+with a fresh 135-second cold or 60-second warm CPU deadline before each parse.
+Stricter inherited limits are kept. These limits are not applied on the macOS
+development host. This is still a bounded lab parser, not a complete process
+sandbox: file-system and syscall isolation, target container/cgroup limits,
+and exhaustion behavior need Linux qualification. Scanned PDFs, OCR, encrypted
 files, large spreadsheets and third-party NAS ACL semantics need separate
 qualification before they enter the supported register. Docling supports the local conversion API used here; see its
 [usage guide](https://docling-project.github.io/docling/usage/) and
