@@ -22,12 +22,13 @@ from infrastructure.deploy.container_runtime import (
 )
 from infrastructure.deploy.product_installer import (
     cleanup_product_orphans, install_product, product_status, recover_product,
-    rollback_product,
+    restore_install_product, rollback_product,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
 
 
 def _sha256(path: Path) -> str:
@@ -74,7 +75,8 @@ def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
 
 def rehearse(output: Path, crane: Path, crane_sha256: str,
              syft: Path, syft_sha256: str, trivy: Path,
-             trivy_sha256: str, trivy_cache: Path) -> dict[str, object]:
+             trivy_sha256: str, trivy_cache: Path,
+             restic: Path, restic_sha256: str) -> dict[str, object]:
     if output.exists() or output.is_symlink():
         raise ValueError("output directory must be new")
     output.mkdir(parents=True)
@@ -164,6 +166,13 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 if verify_bundle(product_bundle, trusted) != created:
                     raise AssertionError("signed product trial did not verify")
                 result["product_bundle"] = "verified"
+                state_root = root / "core-restore"
+                state_root.mkdir(mode=0o700)
+                repository, backup_password, snapshot_id, conversation_id = snapshot_synthetic_state(
+                    state_root, restic, restic_sha256)
+                lab_credential = root / "lab-password"
+                lab_credential.write_text(PASSPHRASE + "\n")
+                lab_credential.chmod(0o600)
                 second_bundle = root / "signed-product-trial-2"
                 create_product_bundle(payload, second_bundle, private,
                                       "synthetic-product-trial-2", descriptors,
@@ -176,9 +185,23 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     with os.fdopen(descriptor, "wb") as stream:
                         stream.write(b'{"schema":1,"oidc_issuer":null}\n')
                     config.chmod(0o644)
-                    first = install_product(product_bundle, trusted, crane, config,
-                                            install_root)
+                    first = restore_install_product(
+                        product_bundle, trusted, crane, config, install_root,
+                        snapshot_id, repository, backup_password, restic,
+                        restic_sha256, lab_credential)
+                    state = install_root / "core-state"
                     try:
+                        def active_core() -> str:
+                            active = json.loads((install_root / "product-state.json").read_text())
+                            return str(active["runtime"]["core_id"])
+
+                        before = _probe(active_core(), conversation_id, "before")
+                        roles = json.loads((state / "roles.json").read_text())
+                        roles["allow"]["chief_engineer"] = ["deck"]
+                        (state / "roles.json").write_text(json.dumps(roles))
+                        after = _probe(active_core(), conversation_id, "after")
+                        result["signed_state_runtime"] = {"snapshot_id": snapshot_id,
+                                                          "before": before, "after": after}
                         unit = root / "sovereign-synthetic-recover.service"
                         write_recovery_unit(unit, install_root, trusted, crane,
                                             Path(sys.executable), Path.cwd())
@@ -224,12 +247,14 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             raise AssertionError("previous product release was not retained")
                         if product_status(install_root, trusted)["active"] != second["active"]:
                             raise AssertionError("replacement product status mismatch")
+                        _probe(active_core(), conversation_id, "after")
                         result["switchover"] = "healthy-candidate-activated"
                         restored = rollback_product(install_root, trusted, crane)
                         if restored["active"] != first["active"]:
                             raise AssertionError("product rollback did not restore prior release")
                         if product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("rolled back product is unhealthy")
+                        _probe(active_core(), conversation_id, "after")
                         result["rollback"] = "previous-release-restored"
                         stopped_state = json.loads((install_root / "product-state.json").read_text())
                         stopped_runtime = RuntimeHandle(**stopped_state["runtime"])
@@ -244,6 +269,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         if recovery["result"] != "recovered" or \
                                 product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("stopped runtime did not recover from staged bundle")
+                        _probe(active_core(), conversation_id, "after")
                         try:
                             _docker("inspect", stopped_runtime.core_id)
                         except subprocess.CalledProcessError:
@@ -251,9 +277,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         else:
                             raise AssertionError("recovered old runtime was not retired")
                         result["recovery"] = "staged-release-restarted"
+                        result["installer_state_continuity"] = "install-upgrade-rollback-recover"
                     finally:
-                        state = json.loads((install_root / "product-state.json").read_text())
-                        stop_runtime(RuntimeHandle(**state["runtime"]))
+                        active_state = json.loads((install_root / "product-state.json").read_text())
+                        stop_runtime(RuntimeHandle(**active_state["runtime"]))
                 finally:
                     config.unlink(missing_ok=True)
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
@@ -266,13 +293,14 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Rehearse exact product-image release evidence")
     for name in ("output", "crane", "crane-sha256", "syft", "syft-sha256",
-                 "trivy", "trivy-sha256", "trivy-cache"):
+                 "trivy", "trivy-sha256", "trivy-cache", "restic", "restic-sha256"):
         parser.add_argument("--" + name, required=True,
-                            type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache"} else str)
+                            type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache", "restic"} else str)
     args = parser.parse_args()
     print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
                              args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache), sort_keys=True))
+                             args.trivy_sha256, args.trivy_cache,
+                             args.restic, args.restic_sha256), sort_keys=True))
 
 
 if __name__ == "__main__":

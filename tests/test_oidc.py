@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import httpx
 import jwt
@@ -70,6 +71,38 @@ class OidcTests(unittest.TestCase):
         self.assertIsNotNone(restarted.user_for(self.token(iat=int(time.time()) - 1)))
         path.write_text('{"sha256":')
         self.assertIsNone(restarted.user_for(self.token()))
+
+    def test_unknown_kids_cannot_trigger_unbounded_jwks_refresh(self) -> None:
+        calls = []
+        key = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.private.public_key()))
+        key.update(kid="lab-key", alg="RS256", use="sig")
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(200, json={"keys": [key]})
+
+        verifier = OidcVerifier(self.issuer, self.roles,
+                                transport=httpx.MockTransport(respond))
+        clock = [100.0]
+        with patch("apps.api.oidc.time.monotonic", side_effect=lambda: clock[0]):
+            self.assertIsNotNone(verifier._key("lab-key"))
+            self.assertEqual(len(calls), 1)
+            clock[0] = 100.1
+            self.assertIsNone(verifier._key("unknown-1"))
+            self.assertEqual(len(calls), 2)
+            clock[0] = 100.2
+            self.assertIsNone(verifier._key("unknown-2"))
+            self.assertEqual(len(calls), 2)
+            self.assertIsNone(verifier._key("x" * 257))
+            self.assertEqual(len(calls), 2)
+            clock[0] = 102.2
+            self.assertIsNone(verifier._key("unknown-3"))
+            self.assertEqual(len(calls), 3)
+
+    def test_oversized_jwks_fails_closed(self) -> None:
+        verifier = OidcVerifier(self.issuer, self.roles, transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b" " * (256 * 1024 + 1))))
+        self.assertIsNone(verifier.user_for(self.token()))
 
 
 if __name__ == "__main__":

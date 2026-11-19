@@ -4,7 +4,7 @@ Sovereign AI is a private vessel assistant and read-only cybersecurity intellige
 
 **Current state:** Phase 0 G0 was approved by the requester on 14 November 2026 and reconfirmed on 15 November for synthetic lab development ([approval records](docs/approval/2026-11-15-phase0-phase1.md)). The requester also reviewed and approved completed Phase 1 local work; the public repository has enforced `main` protection, while target hardware/network checks and independent review remain open in [G0A evidence](docs/phase-1/gate.md). Phase 2 has a working synthetic Core, Console, retrieval and local-model flow on a Mac; [G1 evidence](docs/phase-2/gate.md) keeps the target hardware and disconnected-WAN gate open. Phase 3 local ingestion, indexed retrieval, Keycloak identity and audit work remains under test; its [gate record](docs/phase-3/gate.md) and [external review brief](docs/review/phase-0-3-external-review.md) list remaining controls. Phase 4 synthetic alert analysis is merged; its [gate record](docs/phase-4/gate.md) keeps independent Wazuh and outage proof open. This baseline does not authorise vessel access, production data, procurement or deployment.
 
-**Unfinished work:** [Blockers and build queue](docs/blockers-and-build-queue.md) is the current index of deferred gate evidence and software we can build locally. Phase 5 includes the signed offline bundle, [release evidence preflight](docs/phase-5/release-intake.md), [digest-bound Syft inventory and image scan](docs/phase-5/upstream-release-tools.md), [Core and Console product bundle](docs/phase-5/multi-image-release.md), [health diagnostics](docs/phase-5/diagnostics.md), [encrypted recovery](docs/phase-5/backup-recovery.md), [synthetic PostgreSQL restore rehearsal](docs/phase-5/postgres-restic-recovery.md), [scheduled backup verification candidate](docs/phase-5/scheduled-backup-verification.md), [synthetic product installer and recovery](docs/phase-5/product-installer-activation.md), [adversarial hardening](docs/phase-5/security-hardening.md) and the [direct API role matrix](docs/phase-5/role-bypass-matrix.md). The [Phase 6 operator and engineer pack](docs/phase-6/operator-engineer-pack.md) documents those flows and open handover evidence. These local slices do not close G2/G3 or certify a release.
+**Unfinished work:** [Blockers and build queue](docs/blockers-and-build-queue.md) is the current index of deferred gate evidence and software we can build locally. Phase 5 includes the signed offline bundle, [release evidence preflight](docs/phase-5/release-intake.md), [digest-bound Syft inventory and image scan](docs/phase-5/upstream-release-tools.md), [Core and Console product bundle](docs/phase-5/multi-image-release.md), [health diagnostics](docs/phase-5/diagnostics.md), [encrypted recovery](docs/phase-5/backup-recovery.md), [synthetic PostgreSQL restore rehearsal](docs/phase-5/postgres-restic-recovery.md), [scheduled backup verification candidate](docs/phase-5/scheduled-backup-verification.md), [restored Core state rehearsal](docs/phase-5/restored-core-runtime.md), [signed image and external state candidate](docs/phase-5/signed-core-state-runtime.md), [synthetic product installer and recovery](docs/phase-5/product-installer-activation.md), [adversarial hardening](docs/phase-5/security-hardening.md) and the [direct API role matrix](docs/phase-5/role-bypass-matrix.md). The [Phase 6 operator and engineer pack](docs/phase-6/operator-engineer-pack.md) documents those flows and open handover evidence. A separate [Phase 8 Fleet API and portal candidate](docs/phase-8/fleet-metadata-foundation.md) handles structured company records. These local slices do not close G2/G3 or certify a release.
 
 ## Product milestones
 
@@ -42,7 +42,7 @@ The five milestones describe product outcomes; the engineering phases set their 
 | Policy Engine | Resource authorisation, source permission mapping and audit events |
 | Intelligence Engine | Read-only security event normalisation, analysis and reporting |
 | Vessel Connect & Deploy | Integration adapters, installation, offline updates, diagnostics and recovery |
-| Sovereign Fleet | Separate company portal for customers, vessels, licences, releases and support |
+| Sovereign Fleet | Separate company portal and metadata-only API candidate for customers, vessels, licences, releases and support in Phase 8 |
 
 Strict Sovereign Mode is the V1 default: prompts, vessel documents, embeddings and security telemetry remain onboard. Sovereign Fleet has no standing live connection to a strict-mode vessel.
 
@@ -51,7 +51,7 @@ Strict Sovereign Mode is the V1 default: prompts, vessel documents, embeddings a
 ```text
 Development/
 ├── README.md                 Product roadmap and repository map
-├── apps/                     FastAPI Core and React Console; later product apps
+├── apps/                     FastAPI Core, React Console and separate Fleet API/portal candidate
 ├── services/                 Knowledge retrieval, Policy, Intelligence and connectors
 ├── infrastructure/           Synthetic lab, release, backup and deployment staging
 ├── scripts/                  Build, repository checks and lab control
@@ -78,6 +78,7 @@ Development/
 │   ├── phase-4/              Security intelligence runbook, host worksheet and open gate
 │   ├── phase-5/              Offline release procedure and future G2 evidence
 │   ├── phase-6/              Synthetic operator and engineer SOP draft
+│   ├── phase-8/              Company-side Fleet metadata candidate
 │   ├── blockers-and-build-queue.md
 │   └── approval/2026-11-14-g0.md
 └── fixtures/                 Synthetic generators, manifests and local generated data

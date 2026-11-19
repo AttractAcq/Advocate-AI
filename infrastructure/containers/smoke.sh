@@ -32,6 +32,7 @@ for attempt in $(seq 1 30); do
   sleep 1
 done
 docker exec "$name-core" python -c 'import urllib.request; assert urllib.request.urlopen("http://127.0.0.1:18100/health").status == 200'
+docker exec "$name-core" python -c 'import importlib.util; assert importlib.util.find_spec("services.fleet") is None; assert importlib.util.find_spec("apps.fleet") is None'
 docker exec "$name-core" python -c 'import urllib.error, urllib.request
 try:
     urllib.request.urlopen("http://console:8080/api/models")

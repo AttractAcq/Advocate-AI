@@ -23,6 +23,11 @@ jobs:
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
       - name: Exercise isolated synthetic stack
         run: bash infrastructure/containers/smoke.sh
+      - name: Build and exercise separate Fleet images
+        run: |
+          docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+          docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+          bash infrastructure/containers/fleet-smoke.sh
       - name: Scan built Core image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -47,11 +52,37 @@ jobs:
           output: console-trivy.json
           exit-code: '0'
           cache: 'false'
+      - name: Scan built Fleet API image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sovereign-fleet-api:synthetic
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL,UNKNOWN
+          format: json
+          output: fleet-api-trivy.json
+          exit-code: '0'
+          cache: 'false'
+      - name: Scan built Fleet portal image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: sovereign-fleet-portal:synthetic
+          version: v0.76.2
+          scanners: vuln
+          severity: HIGH,CRITICAL,UNKNOWN
+          format: json
+          output: fleet-portal-trivy.json
+          exit-code: '0'
+          cache: 'false'
       - name: Summarize built image findings
         run: |
-          jq -e '.SchemaVersion and .ArtifactName' core-trivy.json console-trivy.json >/dev/null
+          jq -e '.SchemaVersion and .ArtifactName' core-trivy.json console-trivy.json fleet-api-trivy.json fleet-portal-trivy.json >/dev/null
           echo "Core high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' core-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
           echo "Console high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' console-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fleet API high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' fleet-api-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fleet portal high/critical/unknown: $(jq '[.Results[]?.Vulnerabilities[]?] | length' fleet-portal-trivy.json)" >> "$GITHUB_STEP_SUMMARY"
           echo "This is triage evidence, not release approval." >> "$GITHUB_STEP_SUMMARY"
       - name: Retain built image scan reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -60,6 +91,8 @@ jobs:
           path: |
             core-trivy.json
             console-trivy.json
+            fleet-api-trivy.json
+            fleet-portal-trivy.json
           retention-days: 30
 
   quality:
@@ -84,6 +117,12 @@ jobs:
           make lab-smoke
       - name: Build Console
         working-directory: apps/console/web
+        run: |
+          npm ci --ignore-scripts
+          npm run test
+          npm run build
+      - name: Build Fleet portal
+        working-directory: apps/fleet/web
         run: |
           npm ci --ignore-scripts
           npm run test
@@ -132,6 +171,9 @@ jobs:
       - name: Scan Console dependency lock
         working-directory: apps/console/web
         run: npm audit --audit-level=high
+      - name: Scan Fleet portal dependency lock
+        working-directory: apps/fleet/web
+        run: npm audit --audit-level=high
 
   container-scan:
     if: github.event_name == 'pull_request'
@@ -169,6 +211,88 @@ jobs:
           path: keycloak-trivy.json
           retention-days: 30
 
+  fleet-keycloak-interoperability:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Build Fleet and pull pinned synthetic Keycloak
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+          docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+          docker pull "$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)"
+      - name: Exercise Keycloak PKCE and Fleet role mapping
+        run: .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal
+      - name: Rehearse encrypted Keycloak clean recovery
+        run: .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --recovery
+
+  fleet-browser-https-rehearsal:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build synthetic portal
+        run: |
+          uv sync --locked
+          cd apps/fleet/web
+          npm ci --ignore-scripts
+          npm run build
+      - name: Exercise browser PKCE callback and sign-out over HTTPS
+        run: |
+          set -euo pipefail
+          driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
+          test -n "$driver"
+          echo "CHROMEDRIVER=$driver" >> "$GITHUB_ENV"
+          .venv/bin/python -m scripts.phase8_fleet_browser_rehearsal
+
+  fleet-keycloak-browser-integration:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Build Fleet and pull pinned synthetic Keycloak
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+          docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+          docker pull "$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)"
+      - name: Exercise Chrome with Keycloak and the Fleet API
+        run: |
+          set -euo pipefail
+          driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
+          test -n "$driver"
+          .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --chromedriver "$driver"
+      - name: Require and exercise Fleet OTP in Chrome
+        run: |
+          set -euo pipefail
+          driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
+          test -n "$driver"
+          .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --mfa --chromedriver "$driver"
+
   upstream-release-rehearsal:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -188,12 +312,16 @@ jobs:
           curl -fsSL --retry 3 https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz -o "$RUNNER_TEMP/upstream/crane.tar.gz"
           curl -fsSL --retry 3 https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_linux_amd64.tar.gz -o "$RUNNER_TEMP/upstream/syft.tar.gz"
           curl -fsSL --retry 3 https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz -o "$RUNNER_TEMP/upstream/trivy.tar.gz"
+          curl -fsSL --retry 3 https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2 -o "$RUNNER_TEMP/upstream/restic.bz2"
           echo "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0  $RUNNER_TEMP/upstream/crane.tar.gz" | sha256sum --check
           echo "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c  $RUNNER_TEMP/upstream/syft.tar.gz" | sha256sum --check
           echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  $RUNNER_TEMP/upstream/trivy.tar.gz" | sha256sum --check
+          echo "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c  $RUNNER_TEMP/upstream/restic.bz2" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/upstream/crane.tar.gz" -C "$RUNNER_TEMP/upstream/crane" crane
           tar -xzf "$RUNNER_TEMP/upstream/syft.tar.gz" -C "$RUNNER_TEMP/upstream/syft" syft
           tar -xzf "$RUNNER_TEMP/upstream/trivy.tar.gz" -C "$RUNNER_TEMP/upstream/trivy" trivy
+          bzip2 -d "$RUNNER_TEMP/upstream/restic.bz2"
+          chmod +x "$RUNNER_TEMP/upstream/restic"
           DOCKER_CONFIG="$RUNNER_TEMP/upstream/docker-config" "$RUNNER_TEMP/upstream/trivy/trivy" image --download-db-only --cache-dir "$RUNNER_TEMP/upstream/trivy-cache" --quiet
       - name: Rehearse offline image identity, scan and signed evidence
         shell: bash
@@ -212,6 +340,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 fixtures/generate.py
           docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
           crane="$RUNNER_TEMP/upstream/crane/crane"
@@ -222,12 +351,35 @@ jobs:
             --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
             --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
             --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
-            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache" \
+            --restic "$RUNNER_TEMP/upstream/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/upstream/restic" | cut -d' ' -f1)"
       - name: Retain product image evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: synthetic-product-image-release-evidence
           path: ${{ runner.temp }}/product-image-evidence
+          retention-days: 30
+      - name: Bind actual Fleet image archives to release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
+          docker build -f infrastructure/containers/FleetPortal.Dockerfile -t sovereign-fleet-portal:synthetic .
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase8_fleet_release_rehearsal \
+            --output "$RUNNER_TEMP/fleet-image-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Fleet image evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-fleet-image-release-evidence
+          path: ${{ runner.temp }}/fleet-image-evidence
           retention-days: 30
 
   restic-recovery-rehearsal:
@@ -270,6 +422,29 @@ jobs:
             --staging /srv/sovereign/staging --hour-utc 2 --max-age-hours 24
           systemd-analyze verify "$RUNNER_TEMP/sovereign-backup.service" \
             "$RUNNER_TEMP/sovereign-backup.timer"
+      - name: Validate synthetic Fleet service unit syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m infrastructure.deploy.fleet_boot_service \
+            --output "$RUNNER_TEMP/sovereign-fleet-recover.service" \
+            --root /var/lib/sovereign-fleet \
+            --trusted-key /etc/sovereign/fleet-trusted.pem \
+            --crane /opt/sovereign/bin/crane \
+            --python /usr/bin/python3 \
+            --workdir /opt/sovereign/app
+          .venv/bin/python -m infrastructure.deploy.fleet_backup_service render \
+            --service-output "$RUNNER_TEMP/sovereign-fleet-backup.service" \
+            --timer-output "$RUNNER_TEMP/sovereign-fleet-backup.timer" \
+            --db /var/lib/sovereign-fleet/state/fleet.db \
+            --directory /var/lib/sovereign-fleet-backups \
+            --key /etc/sovereign/fleet-backup.key \
+            --python /usr/bin/python3 \
+            --workdir /opt/sovereign/app --hour-utc 3 \
+            --max-age-hours 26 --max-archives 30
+          systemd-analyze verify "$RUNNER_TEMP/sovereign-fleet-recover.service" \
+            "$RUNNER_TEMP/sovereign-fleet-backup.service" \
+            "$RUNNER_TEMP/sovereign-fleet-backup.timer"
       - name: Rehearse encrypted PostgreSQL dump and clean restore
         shell: bash
         run: |
@@ -278,6 +453,15 @@ jobs:
           docker pull "$image"
           .venv/bin/python -m scripts.phase5_postgres_rehearsal \
             --image "$image" --restic "$RUNNER_TEMP/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
+      - name: Start restored synthetic Core state and recheck permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 fixtures/generate.py
+          docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
+          .venv/bin/python -m scripts.phase5_core_state_restore \
+            --image sovereign-core:synthetic --restic "$RUNNER_TEMP/restic" \
             --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
 
   openfga-policy-probe:
