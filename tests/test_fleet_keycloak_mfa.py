@@ -9,10 +9,11 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from infrastructure.backup import BackupError, generate_key
 from scripts.phase8_fleet_keycloak_rehearsal import (
-    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _totp)
+    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _run_flow, _totp)
 
 
 class FleetKeycloakMfaTests(unittest.TestCase):
@@ -61,6 +62,19 @@ class FleetKeycloakMfaTests(unittest.TestCase):
             self.assertEqual(json.loads((root / "restored/fleet-realm.json").read_text())
                              ["users"][0]["credentials"][0]["value"],
                              "new-fictional-password")
+
+    def test_pkce_flow_retries_only_transient_container_dns(self) -> None:
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=[RuntimeError("httpx.ConnectError: [Errno -3] Try again"),
+                                '{"fleet_role":"fleet_admin"}']) as command, \
+             patch("scripts.phase8_fleet_keycloak_rehearsal.time.sleep"):
+            self.assertEqual(_run_flow("api", "flow"), {"fleet_role": "fleet_admin"})
+            self.assertEqual(command.call_count, 2)
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=RuntimeError("assert status_code == 200")) as command:
+            with self.assertRaises(RuntimeError):
+                _run_flow("api", "flow")
+            command.assert_called_once()
 
 
 if __name__ == "__main__":

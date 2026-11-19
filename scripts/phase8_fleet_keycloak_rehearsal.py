@@ -209,6 +209,20 @@ def _api_token(api: str, token: str, allowed: bool) -> None:
     _run("docker", "exec", api, "python", "-c", script)
 
 
+def _run_flow(api: str, flow: str) -> dict[str, object]:
+    # Docker's embedded DNS can briefly return EAI_AGAIN while an application
+    # network is settling. Retry only that transport error with a fresh PKCE
+    # exchange; assertion and authorization failures still fail immediately.
+    for attempt in range(3):
+        try:
+            return json.loads(_run("docker", "exec", api, "python", "-c", flow))
+        except RuntimeError as error:
+            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 2:
+                raise
+            time.sleep(1)
+    raise AssertionError("unreachable PKCE retry state")
+
+
 def _admin_rotate(api: str, password: str, action: str, old_kid: str,
                   old_provider: str = "", new_kid: str = "") -> dict[str, object]:
     script = (_ADMIN_ROTATE.replace("__ISSUER__", repr(ISSUER))
@@ -282,6 +296,10 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
         raise AssertionError("altered Keycloak archive authenticated")
     restored = root / "restored"
     _checked_realm_restore(archive, backup_key, restored, checkpoint)
+    # The disposable Keycloak UID differs from the CI runner UID. This export
+    # contains fictional lab identity data and is deleted with this test.
+    restored.chmod(0o755)
+    (restored / "fleet-realm.json").chmod(0o644)
     _run("docker", "rm", keycloak)
     # Recreate identity service from the verified export; no old database or
     # import directory is mounted into this second instance.
@@ -305,7 +323,10 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
             break
         time.sleep(1)
     else:
-        raise AssertionError("restored Keycloak did not become ready")
+        logs = subprocess.run(["docker", "logs", "--tail", "30", keycloak],
+                              capture_output=True, text=True)
+        raise AssertionError("restored Keycloak did not become ready: " +
+                             logs.stderr[-1600:])
     _run("docker", "restart", api)
     for _ in range(20):
         probe = subprocess.run(["docker", "exec", api, "python", "-c",
@@ -317,7 +338,7 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
         time.sleep(0.5)
     else:
         raise AssertionError("Fleet API did not restart after identity restore")
-    result = json.loads(_run("docker", "exec", api, "python", "-c", flow))
+    result = _run_flow(api, flow)
     result.pop("access_token")
     assert result["fleet_role"] == "fleet_admin" and result["lab_token"] == "denied"
     return {"keycloak_recovery": "clean-export-import-authorized",
@@ -579,14 +600,13 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
             else:
                 flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
                     "__PASSWORD__", repr(password))
-                outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
+                outcome = _run_flow(api, flow)
                 old_token = outcome.pop("access_token")
                 if not browser:
                     old_kid = jwt.get_unverified_header(old_token)["kid"]
                     added = _admin_rotate(api, admin_password, "add", old_kid)
                     new_kid = added["new_kid"]
-                    new_outcome = json.loads(_run("docker", "exec", api,
-                                                  "python", "-c", flow))
+                    new_outcome = _run_flow(api, flow)
                     new_token = new_outcome.pop("access_token")
                     assert jwt.get_unverified_header(new_token)["kid"] == new_kid
                     _api_token(api, old_token, True)
