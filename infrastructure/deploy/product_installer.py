@@ -359,11 +359,14 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
                             upload_snapshot_id: str | None = None,
                             upload_repository: Path | None = None,
                             upload_password_file: Path | None = None,
-                            require_audit: bool = False) -> dict[str, object]:
+                            require_audit: bool = False,
+                            audit_checkpoint: tuple[int, str] | None = None) -> dict[str, object]:
     """Clean-restore fictional Core state before first signed installation."""
     if not root.is_absolute() or root.exists() or root.is_symlink():
         raise ProductInstallError("restore installation requires a new absolute root")
     upload_options = (upload_snapshot_id, upload_repository, upload_password_file)
+    if audit_checkpoint is not None and not require_audit:
+        raise ProductInstallError("audit checkpoint requires an audited snapshot")
     if any(value is not None for value in upload_options):
         if (not enable_uploads or any(value is None for value in upload_options)
                 or upload_repository.resolve() == repository.resolve()):
@@ -381,6 +384,10 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
             raise ProductInstallError("unexpected synthetic Core snapshot contents")
         if restored["files"] == 5:
             _require_audit(root / "core-state")
+            if (audit_checkpoint is not None and
+                    verify_audit(root / "core-state" / "audit.jsonl",
+                                 require_current_clock=True) != audit_checkpoint):
+                raise ProductInstallError("restored Core audit checkpoint mismatch")
         upload_result = None
         if upload_snapshot_id is not None:
             upload_result = restore_upload_snapshot(

@@ -26,6 +26,7 @@ from infrastructure.release.bundle import verify_bundle
 from infrastructure.upload_quarantine_backup import create_upload_snapshot
 from services.knowledge.upload_staging import quarantine_directory_lock
 from services.policy.policy_file import policy_directory_lock
+from services.policy.audit import verify as verify_audit
 
 
 class RecoverySetError(ValueError):
@@ -95,9 +96,10 @@ def _source_file(state: Path) -> Path:
 def _payload(value: object) -> dict[str, object]:
     expected = {"schema", "installation_id", "active_release", "runtime_ids",
                 "started_utc", "finished_utc", "core_snapshot_id",
-                "upload_snapshot_id", "core_repository", "upload_repository"}
+                "upload_snapshot_id", "core_repository", "upload_repository",
+                "audit_count", "audit_tail_hash"}
     if (not isinstance(value, dict) or set(value) != expected
-            or type(value["schema"]) is not int or value["schema"] != 1
+            or type(value["schema"]) is not int or value["schema"] != 2
             or not isinstance(value["installation_id"], str)
             or not re.fullmatch(r"[0-9a-f]{32}", value["installation_id"])
             or not isinstance(value["active_release"], str)
@@ -110,7 +112,10 @@ def _payload(value: object) -> dict[str, object]:
                    for key in ("core_snapshot_id", "upload_snapshot_id"))
             or any(not isinstance(value[key], str) or not Path(value[key]).is_absolute()
                    for key in ("core_repository", "upload_repository"))
-            or value["core_repository"] == value["upload_repository"]):
+            or value["core_repository"] == value["upload_repository"]
+            or type(value["audit_count"]) is not int or value["audit_count"] < 1
+            or not isinstance(value["audit_tail_hash"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", value["audit_tail_hash"])):
         raise RecoverySetError("invalid recovery receipt payload")
     try:
         started = datetime.fromisoformat(value["started_utc"])
@@ -152,11 +157,12 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
         runtime = state_record["runtime"]
         _require_stopped(runtime)
         source = _source_file(state)
-        _require_audit(state)
         started = datetime.now(timezone.utc)
         with policy_directory_lock(state / "roles.json", exclusive=True), \
                 quarantine_directory_lock(uploads, exclusive=False):
             _require_stopped(runtime)
+            _require_audit(state)
+            audit_checkpoint = verify_audit(state / "audit.jsonl", require_current_clock=True)
             with tempfile.TemporaryDirectory(prefix=".product-recovery-set-",
                                              dir=staging_parent) as temporary:
                 spec = Path(temporary) / "core-spec.json"
@@ -173,8 +179,10 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                                                 upload_password_file, restic,
                                                 restic_sha256, staging_parent)
             _require_stopped(runtime)
+            if verify_audit(state / "audit.jsonl", require_current_clock=True) != audit_checkpoint:
+                raise RecoverySetError("Core audit trail changed during capture")
             value = _payload({
-                "schema": 1, "installation_id": _installation_id(install_root),
+                "schema": 2, "installation_id": _installation_id(install_root),
                 "active_release": state_record["active"], "runtime_ids": runtime,
                 "started_utc": started.isoformat(),
                 "finished_utc": datetime.now(timezone.utc).isoformat(),
@@ -182,9 +190,11 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                 "upload_snapshot_id": upload["snapshot_id"],
                 "core_repository": str(core_repository.resolve()),
                 "upload_repository": str(upload_repository.resolve()),
+                "audit_count": audit_checkpoint[0],
+                "audit_tail_hash": audit_checkpoint[1],
             })
             raw = _canonical(value)
-            signed = {"schema": 1, "payload": base64.b64encode(raw).decode("ascii"),
+            signed = {"schema": 2, "payload": base64.b64encode(raw).decode("ascii"),
                       "signature": base64.b64encode(key.sign(raw)).decode("ascii")}
             descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             try:
@@ -203,7 +213,7 @@ def verify_product_recovery_set(receipt: Path, trusted_key: Path) -> dict[str, o
     try:
         signed = json.loads(_private_file(receipt, maximum=8192), object_pairs_hook=_unique)
         if (not isinstance(signed, dict) or set(signed) != {"schema", "payload", "signature"}
-                or type(signed["schema"]) is not int or signed["schema"] != 1
+                or type(signed["schema"]) is not int or signed["schema"] != 2
                 or not isinstance(signed["payload"], str)
                 or not isinstance(signed["signature"], str)):
             raise RecoverySetError("invalid recovery receipt")
@@ -243,7 +253,9 @@ def restore_product_recovery_set(receipt: Path, receipt_trusted_key: Path,
         emergency_password_file, enable_uploads=True,
         upload_snapshot_id=str(recovery_set["upload_snapshot_id"]),
         upload_repository=Path(str(recovery_set["upload_repository"])),
-        upload_password_file=upload_password_file, require_audit=True)
+        upload_password_file=upload_password_file, require_audit=True,
+        audit_checkpoint=(int(recovery_set["audit_count"]),
+                          str(recovery_set["audit_tail_hash"])))
     return {**restored, "recovery_set": "signed-pair-verified"}
 
 
