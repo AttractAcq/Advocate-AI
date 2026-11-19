@@ -16,6 +16,7 @@ from uuid import uuid4
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from services.knowledge.ingestion import MAX_BYTES, SUPPORTED, _valid_source
+from services.knowledge.inspection import inspect_document
 from services.knowledge.manifest_io import MAX_MANIFEST_BYTES, load_manifest, read_manifest_bytes
 from services.knowledge.upload_staging import _directory, _metadata
 from services.policy.audit import AuditLog
@@ -54,7 +55,8 @@ def _separate_roots(source_root: Path, upload_root: Path) -> None:
         raise ApprovalError("upload area overlaps approved sources")
 
 
-def _proposal(raw: bytes, *, require_current: bool = True) -> dict[str, object]:
+def _proposal(raw: bytes, *, require_current: bool = True,
+              allow_legacy: bool = False) -> dict[str, object]:
     if len(raw) > 4096:
         raise ApprovalError("approval proposal too large")
     try:
@@ -64,9 +66,11 @@ def _proposal(raw: bytes, *, require_current: bool = True) -> dict[str, object]:
     expected = {"schema", "operation", "request_id", "requested_by", "upload_id",
                 "upload_sha256", "manifest_sha256", "document_id", "collection",
                 "classification", "owner", "version", "suffix", "issued_at", "expires_at"}
+    if isinstance(value, dict) and value.get("schema") == 2:
+        expected.add("inspection_profile_sha256")
     if not isinstance(value, dict) or set(value) != expected or raw != _canonical(value):
         raise ApprovalError("invalid approval proposal")
-    if value["schema"] != 1 or value["operation"] != "synthetic-document-promotion":
+    if (value["schema"] != 2 and not (allow_legacy and value["schema"] == 1)) or value["operation"] != "synthetic-document-promotion":
         raise ApprovalError("invalid approval domain")
     for key, pattern in (("request_id", _UPLOAD_ID), ("upload_id", _UPLOAD_ID),
                          ("document_id", _ID)):
@@ -80,6 +84,9 @@ def _proposal(raw: bytes, *, require_current: bool = True) -> dict[str, object]:
     for key in ("upload_sha256", "manifest_sha256"):
         if not isinstance(value[key], str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
             raise ApprovalError("invalid approval digest")
+    if value["schema"] == 2 and (not isinstance(value["inspection_profile_sha256"], str) or
+                                   not re.fullmatch(r"[0-9a-f]{64}", value["inspection_profile_sha256"])):
+        raise ApprovalError("invalid inspection profile digest")
     try:
         issued = datetime.fromisoformat(value["issued_at"])
         expires = datetime.fromisoformat(value["expires_at"])
@@ -96,19 +103,22 @@ def _proposal(raw: bytes, *, require_current: bool = True) -> dict[str, object]:
 def create_proposal(source_root: Path, upload_root: Path, manifest: Path,
                     upload_id: str, *, requester: str, document_id: str,
                     collection: str, classification: str, owner: str,
+                    scan_profile: Path,
                     version: str = "1") -> bytes:
     _separate_roots(source_root, upload_root)
-    item, _ = _staged(upload_root, upload_id)
+    item, payload = _staged(upload_root, upload_id)
     suffix = Path(str(item["filename"])).suffix.lower()
+    inspection_profile_sha256 = inspect_document(payload, suffix, scan_profile)
     now = datetime.now(timezone.utc)
     raw = _canonical({
-        "schema": 1, "operation": "synthetic-document-promotion",
+        "schema": 2, "operation": "synthetic-document-promotion",
         "request_id": uuid4().hex, "requested_by": requester,
         "upload_id": upload_id, "upload_sha256": item["sha256"],
         "manifest_sha256": hashlib.sha256(read_manifest_bytes(manifest)).hexdigest(),
         "document_id": document_id, "collection": collection,
         "classification": classification, "owner": owner, "version": version,
         "suffix": suffix, "issued_at": now.isoformat(),
+        "inspection_profile_sha256": inspection_profile_sha256,
         "expires_at": (now + timedelta(hours=1)).isoformat(),
     })
     proposal = _proposal(raw)
@@ -241,11 +251,16 @@ def _decode(value: object, maximum: int) -> bytes:
 
 def apply_promotion(source_root: Path, upload_root: Path, manifest: Path,
                     proposal_raw: bytes, approvals: tuple[bytes, bytes],
-                    trust_path: Path, audit_path: Path) -> str:
+                    trust_path: Path, audit_path: Path, scan_profile: Path) -> str:
     proposal = _proposal(proposal_raw)
     _separate_roots(source_root, upload_root)
     trust = _read_trust(trust_path)
     _verify_approvals(proposal_raw, approvals, trust, str(proposal["requested_by"]))
+    staged_item, staged_bytes = _staged(upload_root, str(proposal["upload_id"]))
+    if (staged_item["sha256"] != proposal["upload_sha256"] or
+            inspect_document(staged_bytes, str(proposal["suffix"]), scan_profile) !=
+            proposal["inspection_profile_sha256"]):
+        raise ApprovalError("signed inspection inputs changed")
     audit = AuditLog(audit_path)
     audit.check_clock()
     with policy_directory_lock(source_root / "roles.json", exclusive=True):
@@ -334,7 +349,7 @@ def recover_promotion(source_root: Path, manifest: Path, audit_path: Path) -> st
     if packet["schema"] != 1 or packet["request_id"] != request_id or not isinstance(packet["approvals"], list) or len(packet["approvals"]) != 2:
         raise ApprovalError("invalid approval recovery evidence")
     proposal_raw = _decode(packet["proposal"], 4096)
-    proposal = _proposal(proposal_raw, require_current=False)
+    proposal = _proposal(proposal_raw, require_current=False, allow_legacy=True)
     approvals = tuple(_decode(value, 2048) for value in packet["approvals"])
     trust = _decode(packet["trust"], 64 * 1024)
     _verify_approvals(proposal_raw, approvals, trust, str(proposal["requested_by"]))
