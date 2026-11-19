@@ -6,14 +6,17 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
 import tempfile
 import zipfile
 
-from infrastructure.restic_repository import MANIFEST, create_snapshot, restore_snapshot
+from infrastructure.restic_repository import (
+    MANIFEST, _preflight, _run, create_snapshot, restore_snapshot,
+)
+from infrastructure.backup import _unique_object
 from services.knowledge.ingestion import MAX_BYTES
 from services.knowledge.upload_staging import MAX_PENDING, quarantine_directory_lock
 
@@ -186,6 +189,46 @@ def _device(path: Path) -> int:
     return path.stat().st_dev
 
 
+def _snapshot_archive_size(snapshot_id: str, repository: Path, password_file: Path,
+                           restic: Path, restic_sha256: str) -> int:
+    """Get the exact archive size from restic's checked tool and JSON listing."""
+    if not re.fullmatch(r"[0-9a-f]{64}", snapshot_id):
+        raise UploadBackupError("invalid upload snapshot ID")
+    _preflight(restic, restic_sha256, repository, password_file)
+    listing = _run(restic, repository, password_file, "ls", snapshot_id, "--json")
+    if len(listing) > 256 * 1024:
+        raise UploadBackupError("upload snapshot listing too large")
+    try:
+        rows = [json.loads(line, object_pairs_hook=_unique_object)
+                for line in listing.splitlines() if line.strip()]
+    except (ValueError, UnicodeError) as exc:
+        raise UploadBackupError("invalid upload snapshot listing") from exc
+    snapshots = [row for row in rows if isinstance(row, dict) and
+                 row.get("struct_type", row.get("message_type")) == "snapshot"]
+    files = [row for row in rows if isinstance(row, dict) and
+             row.get("struct_type", row.get("message_type")) == "node" and
+             row.get("type") == "file"]
+    if any(not isinstance(row, dict) or
+           row.get("struct_type", row.get("message_type")) not in {"snapshot", "node"} or
+           (row.get("struct_type", row.get("message_type")) == "node" and
+            row.get("type") not in {"file", "dir"}) for row in rows):
+        raise UploadBackupError("invalid upload snapshot listing")
+    if len(snapshots) != 1 or snapshots[0].get("id") != snapshot_id or len(files) != 2:
+        raise UploadBackupError("not an upload quarantine snapshot")
+    sizes: dict[str, int] = {}
+    for row in files:
+        name, path, size = row.get("name"), row.get("path"), row.get("size")
+        if (name not in {ARCHIVE, MANIFEST} or name in sizes or
+                not isinstance(path, str) or PurePosixPath(path).name != name or
+                type(size) is not int or size < 1 or
+                size > (MAX_ARCHIVE if name == ARCHIVE else 64 * 1024)):
+            raise UploadBackupError("invalid upload snapshot file listing")
+        sizes[name] = size
+    if set(sizes) != {ARCHIVE, MANIFEST}:
+        raise UploadBackupError("not an upload quarantine snapshot")
+    return sizes[ARCHIVE]
+
+
 def _extract_archive(archive: Path, destination: Path) -> int:
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
         raise UploadBackupError("restore needs a new destination")
@@ -274,6 +317,10 @@ def restore_upload_snapshot(snapshot_id: str, repository: Path, password_file: P
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
         raise UploadBackupError("restore needs a new destination")
     _private_directory(destination.parent)
+    archive_size = _snapshot_archive_size(snapshot_id, repository, password_file,
+                                          restic, restic_sha256)
+    if shutil.disk_usage(destination.parent).free < archive_size * 2 + FREE_SPACE_RESERVE:
+        raise UploadBackupError("insufficient space for upload restore")
     with tempfile.TemporaryDirectory(prefix=".upload-restic-", dir=destination.parent) as temporary:
         restored = Path(temporary) / "restored"
         result = restore_snapshot(snapshot_id, repository, password_file, restic,
