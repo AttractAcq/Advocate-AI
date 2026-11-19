@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 from uuid import uuid4
 
@@ -53,7 +54,7 @@ def _separate_roots(source_root: Path, upload_root: Path) -> None:
         raise ApprovalError("upload area overlaps approved sources")
 
 
-def _proposal(raw: bytes) -> dict[str, object]:
+def _proposal(raw: bytes, *, require_current: bool = True) -> dict[str, object]:
     if len(raw) > 4096:
         raise ApprovalError("approval proposal too large")
     try:
@@ -86,7 +87,8 @@ def _proposal(raw: bytes) -> dict[str, object]:
         raise ApprovalError("invalid approval time") from exc
     now = datetime.now(timezone.utc)
     if (issued.tzinfo is None or expires.tzinfo is None or
-            not issued <= now < expires or expires - issued > timedelta(hours=24)):
+            not issued < expires or expires - issued > timedelta(hours=24) or
+            (require_current and not issued <= now < expires)):
         raise ApprovalError("approval proposal expired or invalid")
     return value
 
@@ -173,12 +175,77 @@ def _atomic_json(path: Path, value: object) -> None:
     _atomic_bytes(path, _canonical(value))
 
 
+def _write_new(path: Path, content: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(content)
+        stream.flush()
+        os.fsync(stream.fileno())
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _read_private(path: Path, maximum: int) -> bytes:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        details = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid() or
+                stat.S_IMODE(details.st_mode) & 0o077):
+            raise ApprovalError("approval recovery file must be owner-only")
+        content = stream.read(maximum + 1)
+    if len(content) > maximum:
+        raise ApprovalError("approval recovery file too large")
+    return content
+
+
+def _evidence_path(manifest: Path, request_id: str) -> Path:
+    directory = manifest.parent / "document-approval-evidence"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    details = directory.lstat()
+    if (not stat.S_ISDIR(details.st_mode) or details.st_uid != os.getuid() or
+            stat.S_IMODE(details.st_mode) & 0o077):
+        raise ApprovalError("approval evidence directory must be owner-only")
+    return directory / f"{request_id}.json"
+
+
+def _pending_path(manifest: Path) -> Path:
+    return manifest.with_name(manifest.name + ".pending")
+
+
+def _parse_record(raw: bytes, expected: set[str], maximum: int) -> dict[str, object]:
+    if len(raw) > maximum:
+        raise ApprovalError("approval recovery record too large")
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise ApprovalError("invalid approval recovery record") from exc
+    if not isinstance(value, dict) or set(value) != expected or raw != _canonical(value):
+        raise ApprovalError("invalid approval recovery record")
+    return value
+
+
+def _decode(value: object, maximum: int) -> bytes:
+    if not isinstance(value, str) or len(value) > maximum * 4 // 3 + 8:
+        raise ApprovalError("invalid approval recovery encoding")
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ApprovalError("invalid approval recovery encoding") from exc
+    if len(raw) > maximum:
+        raise ApprovalError("approval recovery field too large")
+    return raw
+
+
 def apply_promotion(source_root: Path, upload_root: Path, manifest: Path,
                     proposal_raw: bytes, approvals: tuple[bytes, bytes],
                     trust_path: Path, audit_path: Path) -> str:
     proposal = _proposal(proposal_raw)
     _separate_roots(source_root, upload_root)
-    _verify_approvals(proposal_raw, approvals, _read_trust(trust_path), str(proposal["requested_by"]))
+    trust = _read_trust(trust_path)
+    _verify_approvals(proposal_raw, approvals, trust, str(proposal["requested_by"]))
     audit = AuditLog(audit_path)
     audit.check_clock()
     with policy_directory_lock(source_root / "roles.json", exclusive=True):
@@ -193,37 +260,100 @@ def apply_promotion(source_root: Path, upload_root: Path, manifest: Path,
                "sha256": item["sha256"], "collection": proposal["collection"],
                "classification": proposal["classification"], "owner": proposal["owner"],
                "version": proposal["version"], "source_type": "synthetic-approved-upload"}
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        published = False
+        updated = {**payload, "sources": [*payload["sources"], row]}
+        updated_raw = _canonical(updated)
+        if len(updated_raw) > MAX_MANIFEST_BYTES:
+            raise ApprovalError("approved manifest would exceed size limit")
+        evidence = _canonical({
+            "schema": 1, "request_id": proposal["request_id"],
+            "proposal": base64.b64encode(proposal_raw).decode("ascii"),
+            "approvals": [base64.b64encode(value).decode("ascii") for value in approvals],
+            "trust": base64.b64encode(trust).decode("ascii"),
+        })
+        _write_new(_evidence_path(manifest, str(proposal["request_id"])), evidence)
+        pending = _pending_path(manifest)
+        _write_new(pending, _canonical({
+            "schema": 1, "request_id": proposal["request_id"],
+            "old_manifest": base64.b64encode(old_manifest).decode("ascii"),
+            "old_sha256": proposal["manifest_sha256"],
+            "new_sha256": hashlib.sha256(updated_raw).hexdigest(),
+            "evidence_sha256": hashlib.sha256(evidence).hexdigest(),
+        }))
+        audit_recorded = False
         try:
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream:
                 stream.write(raw)
                 stream.flush()
                 os.fsync(stream.fileno())
             _valid_source(source_root, row)
-            updated = {**payload, "sources": [*payload["sources"], row]}
-            if len(_canonical(updated)) > MAX_MANIFEST_BYTES:
-                raise ApprovalError("approved manifest would exceed size limit")
             # The Core request lock prevents a partial promotion from reaching a reader.
-            _atomic_json(manifest, updated)
-            published = True
-            try:
-                audit.append(actor=str(proposal["requested_by"]), action="document-promoted",
-                             resource=str(proposal["document_id"]), decision="allow",
-                             policy_version=hashlib.sha256(read_policy_bytes(source_root / "roles.json")).hexdigest())
-            except Exception:
-                _atomic_bytes(manifest, old_manifest)
-                published = False
-                raise
+            _atomic_bytes(manifest, updated_raw)
+            audit.append(actor=str(proposal["requested_by"]), action="document-promoted",
+                         resource=str(proposal["request_id"]), decision="allow",
+                         policy_version=hashlib.sha256(read_policy_bytes(source_root / "roles.json")).hexdigest())
+            audit_recorded = True
+            pending.unlink()
             try:
                 _atomic_json(upload_root / f"{proposal['upload_id']}.json", {**item, "status": "approved"})
                 (upload_root / f"{proposal['upload_id']}.blob").unlink(missing_ok=True)
-            except OSError:
+            except Exception:
                 # The signed manifest and audit are authoritative; stale staging
                 # metadata can be repaired without granting any extra access.
                 pass
             return str(proposal["document_id"])
         except Exception:
-            if not published:
-                target.unlink(missing_ok=True)
+            if audit_recorded:
+                # Leave the marker in place if finalisation failed after the
+                # allow event. Recovery records an explicit rollback event.
+                raise
+            # Ordinary failures restore the exact previous manifest. A process
+            # interruption leaves the marker for investigated offline recovery.
+            _atomic_bytes(manifest, old_manifest)
+            target.unlink(missing_ok=True)
+            pending.unlink()
             raise
+
+
+def recover_promotion(source_root: Path, manifest: Path, audit_path: Path) -> str:
+    """Fail-closed rollback of an interrupted signed promotion."""
+    pending_path = _pending_path(manifest)
+    marker = _parse_record(_read_private(pending_path, 12 * 1024 * 1024),
+                           {"schema", "request_id", "old_manifest", "old_sha256",
+                            "new_sha256", "evidence_sha256"}, 12 * 1024 * 1024)
+    request_id = marker["request_id"]
+    if marker["schema"] != 1 or not isinstance(request_id, str) or not _UPLOAD_ID.fullmatch(request_id):
+        raise ApprovalError("invalid approval recovery marker")
+    old_manifest = _decode(marker["old_manifest"], MAX_MANIFEST_BYTES)
+    if hashlib.sha256(old_manifest).hexdigest() != marker["old_sha256"]:
+        raise ApprovalError("approval recovery manifest digest mismatch")
+    evidence = _read_private(_evidence_path(manifest, request_id), 96 * 1024)
+    if hashlib.sha256(evidence).hexdigest() != marker["evidence_sha256"]:
+        raise ApprovalError("approval recovery evidence changed")
+    packet = _parse_record(evidence, {"schema", "request_id", "proposal", "approvals", "trust"}, 96 * 1024)
+    if packet["schema"] != 1 or packet["request_id"] != request_id or not isinstance(packet["approvals"], list) or len(packet["approvals"]) != 2:
+        raise ApprovalError("invalid approval recovery evidence")
+    proposal_raw = _decode(packet["proposal"], 4096)
+    proposal = _proposal(proposal_raw, require_current=False)
+    approvals = tuple(_decode(value, 2048) for value in packet["approvals"])
+    trust = _decode(packet["trust"], 64 * 1024)
+    _verify_approvals(proposal_raw, approvals, trust, str(proposal["requested_by"]))
+    if (proposal["request_id"] != request_id or proposal["manifest_sha256"] != marker["old_sha256"]):
+        raise ApprovalError("approval recovery proposal mismatch")
+    target = source_root / "sources" / f"{proposal['document_id']}{proposal['suffix']}"
+    audit = AuditLog(audit_path)
+    audit.check_clock()
+    with policy_directory_lock(source_root / "roles.json", exclusive=True):
+        current = read_regular_file(manifest, MAX_MANIFEST_BYTES)
+        if hashlib.sha256(current).hexdigest() not in {marker["old_sha256"], marker["new_sha256"]}:
+            raise ApprovalError("unexpected manifest during recovery")
+        if os.path.lexists(target):
+            if hashlib.sha256(read_regular_file(target, MAX_BYTES)).hexdigest() != proposal["upload_sha256"]:
+                raise ApprovalError("approved source changed during recovery")
+        _atomic_bytes(manifest, old_manifest)
+        target.unlink(missing_ok=True)
+        audit.append(actor="offline-recovery", action="document-promotion-recovered",
+                     resource=request_id, decision="rollback",
+                     policy_version=hashlib.sha256(read_policy_bytes(source_root / "roles.json")).hexdigest())
+        pending_path.unlink()
+    return request_id

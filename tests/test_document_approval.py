@@ -11,10 +11,10 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from services.knowledge.approval import ApprovalError, apply_promotion, create_proposal, sign_proposal
-from services.knowledge.manifest_io import load_manifest
+from services.knowledge.approval import ApprovalError, apply_promotion, create_proposal, recover_promotion, sign_proposal
+from services.knowledge.manifest_io import load_manifest, read_manifest_bytes
 from services.knowledge.ingestion import sync_manifest
-from services.knowledge.indexed_retrieval import approved_rows
+from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows
 from services.knowledge.upload_staging import list_uploads, stage_upload
 from services.policy.audit import verify
 
@@ -107,3 +107,52 @@ class DocumentApprovalTests(unittest.TestCase):
         self.assertEqual(self.manifest.read_bytes(), original)
         self.assertFalse((self.sources / "sources/ENG-999.txt").exists())
         self.assertEqual(list_uploads(self.uploads, "lab-chief_engineer-1")[0]["status"], "pending")
+
+    def test_interrupted_publication_fails_closed_then_recovers(self) -> None:
+        proposal = self.proposal()
+        original = self.manifest.read_bytes()
+        database = self.base / "knowledge.sqlite3"
+        sync_manifest(self.sources, self.manifest, database)
+        with patch("services.knowledge.approval.AuditLog.append", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                apply_promotion(self.sources, self.uploads, self.manifest, proposal,
+                                self.approvals(proposal), self.trust, self.audit)
+        self.assertTrue((self.manifest.parent / "approved-sources.json.pending").exists())
+        with self.assertRaises(ValueError):
+            read_manifest_bytes(self.manifest)
+        with self.assertRaises(SourceManifestError):
+            approved_rows(self.sources, self.manifest, database, "lab-chief_engineer-1")
+        self.assertEqual(recover_promotion(self.sources, self.manifest, self.audit),
+                         json.loads(proposal)["request_id"])
+        self.assertEqual(self.manifest.read_bytes(), original)
+        self.assertFalse((self.sources / "sources/ENG-999.txt").exists())
+        self.assertEqual(verify(self.audit)[0], 1)
+        self.assertFalse((self.manifest.parent / "approved-sources.json.pending").exists())
+        self.assertTrue((self.manifest.parent / "document-approval-evidence" /
+                         f"{json.loads(proposal)['request_id']}.json").is_file())
+
+    def test_tampered_recovery_evidence_keeps_manifest_closed(self) -> None:
+        proposal = self.proposal()
+        with patch("services.knowledge.approval.AuditLog.append", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                apply_promotion(self.sources, self.uploads, self.manifest, proposal,
+                                self.approvals(proposal), self.trust, self.audit)
+        evidence = self.manifest.parent / "document-approval-evidence" / f"{json.loads(proposal)['request_id']}.json"
+        evidence.write_bytes(b"tampered")
+        with self.assertRaises(ApprovalError):
+            recover_promotion(self.sources, self.manifest, self.audit)
+        with self.assertRaises(ValueError):
+            read_manifest_bytes(self.manifest)
+
+    def test_exposed_recovery_marker_keeps_manifest_closed(self) -> None:
+        proposal = self.proposal()
+        with patch("services.knowledge.approval.AuditLog.append", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                apply_promotion(self.sources, self.uploads, self.manifest, proposal,
+                                self.approvals(proposal), self.trust, self.audit)
+        marker = self.manifest.parent / "approved-sources.json.pending"
+        marker.chmod(0o644)
+        with self.assertRaises(ApprovalError):
+            recover_promotion(self.sources, self.manifest, self.audit)
+        with self.assertRaises(ValueError):
+            read_manifest_bytes(self.manifest)
