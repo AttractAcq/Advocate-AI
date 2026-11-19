@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -95,3 +96,14 @@ class DocumentApprovalTests(unittest.TestCase):
                                 requester="lab-captain-1", document_id=document_id,
                                 collection=collection, classification="C0_SYNTHETIC_ENGINEERING",
                                 owner="fictional engineering custodian")
+
+    def test_audit_failure_restores_exact_manifest_and_removes_source(self) -> None:
+        proposal = self.proposal()
+        original = self.manifest.read_bytes()
+        with patch("services.knowledge.approval.AuditLog.append", side_effect=OSError("audit unavailable")):
+            with self.assertRaises(OSError):
+                apply_promotion(self.sources, self.uploads, self.manifest, proposal,
+                                self.approvals(proposal), self.trust, self.audit)
+        self.assertEqual(self.manifest.read_bytes(), original)
+        self.assertFalse((self.sources / "sources/ENG-999.txt").exists())
+        self.assertEqual(list_uploads(self.uploads, "lab-chief_engineer-1")[0]["status"], "pending")
