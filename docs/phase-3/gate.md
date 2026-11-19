@@ -21,6 +21,10 @@ indirect prompt injection. See the [runbook](runbook.md),
 The [answer evaluation](answer-evaluation.json) contains all 50 generated
 answers and proxy scores. Source labels in model prose are not a substitute
 for verifying API citation metadata and support for each claim.
+An [internal answer-by-answer review](claim-support-review.md) found six
+wording or support exceptions among the 40 allowed responses. The historical
+report does not retain structured citation objects or exact passages, so this
+review does not close AT-09 or replace independent assessment.
 
 Phase 3 does not authorise vessel data. The G1 hardware/offline items from
 [Phase 2](../phase-2/gate.md) also remain open.
