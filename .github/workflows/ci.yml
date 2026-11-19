@@ -23,6 +23,13 @@ jobs:
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
       - name: Exercise isolated synthetic stack
         run: bash infrastructure/containers/smoke.sh
+      - name: Exercise Core against networkless pgvector socket
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          docker pull "$image"
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image "$image" --core-image sovereign-core:synthetic
       - name: Build and exercise separate Fleet images
         run: |
           docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
