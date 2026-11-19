@@ -98,6 +98,14 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 elif url.path == "/api/fleet/me":
                     self.send_bytes(200, b'{"id":"admin","role":"fleet_admin","customer_codes":["*"]}',
                                     "application/json")
+                elif url.path == "/api/fleet/overview":
+                    self.send_bytes(200, json.dumps({
+                        "as_of": datetime.now(timezone.utc).date().isoformat(),
+                        "counts": {kind: 0 for kind in (
+                            "customer", "release", "deployment", "licence", "ticket",
+                            "maintenance", "receipt")},
+                        "attention_total": 0, "attention": [],
+                    }).encode(), "application/json")
                 else:
                     self.send_bytes(200, b"[]", "application/json")
                 return
