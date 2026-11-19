@@ -10,8 +10,10 @@ creating a snapshot. The adapter checks the exact `.json` and `.blob` file
 inventory, owner-only modes, pending metadata, sizes and SHA-256 digests.
 Approved records may retain metadata but no upload bytes. It rejects orphaned,
 linked or unexpected files. The bounded synthetic profile accepts at most 100
-pending uploads, 1,024 records and 240 MiB of payload. If the upload area
-exceeds that bound, the backup fails; no partial snapshot is accepted. The
+pending uploads, 1,024 records and 900 MiB of payload, covering the full
+100-by-8-MiB pending queue. The scanner, archive writer and restore extractor
+process blobs in bounded chunks. If the upload area exceeds the limit, the
+backup fails; no partial snapshot is accepted. The
 private plaintext staging parent must be separate from the upload area and
 protected by an encrypted filesystem before vessel use.
 

@@ -14,7 +14,7 @@ import stat
 import subprocess
 import tempfile
 
-from infrastructure.backup import BackupError, _name, _snapshot, _unique_object
+from infrastructure.backup import BackupError, MAX_FILE, _name, _snapshot, _unique_object
 
 RESTIC_VERSION = "0.19.1"
 MANIFEST = "sovereign-snapshot-manifest.json"
@@ -76,7 +76,8 @@ def _preflight(restic: Path, restic_sha256: str, repository: Path,
 
 
 def create_snapshot(spec_path: Path, repository: Path, password_file: Path,
-                    restic: Path, restic_sha256: str, staging_parent: Path) -> dict[str, object]:
+                    restic: Path, restic_sha256: str, staging_parent: Path,
+                    *, max_file: int = MAX_FILE) -> dict[str, object]:
     """Snapshot SQLite and allowlisted files, then store them in local restic."""
     _preflight(restic, restic_sha256, repository, password_file)
     if not staging_parent.is_dir() or staging_parent.is_symlink():
@@ -85,7 +86,8 @@ def create_snapshot(spec_path: Path, repository: Path, password_file: Path,
     with tempfile.TemporaryDirectory(prefix=".sovereign-restic-", dir=staging_parent) as temporary:
         stage = Path(temporary) / "snapshot"
         stage.mkdir(mode=0o700)
-        rows = _snapshot(spec, spec_path.parent, stage, password_file, repository)
+        rows = _snapshot(spec, spec_path.parent, stage, password_file, repository,
+                         max_file=max_file)
         if any(row["name"] == MANIFEST for row in rows):
             raise ResticError("reserved snapshot manifest name")
         manifest = {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),

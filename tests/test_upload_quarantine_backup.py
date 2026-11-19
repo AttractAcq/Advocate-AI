@@ -7,9 +7,11 @@ import unittest
 from unittest.mock import patch
 
 from infrastructure.upload_quarantine_backup import (
-    UploadBackupError, _extract_archive, _read_inventory, _write_archive,
+    MAX_ARCHIVE, MAX_TOTAL, UploadBackupError, _extract_archive, _read_inventory,
+    _scan_inventory, _write_archive, _write_archive_from_root,
     create_upload_snapshot, restore_upload_snapshot,
 )
+from services.knowledge.ingestion import MAX_BYTES
 from services.knowledge.upload_staging import stage_upload
 
 
@@ -69,7 +71,8 @@ class UploadQuarantineBackupTests(unittest.TestCase):
 
     def test_restic_adapter_uses_only_private_single_archive(self) -> None:
         def fake_create(spec: Path, repository: Path, password: Path, restic: Path,
-                        digest: str, staging: Path) -> dict[str, object]:
+                        digest: str, staging: Path, *, max_file: int) -> dict[str, object]:
+            self.assertEqual(max_file, MAX_ARCHIVE)
             definition = json.loads(spec.read_text())
             self.assertEqual(len(definition["files"]), 1)
             self.assertEqual(definition["files"][0]["name"], "upload-quarantine.zip")
@@ -83,6 +86,23 @@ class UploadQuarantineBackupTests(unittest.TestCase):
                 self.root / "password", self.root / "restic", "b" * 64, self.staging)
         self.assertEqual(created["quarantine_files"], 2)
         self.assertEqual(list(self.staging.iterdir()), [])
+
+    def test_streaming_profile_covers_full_pending_queue_and_detects_change(self) -> None:
+        self.assertGreaterEqual(MAX_TOTAL, 100 * MAX_BYTES)
+        payload = b"x" * MAX_BYTES
+        for number in range(3):
+            stage_upload(self.uploads, "lab-engineer", f"fictional-{number}.txt", payload)
+        rows = _scan_inventory(self.uploads)
+        self.assertEqual(len(rows), 8)
+        archive = self.staging / "streamed.zip"
+        _write_archive_from_root(archive, self.uploads, rows)
+        restored = self.root / "streamed-restore"
+        self.assertEqual(_extract_archive(archive, restored), 8)
+        self.assertEqual(_scan_inventory(restored), rows)
+        blob = self.uploads / f"{self.record['id']}.blob"
+        blob.write_bytes(b"changed")
+        with self.assertRaisesRegex(UploadBackupError, "changed"):
+            _write_archive_from_root(self.staging / "denied.zip", self.uploads, rows)
 
     def test_restore_rejects_non_quarantine_snapshot(self) -> None:
         def fake_restore(snapshot: str, repository: Path, password: Path,
