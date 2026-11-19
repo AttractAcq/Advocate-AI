@@ -402,6 +402,7 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                 document.querySelector('#kc-totp-settings-form').requestSubmit();
             """, "args": [enrollment_code]})
         until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
+        until(session, "document.querySelector('[aria-label=\"Operational attention\"] .panel-heading span')?.textContent?.includes('as of')", 45)
         cleared = driver_request("POST", f"/session/{session}/execute/sync", {"script": """
             return !location.search && !sessionStorage.getItem('sovereign_fleet_oidc_state')
                 && !sessionStorage.getItem('sovereign_fleet_pkce_verifier');

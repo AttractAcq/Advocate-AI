@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import base64
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import tempfile
@@ -20,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from apps.api.oidc import OidcVerifier
 from apps.fleet.main import FleetSettings, create_app
 from services.fleet.catalog import (
-    Customer, Deployment, DeploymentReceipt, FleetCatalog, Release,
+    Customer, Deployment, DeploymentReceipt, FleetCatalog, Licence, Release, Ticket,
 )
 from services.fleet.offline_import import key_id, receipt_bytes
 from scripts.phase8_fleet_oidc_rehearsal import _post_signed_receipt
@@ -147,6 +148,45 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
             "/api/fleet/customers", headers={"X-Fleet-Lab-Token":
                                               "synthetic-fleet-admin-token-0123456789"}
         )).status_code, 401)
+
+    async def test_operational_overview_obeys_customer_scope(self) -> None:
+        catalog = FleetCatalog(self.db)
+        catalog.add_verified_release(Release(
+            code="REL-LAB1", version="1.0.0", manifest_sha256="a" * 64,
+            signing_key_id="b" * 64, status="candidate"))
+        catalog.transition("release", "REL-LAB1", "approved")
+        today = datetime.now(timezone.utc).date()
+        for suffix in ("1", "2"):
+            customer, vessel = f"CUST-LAB{suffix}", f"VSL-LAB{suffix}"
+            catalog.add("customer", Customer(code=customer, category="owner_manager"))
+            catalog.add("deployment", Deployment(
+                code=vessel, customer_code=customer, release_code="REL-LAB1",
+                hardware_profile="pilot_gpu", status="pilot"))
+            catalog.add("licence", Licence(
+                code=f"LIC-LAB{suffix}", customer_code=customer, vessel_code=vessel,
+                tier="pilot", valid_from=today - timedelta(days=30),
+                valid_until=today - timedelta(days=1), status="active"))
+            catalog.add("ticket", Ticket(
+                code=f"TKT-LAB{suffix}", vessel_code=vessel, category="recovery",
+                priority="p1", status="open"))
+        support = self.headers("support", "fleet_support")
+        scoped = (await self.client.get("/api/fleet/overview", headers=support)).json()
+        self.assertEqual(scoped["counts"], {
+            "customer": 1, "release": 0, "deployment": 1, "licence": 1,
+            "ticket": 1, "maintenance": 0, "receipt": 0})
+        self.assertEqual(scoped["attention_total"], 2)
+        self.assertEqual({item["code"] for item in scoped["attention"]},
+                         {"LIC-LAB1", "TKT-LAB1"})
+        global_view = (await self.client.get(
+            "/api/fleet/overview", headers=self.headers("admin", "fleet_admin"))).json()
+        self.assertEqual(global_view["counts"]["licence"], 2)
+        self.assertEqual(global_view["counts"]["release"], 1)
+        self.assertEqual(global_view["attention_total"], 4)
+        self.policy["users"][2]["customer_codes"] = []
+        self._write_policy()
+        empty = (await self.client.get("/api/fleet/overview", headers=support)).json()
+        self.assertEqual(sum(empty["counts"].values()), 0)
+        self.assertEqual(empty["attention"], [])
 
     async def test_oidc_scoped_admin_imports_only_trusted_signed_receipt(self) -> None:
         catalog = FleetCatalog(self.db)

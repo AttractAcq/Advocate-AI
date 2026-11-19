@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import base64
+from datetime import datetime, timedelta, timezone
 import os
 from contextlib import closing
 from pathlib import Path
@@ -92,6 +93,43 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("payload", audit[-1])
         self.assertEqual(len((await self.client.get("/api/fleet/licences")).json()), 1)
         self.assertEqual(self.db.stat().st_mode & 0o077, 0)
+
+    async def test_overview_counts_and_flags_without_mutating_status(self) -> None:
+        await self._seed()
+        today = datetime.now(timezone.utc).date()
+        licences = (
+            ("LIC-PAST1", today - timedelta(days=1), today - timedelta(days=40)),
+            ("LIC-SOON1", today + timedelta(days=10), today - timedelta(days=40)),
+            ("LIC-EARLY1", today + timedelta(days=100), today + timedelta(days=1)),
+        )
+        for code, until, start in licences:
+            response = await self.client.post("/api/fleet/licences", json={
+                "code": code, "customer_code": "CUST-ACME1", "vessel_code": "VSL-TEST1",
+                "tier": "pilot", "valid_from": start.isoformat(),
+                "valid_until": until.isoformat(), "status": "active"})
+            self.assertEqual(response.status_code, 201, response.text)
+        for code, priority in (("TKT-HIGH1", "p1"), ("TKT-LOW1", "p4")):
+            response = await self.client.post("/api/fleet/tickets", json={
+                "code": code, "vessel_code": "VSL-TEST1",
+                "category": "recovery", "priority": priority, "status": "open"})
+            self.assertEqual(response.status_code, 201, response.text)
+        response = await self.client.post("/api/fleet/maintenance", json={
+            "code": "MNT-LATE1", "vessel_code": "VSL-TEST1", "kind": "backup_rehearsal",
+            "due_on": (today - timedelta(days=1)).isoformat(),
+            "engineer_code": "ENGR-LAB1", "status": "planned"})
+        self.assertEqual(response.status_code, 201, response.text)
+        summary = (await self.client.get("/api/fleet/overview")).json()
+        self.assertEqual(summary["as_of"], today.isoformat())
+        self.assertEqual(summary["counts"], {
+            "customer": 1, "release": 1, "deployment": 1, "licence": 3,
+            "ticket": 2, "maintenance": 1, "receipt": 0})
+        self.assertEqual(summary["attention_total"], 5)
+        self.assertEqual({item["reason"] for item in summary["attention"]}, {
+            "licence_past_end", "licence_ends_soon", "licence_not_started",
+            "maintenance_overdue", "urgent_support"})
+        self.assertEqual(len((await self.client.get("/api/fleet/licences")).json()), 3)
+        self.assertTrue(all(row["status"] == "active" for row in
+                            (await self.client.get("/api/fleet/licences")).json()))
 
     async def test_prompt_document_embedding_and_log_fields_are_rejected(self) -> None:
         await self._seed()

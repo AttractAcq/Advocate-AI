@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from bisect import insort
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -379,6 +380,57 @@ class FleetCatalog:
                 if len(result) == limit:
                     break
             return result
+
+    def operational_overview(self, as_of: date, *,
+                             allowed_customers: frozenset[str] | None = None
+                             ) -> dict[str, object]:
+        """Count visible coded records and bound a read-only attention queue."""
+        if type(as_of) is not date:
+            raise FleetError("invalid Fleet overview date")
+        counts = {kind: 0 for kind in KIND_MODELS}
+        attention: list[tuple[int, str, str, dict[str, object]]] = []
+        attention_total = 0
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            self._verify(connection)
+            for row in connection.execute("SELECT kind, payload FROM records ORDER BY kind, code"):
+                kind = str(row["kind"])
+                data = json.loads(row["payload"])
+                customer = self._customer_of(connection, kind, data)
+                if allowed_customers is not None and customer not in allowed_customers:
+                    continue
+                counts[kind] += 1
+                reason: str | None = None
+                due_on: str | None = None
+                priority = 2
+                if kind == "licence" and data["status"] == "active":
+                    start = date.fromisoformat(data["valid_from"])
+                    end = date.fromisoformat(data["valid_until"])
+                    if as_of < start:
+                        reason, due_on, priority = "licence_not_started", data["valid_from"], 0
+                    elif as_of > end:
+                        reason, due_on, priority = "licence_past_end", data["valid_until"], 0
+                    elif end <= as_of + timedelta(days=30):
+                        reason, due_on = "licence_ends_soon", data["valid_until"]
+                elif kind == "maintenance" and data["status"] == "planned" and \
+                        date.fromisoformat(data["due_on"]) < as_of:
+                    reason, due_on, priority = "maintenance_overdue", data["due_on"], 0
+                elif kind == "ticket" and data["status"] != "resolved" and \
+                        data["priority"] in {"p1", "p2"}:
+                    reason, priority = "urgent_support", 1
+                if reason is not None:
+                    attention_total += 1
+                    item = {"kind": kind, "code": data["code"],
+                            "customer_code": customer, "vessel_code": data["vessel_code"],
+                            "reason": reason, "due_on": due_on}
+                    rank = (priority, due_on or "9999-12-31", data["code"], item)
+                    if len(attention) < 100 or rank[:3] < attention[-1][:3]:
+                        insort(attention, rank)
+                        if len(attention) > 100:
+                            attention.pop()
+        return {"as_of": as_of.isoformat(), "counts": counts,
+                "attention_total": attention_total,
+                "attention": [item[3] for item in attention]}
 
     def audit(self, *, after: int = 0, limit: int = 100,
               allowed_customers: frozenset[str] | None = None) -> list[dict[str, object]]:

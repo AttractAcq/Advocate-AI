@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import secrets
@@ -168,6 +169,15 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     def me(user: dict = Depends(authorise)):
         return {"id": user["id"], "role": user["role"],
                 "customer_codes": user["customer_codes"]}
+
+    @router.get("/overview")
+    def overview(user: dict = Depends(authorise)):
+        try:
+            return catalog.operational_overview(datetime.now(timezone.utc).date(),
+                                                allowed_customers=scope(user))
+        except FleetIntegrityError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Fleet store integrity check failed") from exc
 
     def add(kind: str, record):
         try:
