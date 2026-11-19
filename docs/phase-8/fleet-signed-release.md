@@ -235,8 +235,10 @@ The synthetic daily backup candidate creates a new timestamped encrypted
 archive and immediately performs an authenticated clean restore of the newest
 archive, including the Fleet audit-chain check. It fails if no archive exists,
 the newest one is stale or damaged, or the archive count reaches the configured
-limit. It never deletes an archive: an owner-approved retention policy and
-protected storage capacity are still required. Render the units into a private
+limit. The timer never deletes an archive. The service creates an owner-only
+`.fleet-backup.lock` in the archive directory, shared with the manual retention
+command. An owner-approved production retention policy and protected storage
+capacity are still required. Render the units into a private
 staging directory, review them, and validate with `systemd-analyze verify`
 on a compatible host before installation. The `sovereign-fleet` service user
 must own the catalog, archive directory and key source. The timer and service
@@ -251,6 +253,32 @@ names are fixed so the timer cannot point at a different unit.
   --workdir /opt/sovereign --hour-utc 3 --max-age-hours 26 \
   --max-archives 30
 ```
+
+The manual synthetic retention command takes an owner-only JSON policy such as
+`{"schema":1,"keep_last":2,"max_age_hours":26}`. `plan` records the exact
+archive names, sizes and SHA-256 digests in a new owner-only file outside the
+archive directory; it deletes nothing. Review its `retain` and `remove` lists,
+then supply the printed plan digest to `apply` within 24 hours. `apply` rejects
+changed policy bytes, archive inventory or directory identity and clean-restores
+every retained encrypted archive before deleting the listed older archives.
+The latest retained archive must meet the policy freshness limit. A failed
+restore leaves every archive in place. If deletion is interrupted, inspect the
+remaining set and make a new plan; there is no automatic retry or rollback.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_backup_retention plan \
+  --directory /private/backups --policy /protected/fleet-retention.json \
+  --output /protected/fleet-retention-plan.json
+.venv/bin/python -m infrastructure.deploy.fleet_backup_retention apply \
+  --directory /private/backups --policy /protected/fleet-retention.json \
+  --plan /protected/fleet-retention-plan.json --plan-sha256 REVIEWED_DIGEST \
+  --key /protected/fleet-backup.key
+```
+
+The minimum keep count of two is a software guard, not an approved retention
+period. The company must approve policy, archive media, legal holds and key
+custody before this process can govern production backups. Target systemd and
+protected-media behavior remain unverified.
 
 For boot recovery, render the Fleet one-shot unit into the same private staging
 area and validate it before installation. It waits for Docker, requires an
