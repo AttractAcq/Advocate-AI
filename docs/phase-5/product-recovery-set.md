@@ -30,7 +30,9 @@ directory, rechecks their digests there, and gives that frozen copy to restic.
 Before staging, it estimates the manifest and source file bytes and requires
 that space plus a 128 MiB reserve on the staging volume. This is a source-copy
 preflight; restic's later staging and repository peaks still need a separate
-capacity check.
+capacity check. The [restic adapter](restic-repository.md) now makes that
+estimated check before copying; actual target-host peak usage and filesystem
+quotas remain open.
 It checks the live source inventory and manifest again before signing the
 receipt; a change during capture leaves no receipt. This guards the synthetic
 source pair against an external writer while restic copies it. The knowledge
