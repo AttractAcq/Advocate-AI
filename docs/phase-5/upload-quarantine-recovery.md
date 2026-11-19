@@ -28,6 +28,15 @@ have room for all three copies. Insufficient space fails before creating a
 repository snapshot. This estimate is deliberately conservative; target-host
 capacity, filesystem quotas and sustained restore space still need validation.
 
+Restore first reads the exact snapshot's JSON file listing through the pinned
+restic binary. It requires one archive and one Sovereign manifest, then checks
+space for the encrypted restore's plaintext archive and extracted quarantine
+plus the same reserve. The checked listing is only a capacity estimate; the
+normal repository integrity, manifest, archive and upload-digest checks still
+run before the new destination appears. Filesystem quotas and measured
+clean-host restore capacity remain target gates.
+The listing parser follows the [restic v0.19.1 JSON `ls` format](https://github.com/restic/restic/blob/v0.19.1/doc/075_scripting.rst#ls).
+
 ```sh
 .venv/bin/python -m infrastructure.upload_quarantine_backup create \
   --upload-root /path/to/product-uploads \

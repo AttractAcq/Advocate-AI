@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from infrastructure.upload_quarantine_backup import (
     MAX_ARCHIVE, MAX_TOTAL, UploadBackupError, _extract_archive, _read_inventory,
-    _scan_inventory, _write_archive, _write_archive_from_root,
+    _scan_inventory, _snapshot_archive_size, _write_archive, _write_archive_from_root,
     create_upload_snapshot, restore_upload_snapshot,
 )
 from services.knowledge.ingestion import MAX_BYTES
@@ -155,7 +155,9 @@ class UploadQuarantineBackupTests(unittest.TestCase):
             return {"files": 1}
 
         destination = self.root / "restored"
-        with patch("infrastructure.upload_quarantine_backup.restore_snapshot",
+        with patch("infrastructure.upload_quarantine_backup._snapshot_archive_size",
+                   return_value=4096), \
+             patch("infrastructure.upload_quarantine_backup.restore_snapshot",
                    side_effect=fake_restore):
             with self.assertRaisesRegex(UploadBackupError, "not an upload"):
                 restore_upload_snapshot("a" * 64, self.root / "repo",
@@ -174,13 +176,53 @@ class UploadQuarantineBackupTests(unittest.TestCase):
             return {"files": 1}
 
         destination = self.root / "restored"
-        with patch("infrastructure.upload_quarantine_backup.restore_snapshot",
+        with patch("infrastructure.upload_quarantine_backup._snapshot_archive_size",
+                   return_value=4096), \
+             patch("infrastructure.upload_quarantine_backup.restore_snapshot",
                    side_effect=fake_restore):
             result = restore_upload_snapshot("a" * 64, self.root / "repo",
                 self.root / "password", self.root / "restic", "b" * 64,
                 destination)
         self.assertEqual(result["quarantine_files"], 2)
         self.assertEqual(_read_inventory(destination), (files, rows))
+
+    def test_restore_space_check_precedes_restic_restore(self) -> None:
+        destination = self.root / "restored"
+        with patch("infrastructure.upload_quarantine_backup._snapshot_archive_size",
+                   return_value=MAX_ARCHIVE), \
+             patch("infrastructure.upload_quarantine_backup.shutil.disk_usage",
+                   return_value=SimpleNamespace(free=0)), \
+             patch("infrastructure.upload_quarantine_backup.restore_snapshot") as restic:
+            with self.assertRaisesRegex(UploadBackupError, "insufficient space"):
+                restore_upload_snapshot("a" * 64, self.root / "repo",
+                    self.root / "password", self.root / "restic", "b" * 64,
+                    destination)
+        restic.assert_not_called()
+        self.assertFalse(destination.exists())
+
+    def test_restic_listing_size_is_exact_and_rejects_extra_file(self) -> None:
+        snapshot_id = "a" * 64
+        listing = [
+            {"struct_type": "snapshot", "id": snapshot_id},
+            {"struct_type": "node", "type": "dir", "name": "snapshot", "path": "/snapshot"},
+            {"struct_type": "node", "type": "file", "name": "upload-quarantine.zip",
+             "path": "/snapshot/upload-quarantine.zip", "size": 4096},
+            {"struct_type": "node", "type": "file", "name": "sovereign-snapshot-manifest.json",
+             "path": "/snapshot/sovereign-snapshot-manifest.json", "size": 256},
+        ]
+        with patch("infrastructure.upload_quarantine_backup._preflight"), \
+             patch("infrastructure.upload_quarantine_backup._run",
+                   return_value="\n".join(json.dumps(row) for row in listing)):
+            self.assertEqual(_snapshot_archive_size(snapshot_id, self.root / "repo",
+                self.root / "password", self.root / "restic", "b" * 64), 4096)
+        listing.append({"struct_type": "node", "type": "file", "name": "unexpected.txt",
+                        "path": "/snapshot/unexpected.txt", "size": 1})
+        with patch("infrastructure.upload_quarantine_backup._preflight"), \
+             patch("infrastructure.upload_quarantine_backup._run",
+                   return_value="\n".join(json.dumps(row) for row in listing)):
+            with self.assertRaisesRegex(UploadBackupError, "not an upload"):
+                _snapshot_archive_size(snapshot_id, self.root / "repo",
+                    self.root / "password", self.root / "restic", "b" * 64)
 
 
 if __name__ == "__main__":
