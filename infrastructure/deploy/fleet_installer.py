@@ -296,6 +296,8 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
                   ca_file: Path | None = None) -> dict[str, object]:
     _owner_directory(root, create=True)
     with _lock(root):
+        if _read_ca_journal(root) is not None:
+            raise FleetInstallError("recover interrupted Fleet CA rotation first")
         issuer = validate_config(config)
         current = _state(root)
         if issuer is not None and identity_network is None and current is not None:
@@ -330,6 +332,8 @@ def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
 
 
 def fleet_status(root: Path, trusted_key: Path) -> dict[str, object]:
+    if _read_ca_journal(root) is not None:
+        raise FleetInstallError("Fleet CA rotation is pending recovery")
     current = _state(root)
     if current is None:
         raise FleetInstallError("no active Fleet release")
@@ -340,6 +344,21 @@ def fleet_status(root: Path, trusted_key: Path) -> dict[str, object]:
                   root / "state", stage / "fleet-config.json")
     return {"result": "healthy", "active": identifier,
             "previous": current["previous"]}
+
+
+def _validate_ca_bundle(data: bytes) -> None:
+    try:
+        certificates = x509.load_pem_x509_certificates(data)
+        now = datetime.now(timezone.utc)
+        if not certificates or any(
+                not certificate.extensions.get_extension_for_class(
+                    x509.BasicConstraints).value.ca or
+                certificate.not_valid_before_utc > now or
+                certificate.not_valid_after_utc <= now
+                for certificate in certificates):
+            raise FleetInstallError("Fleet CA bundle must contain valid CA certificates")
+    except (ValueError, x509.ExtensionNotFound) as exc:
+        raise FleetInstallError("invalid Fleet CA bundle") from exc
 
 
 def _read_ca_source(source: Path) -> bytes:
@@ -358,18 +377,7 @@ def _read_ca_source(source: Path) -> bytes:
         os.close(descriptor)
     if len(data) > 64 * 1024:
         raise FleetInstallError("Fleet CA source is too large")
-    try:
-        certificates = x509.load_pem_x509_certificates(data)
-        now = datetime.now(timezone.utc)
-        if not certificates or any(
-                not certificate.extensions.get_extension_for_class(
-                    x509.BasicConstraints).value.ca or
-                certificate.not_valid_before_utc > now or
-                certificate.not_valid_after_utc <= now
-                for certificate in certificates):
-            raise FleetInstallError("Fleet CA bundle must contain valid CA certificates")
-    except (ValueError, x509.ExtensionNotFound) as exc:
-        raise FleetInstallError("invalid Fleet CA bundle") from exc
+    _validate_ca_bundle(data)
     return data
 
 
@@ -386,11 +394,73 @@ def _private_temp(directory: Path, prefix: str, data: bytes) -> Path:
     return Path(filename)
 
 
+def _ca_journal(root: Path) -> Path:
+    return root / "identity" / ".ca-rotation.json"
+
+
+def _write_ca_journal(root: Path, current: dict[str, object], old_ca: bytes) -> Path:
+    journal = _ca_journal(root)
+    payload = json.dumps({"schema": 1, "old_state": current,
+                          "old_ca": old_ca.decode("ascii")},
+                         sort_keys=True, separators=(",", ":")).encode()
+    descriptor = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        journal.unlink(missing_ok=True)
+        raise
+    return journal
+
+
+def _read_ca_journal(root: Path) -> dict[str, object] | None:
+    journal = _ca_journal(root)
+    if not journal.exists() and not journal.is_symlink():
+        return None
+    if (journal.is_symlink() or not journal.is_file() or
+            journal.stat().st_uid != os.getuid() or
+            stat.S_IMODE(journal.stat().st_mode) & 0o077 or
+            journal.stat().st_size > 128 * 1024):
+        raise FleetInstallError("invalid Fleet CA rotation journal")
+    try:
+        value = json.loads(journal.read_bytes(), object_pairs_hook=_unique)
+        if (not isinstance(value, dict) or set(value) != {"schema", "old_state", "old_ca"}
+                or value["schema"] != 1 or not isinstance(value["old_state"], dict)
+                or not isinstance(value["old_ca"], str)):
+            raise ValueError("invalid rotation journal fields")
+        old = value["old_state"]
+        runtime = old.get("runtime")
+        if (set(old) != {"schema", "active", "previous", "runtime"} or
+                old["schema"] != 1 or not isinstance(old["active"], str) or
+                not _RELEASE.fullmatch(old["active"]) or
+                (old["previous"] is not None and
+                 (not isinstance(old["previous"], str) or
+                  not _RELEASE.fullmatch(old["previous"]))) or
+                not isinstance(runtime, dict) or
+                set(runtime) != {"network_id", "api_id", "portal_id",
+                                 "identity_network_id", "identity_network_name"} or
+                any(not isinstance(runtime.get(key), str) or
+                    not _DOCKER_ID.fullmatch(runtime[key])
+                    for key in ("network_id", "api_id", "portal_id",
+                                "identity_network_id")) or
+                not isinstance(runtime.get("identity_network_name"), str)):
+            raise ValueError("invalid rotation journal state")
+        _validate_ca_bundle(value["old_ca"].encode("ascii"))
+    except (ValueError, UnicodeError) as exc:
+        raise FleetInstallError("invalid Fleet CA rotation journal") from exc
+    return value
+
+
 def rotate_fleet_ca(root: Path, trusted_key: Path, crane: Path,
                     ca_file: Path) -> dict[str, object]:
     """Start a signed candidate with staged CA trust; retain the old runtime on failure."""
     _owner_directory(root)
     with _lock(root):
+        if _read_ca_journal(root) is not None:
+            raise FleetInstallError("recover interrupted Fleet CA rotation first")
         current = _state(root)
         if current is None:
             raise FleetInstallError("no active Fleet release")
@@ -409,6 +479,7 @@ def rotate_fleet_ca(root: Path, trusted_key: Path, crane: Path,
                       root / "state", stage / "fleet-config.json")
         staged = _private_temp(identity, ".ca-next-", replacement)
         try:
+            journal = _write_ca_journal(root, current, previous)
             os.replace(staged, old_ca)
             try:
                 candidate = start_verified_bundle(
@@ -423,17 +494,47 @@ def rotate_fleet_ca(root: Path, trusted_key: Path, crane: Path,
             except Exception:
                 fallback = _private_temp(identity, ".ca-restore-", previous)
                 os.replace(fallback, old_ca)
+                journal.unlink()
                 raise
         finally:
             staged.unlink(missing_ok=True)
+        journal.unlink()
         stop_runtime(handle)
         return {"result": "identity_rotated", "active": identifier,
                 "previous": current["previous"]}
 
 
+def _reconcile_ca_rotation(root: Path, trusted_key: Path) -> None:
+    pending = _read_ca_journal(root)
+    if pending is None:
+        return
+    current = _state(root)
+    old = pending["old_state"]
+    if current is None or not isinstance(old, dict) or current["active"] != old.get("active"):
+        raise FleetInstallError("Fleet CA rotation journal does not match active release")
+    identity = root / "identity"
+    _owner_directory(identity)
+    target = identity / "ca.pem"
+    old_runtime = _handle(old)
+    current_runtime = _handle(current)
+    if current_runtime.api_id == old_runtime.api_id:
+        restored = _private_temp(identity, ".ca-recovery-",
+                                 pending["old_ca"].encode("ascii"))
+        os.replace(restored, target)
+    else:
+        stage = root / "fleet-releases" / str(current["active"])
+        _verify_stage(stage, trusted_key, str(current["active"]))
+        probe_runtime(current_runtime, stage / "bundle", trusted_key,
+                      root / "state", stage / "fleet-config.json")
+        stop_runtime(old_runtime)
+    _ca_journal(root).unlink()
+
+
 def rollback_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, object]:
     _owner_directory(root)
     with _lock(root):
+        if _read_ca_journal(root) is not None:
+            raise FleetInstallError("recover interrupted Fleet CA rotation first")
         current = _state(root)
         if current is None or current["previous"] is None:
             raise FleetInstallError("no previous Fleet release")
@@ -446,6 +547,7 @@ def rollback_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, obje
 def recover_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, object]:
     _owner_directory(root)
     with _lock(root):
+        _reconcile_ca_rotation(root, trusted_key)
         current = _state(root)
         if current is None:
             raise FleetInstallError("no active Fleet release")

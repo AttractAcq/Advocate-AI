@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from infrastructure.deploy.fleet_installer import (
     FleetInstallError, fleet_status, install_fleet, recover_fleet, rollback_fleet,
-    rotate_fleet_ca,
+    rotate_fleet_ca, _state, _write_ca_journal,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError
 from infrastructure.deploy.fleet_runtime import (
@@ -220,6 +220,14 @@ class FleetInstallerTests(unittest.TestCase):
             self.assertEqual(fleet_status(self.root, self.trusted)["active"],
                              installed["active"])
             self.assertEqual(stopped, [])
+            _write_ca_journal(self.root, _state(self.root), old_ca.read_bytes())
+            active_ca.write_bytes(new_ca.read_bytes())
+            with self.assertRaises(FleetInstallError):
+                fleet_status(self.root, self.trusted)
+            self.assertEqual(recover_fleet(self.root, self.trusted, self.crane)["result"],
+                             "already_healthy")
+            self.assertEqual(active_ca.read_bytes(), old_ca.read_bytes())
+            self.assertFalse((self.root / "identity" / ".ca-rotation.json").exists())
             rotated = rotate_fleet_ca(self.root, self.trusted, self.crane, source)
             self.assertEqual(rotated["result"], "identity_rotated")
             self.assertEqual(rotated["active"], installed["active"])

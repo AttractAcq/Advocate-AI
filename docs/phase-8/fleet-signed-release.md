@@ -124,10 +124,14 @@ The new API instance clears the five-minute JWKS cache at signing-key cutover.
 Stage an overlapping CA bundle before changing the IdP certificate. After
 the IdP serves the new certificate and signing key, rotate to the new-only CA
 bundle. The local rehearsal checks rejected candidate rollback, overlapping
-trust, cutover and stale-trust denial. An abrupt interruption between CA
-staging and active-state replacement is not yet automatically reconciled;
-recover the previous CA from protected media before restarting the installer.
-Company CA custody, approved rollover timing and target ingress remain B-12.
+trust, cutover and stale-trust denial. An owner-only journal records the old
+CA and runtime before staging. `status`, `install` and `rollback` stop if a
+rotation is interrupted. `recover` restores the old CA when the old runtime
+is still active, or verifies the committed candidate before retiring the old
+runtime. If the committed candidate is unhealthy after a process crash,
+recovery fails closed and leaves the journal for operator investigation.
+Company CA custody, approved rollover timing, target ingress and interrupted
+host-reboot rehearsal remain B-12.
 The synthetic runner maps that temporary IdP hostname to its private network
 address because the hosted Linux Docker runner does not resolve its network
 alias from the two-network API container. This mapping is confined to the
