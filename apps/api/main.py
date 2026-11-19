@@ -74,7 +74,7 @@ class Settings:
     inference_endpoint: str = "http://127.0.0.1:11434/v1"
     model_name: str = "qwen3.5:2b"
     knowledge_manifest: Path | None = None
-    knowledge_db: Path | None = None
+    knowledge_db: Path | str | None = None
     upload_root: Path | None = None
     audit_path: Path | None = None
     oidc_issuer: str | None = None
@@ -98,7 +98,8 @@ class Settings:
             inference_endpoint=os.environ.get("SOVEREIGN_MODEL_ENDPOINT", cls.inference_endpoint),
             model_name=os.environ.get("SOVEREIGN_MODEL_NAME", cls.model_name),
             knowledge_manifest=Path(os.environ["SOVEREIGN_KNOWLEDGE_MANIFEST"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_MANIFEST") else None,
-            knowledge_db=Path(os.environ["SOVEREIGN_KNOWLEDGE_DB"]) if os.environ.get("SOVEREIGN_KNOWLEDGE_DB") else None,
+            knowledge_db=(os.environ["SOVEREIGN_KNOWLEDGE_DB"] if os.environ["SOVEREIGN_KNOWLEDGE_DB"].startswith("postgresql://")
+                          else Path(os.environ["SOVEREIGN_KNOWLEDGE_DB"])) if os.environ.get("SOVEREIGN_KNOWLEDGE_DB") else None,
             upload_root=Path(os.environ["SOVEREIGN_UPLOAD_ROOT"]) if os.environ.get("SOVEREIGN_UPLOAD_ROOT") else None,
             audit_path=Path(os.environ["SOVEREIGN_AUDIT_PATH"]) if os.environ.get("SOVEREIGN_AUDIT_PATH") else None,
             oidc_issuer=os.environ.get("SOVEREIGN_OIDC_ISSUER"),

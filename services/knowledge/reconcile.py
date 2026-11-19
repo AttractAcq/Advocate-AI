@@ -12,9 +12,9 @@ from services.knowledge.manifest_io import read_manifest_bytes
 
 
 class ManifestReconciler:
-    def __init__(self, root: Path, manifest: Path, database: Path, *,
+    def __init__(self, root: Path, manifest: Path, database: Path | str, *,
                  full_scan_seconds: int = 600,
-                 sync: Callable[[Path, Path, Path], dict[str, object]] = sync_manifest) -> None:
+                 sync: Callable[[Path, Path, Path | str], dict[str, object]] = sync_manifest) -> None:
         if not 60 <= full_scan_seconds <= 3600:
             raise ValueError("full scan interval must be 60–3600 seconds")
         self.root = root

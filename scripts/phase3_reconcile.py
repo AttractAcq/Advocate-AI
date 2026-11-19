@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -21,9 +22,12 @@ def main() -> int:
     args = parser.parse_args()
     if not 5 <= args.poll_seconds <= 300:
         parser.error("poll interval must be 5–300 seconds")
+    location = os.environ.get("SOVEREIGN_KNOWLEDGE_DB")
+    database = location if location and location.startswith("postgresql://") else (
+        Path(location) if location else ROOT / "infrastructure/lab/runtime/phase3-knowledge/index.sqlite3")
     reconciler = ManifestReconciler(
         ROOT / "fixtures", ROOT / "fixtures/phase-3/approved-sources.json",
-        ROOT / "infrastructure/lab/runtime/phase3-knowledge/index.sqlite3",
+        database,
         full_scan_seconds=args.full_scan_seconds)
     while True:
         try:

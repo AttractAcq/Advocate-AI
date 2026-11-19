@@ -207,7 +207,7 @@ def _parse_verified_bytes(payload: bytes, suffix: str, parser: Callable[[Path], 
 
 
 def sync_manifest(
-    root: Path, manifest: Path, database: Path,
+    root: Path, manifest: Path, database: Path | str,
     parser: Callable[[Path], str] = parse_local,
 ) -> dict[str, object]:
     """Replace index contents from an approved manifest, failing closed per source.
@@ -215,6 +215,9 @@ def sync_manifest(
     The caller must mount the source root read-only. Only manifest-listed paths
     are opened. Deletions are reconciled in the same transaction as additions.
     """
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import sync_manifest_pg
+        return sync_manifest_pg(root, manifest, database, parser)
     base = root.resolve(strict=True)
     payload = load_manifest(manifest)
     if not isinstance(payload, dict) or payload.get("schema") != 1 or not isinstance(payload.get("sources"), list):

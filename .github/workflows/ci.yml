@@ -464,6 +464,39 @@ jobs:
             --image sovereign-core:synthetic --restic "$RUNNER_TEMP/restic" \
             --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
 
+  pgvector-knowledge:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Start disposable loopback pgvector database
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          docker pull "$image"
+          docker run -d --rm --name sovereign-pgvector-test \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:55439:5432 \
+            --tmpfs /var/lib/postgresql/data "$image"
+          for attempt in $(seq 1 40); do
+            if docker exec sovereign-pgvector-test pg_isready -U postgres -q; then break; fi
+            sleep 1
+          done
+          docker exec sovereign-pgvector-test createdb -U postgres sovereign_pgvector_test
+          docker exec sovereign-pgvector-test psql -U postgres -d sovereign_pgvector_test \
+            -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION vector'
+      - name: Test live policy, revocation, ingestion and vector ranking
+        env:
+          SOVEREIGN_TEST_PG_DSN: postgresql://postgres@127.0.0.1:55439/sovereign_pgvector_test
+        run: |
+          uv sync --locked --extra phase3
+          .venv/bin/python -m unittest tests.test_phase3_postgres_index -v
+
   openfga-policy-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

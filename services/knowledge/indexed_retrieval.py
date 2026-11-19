@@ -26,8 +26,20 @@ def _terms(text: str) -> set[str]:
     return set(_WORDS.findall(text.casefold())) - _STOP
 
 
-def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> list[dict[str, str]]:
+def approved_rows(root: Path, manifest: Path, database: Path | str, user_id: str) -> list[dict[str, str]]:
     """Recheck current manifest, policy and source bytes before exposing metadata."""
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import approved_rows_pg
+        return approved_rows_pg(root, manifest, database, user_id)
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
+        db.row_factory = sqlite3.Row
+        rows = [dict(row) for row in db.execute("SELECT * FROM sources WHERE state='ready'")]
+    return live_approved_rows(root, manifest, rows, user_id)
+
+
+def live_approved_rows(root: Path, manifest: Path, rows: list[dict[str, str]],
+                       user_id: str) -> list[dict[str, str]]:
+    """Apply the authoritative policy, manifest and live-byte checks to either index."""
     base = root.resolve(strict=True)
     try:
         policy = load_policy(base / "roles.json")
@@ -50,33 +62,34 @@ def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> l
             raise SourceManifestError("source manifest has invalid or duplicate IDs")
         listed[document_id] = item
     approved = []
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
-        db.row_factory = sqlite3.Row
-        for row in db.execute("SELECT * FROM sources WHERE state='ready'"):
-            source = dict(row)
-            manifest_row = listed.get(source["document_id"])
-            if not isinstance(manifest_row, dict) or any(
-                    str(manifest_row.get(key, "")) != source[key] for key in
-                    ("relative_path", "collection", "classification", "owner", "version", "sha256", "source_type")):
-                continue
-            if not source_access(user_id, source, policy):
-                continue
-            relative = source["relative_path"]
-            try:
-                payload = read_source_bytes(base, relative, 8 * 1024 * 1024)
-            except (OSError, ValueError):
-                continue
-            if hashlib.sha256(payload).hexdigest() != source["sha256"]:
-                continue
-            approved.append(source)
+    for source in rows:
+        manifest_row = listed.get(source["document_id"])
+        if not isinstance(manifest_row, dict) or any(
+                str(manifest_row.get(key, "")) != source[key] for key in
+                ("relative_path", "collection", "classification", "owner", "version", "sha256", "source_type")):
+            continue
+        if not source_access(user_id, source, policy):
+            continue
+        relative = source["relative_path"]
+        try:
+            payload = read_source_bytes(base, relative, 8 * 1024 * 1024)
+        except (OSError, ValueError):
+            continue
+        if hashlib.sha256(payload).hexdigest() != source["sha256"]:
+            continue
+        approved.append(source)
     return approved
 
 
 def search_index(
-    root: Path, manifest: Path, database: Path, user_id: str, query: str,
+    root: Path, manifest: Path, database: Path | str, user_id: str, query: str,
     *, limit: int = 3, document_ids: set[str] | None = None,
     collections: set[str] | None = None,
 ) -> list[dict[str, object]]:
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import search_index_pg
+        return search_index_pg(root, manifest, database, user_id, query, limit=limit,
+                               document_ids=document_ids, collections=collections)
     if not isinstance(query, str) or not query.strip() or len(query) > 1000:
         raise ValueError("query must contain 1–1000 characters")
     if not isinstance(limit, int) or not 1 <= limit <= 10:
@@ -111,8 +124,11 @@ def search_index(
     return [hit for _, _, _, hit in hits[:limit]]
 
 
-def preview_index(root: Path, manifest: Path, database: Path, user_id: str,
+def preview_index(root: Path, manifest: Path, database: Path | str, user_id: str,
                   document_id: str, ordinal: int = 0) -> dict[str, object] | None:
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import preview_index_pg
+        return preview_index_pg(root, manifest, database, user_id, document_id, ordinal)
     if ordinal < 0 or ordinal > 10000:
         return None
     source = next((row for row in approved_rows(root, manifest, database, user_id)
