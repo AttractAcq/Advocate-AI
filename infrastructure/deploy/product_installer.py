@@ -25,6 +25,7 @@ from infrastructure.deploy.container_runtime import (
 )
 from infrastructure.release.bundle import BundleError, verify_bundle
 from infrastructure.restic_repository import restore_snapshot
+from infrastructure.upload_quarantine_backup import restore_upload_snapshot
 
 
 class ProductInstallError(ValueError):
@@ -324,10 +325,18 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
                             restic: Path, restic_sha256: str,
                             lab_password_file: Path,
                             emergency_password_file: Path | None = None,
-                            *, enable_uploads: bool = False) -> dict[str, object]:
+                            *, enable_uploads: bool = False,
+                            upload_snapshot_id: str | None = None,
+                            upload_repository: Path | None = None,
+                            upload_password_file: Path | None = None) -> dict[str, object]:
     """Clean-restore fictional Core state before first signed installation."""
     if not root.is_absolute() or root.exists() or root.is_symlink():
         raise ProductInstallError("restore installation requires a new absolute root")
+    upload_options = (upload_snapshot_id, upload_repository, upload_password_file)
+    if any(value is not None for value in upload_options):
+        if (not enable_uploads or any(value is None for value in upload_options)
+                or upload_repository.resolve() == repository.resolve()):
+            raise ProductInstallError("upload restore requires uploads and a separate repository")
     _owner_directory(root.parent, create=False)
     manifest = verify_bundle(bundle, trusted_key)
     if manifest["schema"] != 4:
@@ -339,11 +348,19 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
                                     restic, restic_sha256, root / "core-state")
         if restored["files"] != 4:
             raise ProductInstallError("unexpected synthetic Core snapshot contents")
+        upload_result = None
+        if upload_snapshot_id is not None:
+            upload_result = restore_upload_snapshot(
+                upload_snapshot_id, upload_repository, upload_password_file,
+                restic, restic_sha256, root / "product-uploads")
         activated = install_product(bundle, trusted_key, crane, console_config,
                                     root, root / "core-state", lab_password_file,
                                     emergency_password_file, enable_uploads=enable_uploads)
         return {**activated, "snapshot_id": snapshot_id,
-                "restored_files": restored["files"]}
+                "restored_files": restored["files"],
+                **({"upload_snapshot_id": upload_snapshot_id,
+                    "restored_upload_files": upload_result["quarantine_files"]}
+                   if upload_result is not None else {})}
     except Exception:
         if not (root / "product-state.json").exists() and not root.is_symlink():
             shutil.rmtree(root)
@@ -493,6 +510,9 @@ def main() -> None:
             command.add_argument("--lab-password-file", required=True, type=Path)
             command.add_argument("--emergency-password-file", type=Path)
             command.add_argument("--enable-uploads", action="store_true")
+            command.add_argument("--upload-snapshot-id")
+            command.add_argument("--upload-repository", type=Path)
+            command.add_argument("--upload-password-file", type=Path)
         if action == "install":
             command.add_argument("--core-state", type=Path)
             command.add_argument("--lab-password-file", type=Path)
@@ -512,7 +532,10 @@ def main() -> None:
                 args.root, args.snapshot_id, args.repository,
                 args.restic_password_file, args.restic, args.restic_sha256,
                 args.lab_password_file, args.emergency_password_file,
-                enable_uploads=args.enable_uploads)
+                enable_uploads=args.enable_uploads,
+                upload_snapshot_id=args.upload_snapshot_id,
+                upload_repository=args.upload_repository,
+                upload_password_file=args.upload_password_file)
         elif args.action == "rollback":
             result = rollback_product(args.root, args.trusted_key, args.crane)
         elif args.action == "recover":

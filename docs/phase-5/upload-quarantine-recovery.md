@@ -39,7 +39,9 @@ round trip in CI. A restored upload is still quarantined; it is never made an
 approved knowledge source by this procedure.
 
 For a complete recovery, restore the Core state and upload quarantine from a
-coordinated maintenance point, then inspect both before activating the
-installer. Scheduling, coordination with an active Core, approved retention,
+coordinated maintenance point. The product installer's `restore-install` command
+can now verify both snapshots into a new private root before launching the
+signed release. It refuses a partial upload restore, a shared repository or an
+existing root. Scheduling, coordination with an active Core, approved retention,
 protected off-host media, key custody, target-host recovery timing and an
 independent security review remain open gates.
