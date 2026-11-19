@@ -65,6 +65,18 @@ def _core_state_options(state: Path | None, password_file: Path | None,
                 audit.stat().st_uid != os.getuid() or
                 stat.S_IMODE(audit.stat().st_mode) & 0o077):
             raise RuntimeError("invalid restored Core audit trail")
+    knowledge_manifest = state / "knowledge-manifest.json"
+    knowledge_database = state / "knowledge.db"
+    if knowledge_manifest.is_symlink() or knowledge_database.is_symlink():
+        raise RuntimeError("linked Core knowledge file")
+    if knowledge_manifest.exists() != knowledge_database.exists():
+        raise RuntimeError("Core knowledge manifest and index must be supplied together")
+    if knowledge_manifest.exists():
+        for item in (knowledge_manifest, knowledge_database):
+            if (item.is_symlink() or not item.is_file() or
+                    item.stat().st_uid != os.getuid() or
+                    stat.S_IMODE(item.stat().st_mode) & 0o022):
+                raise RuntimeError("invalid restored Core knowledge file")
     if (not password_file.is_absolute() or password_file.is_symlink() or
             not password_file.is_file() or password_file.stat().st_uid != os.getuid()
             or stat.S_IMODE(password_file.stat().st_mode) & 0o077
@@ -102,6 +114,9 @@ def _core_state_options(state: Path | None, password_file: Path | None,
         options += ["--mount", (f"type=bind,source={upload_root.resolve()},"
                                  "target=/var/lib/sovereign-uploads"),
                     "-e", "SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads"]
+    if knowledge_manifest.exists():
+        options += ["-e", "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/knowledge-manifest.json",
+                    "-e", "SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db"]
     return options
 
 
@@ -337,6 +352,7 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
                 and item.get("Destination") in targets]
     prefixes = ("SOVEREIGN_FIXTURE_ROOT=", "SOVEREIGN_HISTORY_DB=",
                 "SOVEREIGN_AUDIT_PATH=",
+                "SOVEREIGN_KNOWLEDGE_MANIFEST=", "SOVEREIGN_KNOWLEDGE_DB=",
                 "SOVEREIGN_LAB_PASSWORD_FILE=", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=",
                 "SOVEREIGN_UPLOAD_ROOT=")
     relevant = [item for item in environment if isinstance(item, str)
@@ -367,6 +383,11 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
         required.add("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password")
     if upload_root is not None:
         required.add("SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads")
+    if (core_state / "knowledge-manifest.json").exists():
+        required.update({
+            "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/knowledge-manifest.json",
+            "SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db",
+        })
     if len(relevant) != len(required) or set(relevant) != required:
         raise RuntimeError("Core state environment mismatch")
     if emergency_password_file is not None and not allow_stale_emergency:

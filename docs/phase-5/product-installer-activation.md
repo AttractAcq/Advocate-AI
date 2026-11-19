@@ -98,6 +98,12 @@ continuity after the second installation. The version 2 recovery receipt also
 signs the audit sequence and tail hash, which the clean installer checks before
 activation. Approved retention and off-host custody remain open.
 
+If the external state supplies both `knowledge-manifest.json` and
+`knowledge.db`, the signed Core receives the Phase 3 manifest and index paths.
+The installer rejects an incomplete pair, and the coordinated recovery set
+preserves both files. This remains a synthetic SQLite index; PostgreSQL and
+pgvector recovery require separate target-host proof.
+
 For a synthetic Core state restored from restic, the first `install` can also
 specify `--core-state /path/to/restored` and
 `--lab-password-file /path/to/owner-only-lab-password`. An optional separate

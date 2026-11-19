@@ -166,13 +166,21 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
             with tempfile.TemporaryDirectory(prefix=".product-recovery-set-",
                                              dir=staging_parent) as temporary:
                 spec = Path(temporary) / "core-spec.json"
-                spec.write_text(json.dumps({"schema": 1, "files": [
+                files = [
                     {"name": "roles.json", "kind": "file", "source": str(state / "roles.json")},
                     {"name": "manifest.csv", "kind": "file", "source": str(state / "manifest.csv")},
                     {"name": "history.db", "kind": "sqlite", "source": str(state / "history.db")},
                     {"name": "audit.jsonl", "kind": "file", "source": str(state / "audit.jsonl")},
                     {"name": f"sources/{source.name}", "kind": "file", "source": str(source)},
-                ]}))
+                ]
+                if (state / "knowledge-manifest.json").exists():
+                    files.extend([
+                        {"name": "knowledge-manifest.json", "kind": "file",
+                         "source": str(state / "knowledge-manifest.json")},
+                        {"name": "knowledge.db", "kind": "sqlite",
+                         "source": str(state / "knowledge.db")},
+                    ])
+                spec.write_text(json.dumps({"schema": 1, "files": files}))
                 core = create_snapshot(spec, core_repository, core_password_file,
                                        restic, restic_sha256, staging_parent)
                 upload = create_upload_snapshot(uploads, upload_repository,

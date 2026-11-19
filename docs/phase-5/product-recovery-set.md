@@ -16,6 +16,10 @@ repositories to the clean installer. The Core snapshot includes the installed
 hash-chained audit trail. Capture refuses a missing, exposed, or invalid trail;
 receipt-bound restore requires its sequence and tail hash to match the signed
 checkpoint before activation.
+When an installed Core also has a Phase 3 `knowledge-manifest.json` and
+`knowledge.db`, capture requires both and includes both in the Core snapshot.
+The index is taken as a SQLite snapshot; the signed runtime pins both paths in
+its environment after restore.
 
 The actual-image CI rehearsal verifies the receipt and restores that pair into
 a clean second signed product installation. It checks that the restored trail
