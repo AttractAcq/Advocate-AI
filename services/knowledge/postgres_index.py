@@ -18,6 +18,7 @@ from services.knowledge.indexed_retrieval import _terms, live_approved_rows
 from services.knowledge.ingestion import (_parse_verified_bytes, _valid_source,
                                           chunks, parse_local)
 from services.knowledge.manifest_io import load_manifest
+from services.policy.policy_file import load_policy
 
 
 class PostgresIndexUnavailable(OSError):
@@ -62,6 +63,61 @@ def initialize_schema(dsn: str) -> None:
                     ON DELETE CASCADE)""")
     except psycopg.Error as exc:
         raise PostgresIndexUnavailable("PostgreSQL schema unavailable") from exc
+
+
+def verify_knowledge_snapshot(root: Path, manifest: Path, dsn: str,
+                              *, expected_model: str | None = None,
+                              parser=parse_local) -> dict[str, int]:
+    """Check every indexed passage against the approved source bytes and policy.
+
+    This is intended for a stopped or writer-locked recovery capture and a
+    clean restore, not as a per-request query path. Quarantined or missing
+    sources deny this complete recovery-set candidate.
+    """
+    base = root.resolve(strict=True)
+    if not isinstance(load_policy(base / "roles.json"), dict):
+        raise ValueError("source policy unavailable")
+    payload = load_manifest(manifest)
+    if (not isinstance(payload, dict) or payload.get("schema") != 1
+            or not isinstance(payload.get("sources"), list)
+            or len(payload["sources"]) > 10000):
+        raise ValueError("invalid approved manifest")
+    listed = payload["sources"]
+    ids = [item.get("document_id") for item in listed if isinstance(item, dict)]
+    if len(ids) != len(listed) or any(not isinstance(value, str) for value in ids) or len(set(ids)) != len(ids):
+        raise ValueError("duplicate or invalid approved source")
+    try:
+        with _connect(dsn) as db:
+            db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            sources = {row["document_id"]: row for row in db.execute("SELECT * FROM knowledge_sources")}
+            if set(sources) != set(ids) or db.execute("SELECT 1 FROM knowledge_quarantine LIMIT 1").fetchone():
+                raise ValueError("knowledge index source set or quarantine mismatch")
+            total_passages = 0
+            for item in listed:
+                identifier = item["document_id"]
+                suffix, digest, source_bytes = _valid_source(base, item)
+                metadata = {key: str(item[key]) for key in
+                            ("relative_path", "collection", "classification", "owner", "version", "source_type")}
+                metadata["sha256"] = digest
+                source = sources[identifier]
+                if source["state"] != "ready" or any(source[key] != value for key, value in metadata.items()):
+                    raise ValueError("knowledge source metadata mismatch")
+                expected = chunks(_parse_verified_bytes(source_bytes, suffix, parser))
+                actual = db.execute("""SELECT ordinal,text FROM knowledge_passages
+                    WHERE document_id=%s ORDER BY ordinal""", (identifier,)).fetchall()
+                if [(row["ordinal"], row["text"]) for row in actual] != list(enumerate(expected)):
+                    raise ValueError("knowledge passage mismatch")
+                total_passages += len(expected)
+            if expected_model is not None:
+                vectors = db.execute("""SELECT document_id,ordinal,model,
+                    vector_dims(embedding) AS dimensions FROM knowledge_vectors""").fetchall()
+                if (len(vectors) != total_passages or any(
+                        row["model"] != expected_model or not 1 <= row["dimensions"] <= 4096
+                        for row in vectors)):
+                    raise ValueError("knowledge vector set mismatch")
+            return {"sources": len(sources), "passages": total_passages}
+    except psycopg.Error as exc:
+        raise PostgresIndexUnavailable("PostgreSQL snapshot verification unavailable") from exc
 
 
 def sync_manifest_pg(root: Path, manifest: Path, dsn: str, parser=parse_local) -> dict[str, object]:

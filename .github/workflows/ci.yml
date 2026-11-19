@@ -454,6 +454,15 @@ jobs:
           .venv/bin/python -m scripts.phase5_postgres_rehearsal \
             --image "$image" --restic "$RUNNER_TEMP/restic" \
             --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
+      - name: Restore encrypted pgvector knowledge set and recheck permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          docker pull "$image"
+          .venv/bin/python -m scripts.phase3_pgvector_recovery \
+            --image "$image" --restic "$RUNNER_TEMP/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
       - name: Start restored synthetic Core state and recheck permissions
         shell: bash
         run: |
