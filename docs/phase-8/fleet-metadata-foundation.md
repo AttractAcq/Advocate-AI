@@ -195,9 +195,10 @@ instead. It names an owner-only JSON file containing an array of one to four
 distinct absolute PEM paths, for example `["/protected/issuer-old.pem",
 "/protected/issuer-new.pem"]`. The two environment settings are mutually
 exclusive. Fleet loads the trust set at startup, selects the verifier by the
-envelope's `key_id`, and rejects unknown issuers before signature validation. Add the new public key
-and restart Fleet for an overlap window; remove the old key from the manifest
-and restart to retire it. Keep the manifest and each key owner-only. The
+envelope's `key_id`, and rejects unknown issuers before signature validation.
+Add the new public key and restart Fleet for an overlap window; remove the old
+key from the manifest and restart to retire it. Keep the manifest and each key
+owner-only. The
 database audit retains the issuer key ID for each accepted import. This is a
 local rotation mechanism; issuer approval, secure offline distribution,
 revocation timing and production key custody remain B-12.
@@ -211,6 +212,24 @@ receipt fields fail before storage. Duplicate receipt codes reject replay.
 The audit event records the trusted issuer key ID and record digest, without
 the signature or raw request. The import key is a synthetic lab trust anchor;
 production key custody, revocation and approved offline handoff remain B-12.
+
+The synthetic offline issuer command accepts a strict coded receipt JSON file
+and an owner-only Ed25519 private PEM file, then creates a new owner-only
+signed envelope. The issuer workstation keeps the private key and inputs;
+transfer only the envelope through the approved offline procedure. The command
+rejects unknown or duplicate receipt fields and will not overwrite an output:
+
+```sh
+.venv/bin/python -m services.fleet.offline_issue \
+  --record /private/receipt-record.json \
+  --signing-key /private/issuer-private.pem \
+  --output /private/signed-receipt.json
+```
+
+The `source: approved_offline_admin` field is a coded claim in the signed
+record, not proof that an owner approved the handoff. Production issuer
+authorisation, private-key custody, transport and revocation procedure remain
+B-12.
 
 The local lifecycle candidate exposes authenticated `PATCH` routes for
 `/licences/{code}/status`, `/tickets/{code}/status` and
