@@ -7,6 +7,8 @@ import hashlib
 import io
 from pathlib import Path
 import re
+import shutil
+import stat
 
 from services.knowledge.paths import read_source_bytes
 from services.policy.regular_file import read_regular_file
@@ -16,6 +18,7 @@ FIELDS = ("document_id", "relative_path", "collection", "classification",
           "version", "sha256", "owner", "source_type")
 MAX_SOURCES = 122
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
+SOURCE_STAGE_RESERVE = 128 * 1024 * 1024
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -62,9 +65,17 @@ def source_files(state: Path) -> list[Path]:
 def stage_source_inventory(state: Path, destination: Path) -> list[Path]:
     """Freeze a digest-checked manifest and sources in a private directory."""
     original = source_files(state)
+    manifest = read_regular_file(state / "manifest.csv", 1024 * 1024)
+    required = len(manifest) + SOURCE_STAGE_RESERVE
+    for source in original:
+        details = source.lstat()
+        if not stat.S_ISREG(details.st_mode) or details.st_size > MAX_SOURCE_BYTES:
+            raise ValueError("synthetic source changed before staging")
+        required += details.st_size
+    if shutil.disk_usage(destination.parent).free < required:
+        raise ValueError("insufficient space for synthetic source staging")
     destination.mkdir(mode=0o700)
     (destination / "sources").mkdir(mode=0o700)
-    manifest = read_regular_file(state / "manifest.csv", 1024 * 1024)
     staged_manifest = destination / "manifest.csv"
     staged_manifest.write_bytes(manifest)
     staged_manifest.chmod(0o600)

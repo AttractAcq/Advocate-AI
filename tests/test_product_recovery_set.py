@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -171,6 +172,16 @@ class ProductRecoverySetTests(unittest.TestCase):
                    return_value={"snapshot_id": "2" * 64}):
             self._create()
         self.assertTrue(self.receipt.is_file())
+
+    def test_low_source_staging_capacity_denies_before_backup(self) -> None:
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.core_state_inventory.shutil.disk_usage",
+                   return_value=SimpleNamespace(free=0)), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+            with self.assertRaisesRegex(ValueError, "insufficient space"):
+                self._create()
+        backup.assert_not_called()
+        self.assertFalse(self.receipt.exists())
 
     def test_live_source_change_during_capture_leaves_no_receipt(self) -> None:
         state = self.install / "core-state"
