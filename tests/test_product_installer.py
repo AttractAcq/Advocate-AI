@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 from pathlib import Path
 import secrets
@@ -267,6 +269,15 @@ class ProductInstallerTests(unittest.TestCase):
                 item.chmod(0o600)
             shutil.copyfile(seed, destination / "audit.jsonl")
             (destination / "audit.jsonl").chmod(0o600)
+            (destination / "sources" / "ENG-001.txt").write_bytes(b"fictional")
+            with (destination / "manifest.csv").open("w", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(("document_id", "relative_path", "collection", "classification",
+                                 "version", "sha256", "owner", "source_type"))
+                writer.writerow(("ENG-001", "sources/ENG-001.txt", "engineering",
+                                 "C0_SYNTHETIC", "1", hashlib.sha256(b"fictional").hexdigest(),
+                                 "fictional", "synthetic-local"))
+            (destination / "manifest.csv").chmod(0o600)
             return {"files": 5}
 
         args = (self.first, self.key, self.crane, self.config, self.root,

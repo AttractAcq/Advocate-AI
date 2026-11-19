@@ -20,6 +20,13 @@ When an installed Core also has a Phase 3 `knowledge-manifest.json` and
 `knowledge.db`, capture requires both and includes both in the Core snapshot.
 The index is taken as a SQLite snapshot; the signed runtime pins both paths in
 its environment after restore.
+The Core source inventory comes from its synthetic `manifest.csv`. Capture
+requires every listed source to be a regular flat file with the listed SHA-256,
+rejects missing or extra files, and includes each listed source in the encrypted
+snapshot. Receipt-bound restore repeats that check and requires the snapshot
+file count to match the restored source inventory before runtime activation.
+This path is bounded to 122 sources of at most 8 MiB each (the current fixture
+has 100); larger vessel datasets require a separate production design.
 
 The actual-image CI rehearsal verifies the receipt and restores that pair into
 a clean second signed product installation. It checks that the restored trail
