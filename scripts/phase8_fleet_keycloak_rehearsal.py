@@ -16,6 +16,8 @@ import uuid
 from urllib.request import Request, urlopen
 import ssl
 
+import jwt
+
 from scripts.phase8_fleet_browser_rehearsal import FLEET, certificate, driver_request, until
 from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, ISSUER, _identity_material
 
@@ -140,8 +142,81 @@ with httpx.Client(trust_env=False, timeout=10) as client:
                      headers={"X-Fleet-Lab-Token": "synthetic-fleet-admin-token-0123456789"})
     assert lab.status_code == 401, "lab token accepted in company mode"
 print(json.dumps({"keycloak_flow": "authorization-code-pkce-authorized",
-                  "fleet_role": "fleet_admin", "lab_token": "denied"}))
+                  "fleet_role": "fleet_admin", "lab_token": "denied",
+                  "access_token": access}))
 '''
+
+_ADMIN_ROTATE = '''import json
+import httpx
+
+issuer = __ISSUER__
+password = __PASSWORD__
+action = __ACTION__
+old_kid = __OLD_KID__
+old_provider = __OLD_PROVIDER__
+new_kid = __NEW_KID__
+base = issuer.removesuffix("/realms/fleet")
+with httpx.Client(verify="/etc/fleet-ca.pem", trust_env=False, timeout=10) as client:
+    response = client.post(base + "/realms/master/protocol/openid-connect/token", data={
+        "grant_type": "password", "client_id": "admin-cli",
+        "username": "synthetic-rotator", "password": password})
+    assert response.status_code == 200, ("admin token", response.status_code, response.text[:200])
+    headers = {"Authorization": "Bearer " + response.json()["access_token"]}
+    admin = base + "/admin/realms/fleet"
+    before = client.get(issuer + "/protocol/openid-connect/certs").json()
+    before_kids = {item["kid"] for item in before["keys"] if item.get("alg") == "RS256"}
+    if action == "add":
+        assert old_kid in before_kids, "original signing key missing"
+        realm = client.get(admin, headers=headers)
+        assert realm.status_code == 200, ("realm", realm.status_code)
+        realm_id = realm.json()["id"]
+        listing = client.get(admin + "/components", headers=headers, params={
+            "parent": realm_id, "type": "org.keycloak.keys.KeyProvider"})
+        assert listing.status_code == 200, ("providers", listing.status_code)
+        originals = [item for item in listing.json()
+                     if item.get("providerId") == "rsa-generated"]
+        assert len(originals) == 1, "expected one original RSA signing provider"
+        old_provider = originals[0]["id"]
+        created = client.post(admin + "/components", headers=headers, json={
+            "name": "sovereign-synthetic-rollover", "providerId": "rsa-generated",
+            "providerType": "org.keycloak.keys.KeyProvider", "parentId": realm_id,
+            "config": {"priority": ["1000"], "enabled": ["true"],
+                       "active": ["true"], "keySize": ["2048"]}})
+        assert created.status_code in (200, 201, 204), (
+            "create provider", created.status_code, created.text[:200])
+        after = client.get(issuer + "/protocol/openid-connect/certs").json()
+        after_kids = {item["kid"] for item in after["keys"] if item.get("alg") == "RS256"}
+        added = after_kids - before_kids
+        assert old_kid in after_kids and len(added) == 1, "signing-key overlap missing"
+        print(json.dumps({"old_provider": old_provider, "new_kid": added.pop()}))
+    else:
+        assert action == "retire" and old_provider and new_kid
+        removed = client.delete(admin + "/components/" + old_provider, headers=headers)
+        assert removed.status_code == 204, ("retire provider", removed.status_code)
+        after = client.get(issuer + "/protocol/openid-connect/certs").json()
+        after_kids = {item["kid"] for item in after["keys"] if item.get("alg") == "RS256"}
+        assert old_kid not in after_kids and new_kid in after_kids, "old signing key persisted"
+        print(json.dumps({"retired": True}))
+'''
+
+
+def _api_token(api: str, token: str, allowed: bool) -> None:
+    script = ('import httpx\n'
+              'r=httpx.get("http://fleet-portal:8080/api/fleet/me", '
+              f'headers={{"Authorization":"Bearer {token}"}},trust_env=False,timeout=5)\n'
+              f'assert r.status_code=={200 if allowed else 401}, r.status_code\n')
+    _run("docker", "exec", api, "python", "-c", script)
+
+
+def _admin_rotate(api: str, password: str, action: str, old_kid: str,
+                  old_provider: str = "", new_kid: str = "") -> dict[str, object]:
+    script = (_ADMIN_ROTATE.replace("__ISSUER__", repr(ISSUER))
+              .replace("__PASSWORD__", repr(password))
+              .replace("__ACTION__", repr(action))
+              .replace("__OLD_KID__", repr(old_kid))
+              .replace("__OLD_PROVIDER__", repr(old_provider))
+              .replace("__NEW_KID__", repr(new_kid)))
+    return json.loads(_run("docker", "exec", api, "python", "-c", script))
 
 
 def _totp(secret: str, offset: int = 0, at: float | None = None) -> str:
@@ -290,6 +365,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         realm = root / "realm"
         realm.mkdir(mode=0o755)
         password = "synthetic-fleet-" + uuid.uuid4().hex
+        admin_password = "synthetic-rotator-" + uuid.uuid4().hex
         (realm / "fleet-realm.json").write_text(json.dumps(_realm(password, mfa)))
         (realm / "fleet-realm.json").chmod(0o644)
         state = root / "state"
@@ -320,6 +396,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
                  "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
                  "--mount", f"type=bind,source={realm},target=/opt/keycloak/data/import,readonly",
+                 "--env", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-rotator",
+                 "--env", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + admin_password,
                  reference, "start-dev", "--import-realm", "--http-enabled=false",
                  "--hostname=" + ISSUER.removesuffix("/realms/fleet"),
                  "--https-port=443", "--https-certificate-file=/tmp/fleet-cert.pem",
@@ -385,6 +463,34 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                 flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
                     "__PASSWORD__", repr(password))
                 outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
+                old_token = outcome.pop("access_token")
+                if not browser:
+                    old_kid = jwt.get_unverified_header(old_token)["kid"]
+                    added = _admin_rotate(api, admin_password, "add", old_kid)
+                    new_kid = added["new_kid"]
+                    new_outcome = json.loads(_run("docker", "exec", api,
+                                                  "python", "-c", flow))
+                    new_token = new_outcome.pop("access_token")
+                    assert jwt.get_unverified_header(new_token)["kid"] == new_kid
+                    _api_token(api, old_token, True)
+                    _api_token(api, new_token, True)
+                    _admin_rotate(api, admin_password, "retire", old_kid,
+                                  added["old_provider"], new_kid)
+                    _run("docker", "restart", api)
+                    for _ in range(20):
+                        healthy = subprocess.run(
+                            ["docker", "exec", api, "python", "-c",
+                             "import httpx; assert httpx.get('http://127.0.0.1:18800/health', "
+                             "trust_env=False, timeout=2).status_code == 200"],
+                            capture_output=True, timeout=5)
+                        if healthy.returncode == 0:
+                            break
+                        time.sleep(0.5)
+                    else:
+                        raise AssertionError("Fleet API did not restart after key retirement")
+                    _api_token(api, old_token, False)
+                    _api_token(api, new_token, True)
+                    outcome["keycloak_rotation"] = "overlap-old-key-retired"
             if browser:
                 try:
                     with urlopen("http://127.0.0.1:18080/", timeout=3) as response:
