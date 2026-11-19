@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import base64
 import ast
+import hashlib
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
-from scripts.phase8_fleet_keycloak_rehearsal import _ADMIN_ROTATE, _realm, _totp
+from infrastructure.backup import BackupError, generate_key
+from scripts.phase8_fleet_keycloak_rehearsal import (
+    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _totp)
 
 
 class FleetKeycloakMfaTests(unittest.TestCase):
@@ -29,6 +35,32 @@ class FleetKeycloakMfaTests(unittest.TestCase):
                        "__OLD_KID__", "__OLD_PROVIDER__", "__NEW_KID__"):
             script = script.replace(marker, repr("synthetic-value"))
         ast.parse(script)
+
+    def test_realm_recovery_requires_fresh_authenticated_export(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            key = root / "backup.key"
+            generate_key(key)
+            source = root / "fleet-realm.json"
+            source.write_text(json.dumps(_realm("fictional-password")))
+            old = root / "old.svbk"
+            _backup_realm(source, root, old, key)
+            source.write_text(json.dumps(_realm("new-fictional-password")))
+            current = root / "current.svbk"
+            expected = _backup_realm(source, root, current, key)
+            with self.assertRaisesRegex(BackupError, "stale"):
+                _checked_realm_restore(old, key, root / "rejected", expected)
+            altered = root / "altered.svbk"
+            payload = bytearray(current.read_bytes())
+            payload[-20] ^= 1
+            altered.write_bytes(payload)
+            with self.assertRaises(BackupError):
+                _checked_realm_restore(altered, key, root / "rejected",
+                    hashlib.sha256(payload).hexdigest())
+            _checked_realm_restore(current, key, root / "restored", expected)
+            self.assertEqual(json.loads((root / "restored/fleet-realm.json").read_text())
+                             ["users"][0]["credentials"][0]["value"],
+                             "new-fictional-password")
 
 
 if __name__ == "__main__":
