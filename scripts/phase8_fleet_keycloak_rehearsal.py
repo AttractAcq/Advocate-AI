@@ -250,6 +250,7 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
     _run("docker", "stop", keycloak)
     exported = root / "exported"
     exported.mkdir(mode=0o777)
+    exported.chmod(0o777)
     _run("docker", "run", "--rm", "--network", "none",
          "--mount", f"type=bind,source={data},target=/opt/keycloak/data",
          "--mount", f"type=bind,source={exported},target=/synthetic-export",
@@ -476,7 +477,11 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         (realm / "fleet-realm.json").chmod(0o644)
         data = root / "keycloak-data"
         data.mkdir(mode=0o777)
+        # The pinned container runs as a different UID on GitHub's runner.
+        # These paths contain only fictional, short-lived lab identity data.
+        data.chmod(0o777)
         (data / "import").mkdir(mode=0o777)
+        (data / "import").chmod(0o777)
         (data / "import" / "fleet-realm.json").write_bytes((realm / "fleet-realm.json").read_bytes())
         (data / "import" / "fleet-realm.json").chmod(0o644)
         stale_archive = root / "stale.svbk"
