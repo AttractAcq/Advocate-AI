@@ -8,8 +8,9 @@ checks before search, preview, chat citation or vector ranking. Source and
 passage replacement, quarantine and deletion occur in one database transaction.
 Ingestion and embedding writers share a database advisory transaction lock.
 
-The adapter requires a numeric loopback URI with a named user and database. It
-rejects a password in the URI; use a separately protected local PostgreSQL
+The adapter requires a numeric loopback URI or the exact `/run/postgresql`
+Unix socket URI with a named user and database. It rejects a password in the
+URI; use a separately protected local PostgreSQL
 credential mechanism when authentication is introduced. It never silently
 falls back to SQLite after a PostgreSQL error. The `init` action requires a
 database where the `vector` extension was installed separately by a migration
@@ -43,7 +44,9 @@ synthetic embedder and do not require a model download.
 
 An [encrypted knowledge recovery rehearsal](../phase-5/pgvector-knowledge-recovery.md)
 now captures the database with its manifest, policy and source bytes and
-checks a clean restore. This is a software candidate, not the Phase 3 target
+checks a clean restore. An [actual Core image rehearsal](../phase-5/pgvector-core-socket-runtime.md)
+connects to a networkless pgvector container over a private Unix socket. This
+is a software candidate, not the Phase 3 target
 gate. PostgreSQL is not yet included in the signed vessel runtime or
 coordinated full-stack recovery set. Index ownership, database credentials,
 extension migration, target backup and restore, failure handling, target network isolation, NAS access propagation,

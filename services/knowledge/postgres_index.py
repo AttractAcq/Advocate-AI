@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 
 import psycopg
@@ -27,10 +28,23 @@ class PostgresIndexUnavailable(OSError):
 
 def _connect(dsn: str) -> psycopg.Connection:
     parsed = urlsplit(dsn)
-    if (parsed.scheme != "postgresql" or parsed.hostname not in ("127.0.0.1", "::1")
-            or not parsed.path.strip("/") or parsed.password is not None
-            or parsed.query or parsed.fragment or not parsed.username):
-        raise ValueError("PostgreSQL index requires a passwordless numeric loopback URI")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid PostgreSQL index port") from exc
+    identity = (isinstance(parsed.username, str) and
+                re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", parsed.username))
+    database = re.fullmatch(r"/[A-Za-z_][A-Za-z0-9_]{0,62}", parsed.path)
+    host_token = "[::1]" if parsed.hostname == "::1" else "127.0.0.1"
+    loopback = (parsed.hostname in ("127.0.0.1", "::1") and
+                parsed.query == "" and parsed.netloc ==
+                f"{parsed.username}@{host_token}{f':{port}' if port is not None else ''}")
+    socket = (parsed.hostname is None and port is None and
+              parsed.netloc == f"{parsed.username}@" and
+              parsed.query == "host=/run/postgresql")
+    if (parsed.scheme != "postgresql" or not identity or not database or
+            parsed.password is not None or parsed.fragment or not (loopback or socket)):
+        raise ValueError("PostgreSQL index requires a numeric loopback or approved local socket URI")
     try:
         return psycopg.connect(dsn, connect_timeout=3,
                                options="-c statement_timeout=10000", row_factory=dict_row)
