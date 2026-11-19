@@ -291,10 +291,16 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                 "__PASSWORD__", repr(password))
             outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
             if browser:
+                try:
+                    with urlopen("http://127.0.0.1:18080/", timeout=3) as response:
+                        assert response.status == 200, "published Fleet portal did not return 200"
+                except OSError as error:
+                    raise RuntimeError(f"published Fleet portal is unreachable: {error}") from error
                 proxy = subprocess.Popen(["sudo", "-n", str(Path.cwd() / ".venv/bin/python"), "-m",
                                           "scripts.phase8_fleet_https_proxy", "--cert", str(root / f"{FLEET}.crt"),
                                           "--key", str(root / f"{FLEET}.key")],
                                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                last_error = "no response"
                 for _ in range(50):
                     if proxy.poll() is not None:
                         raise RuntimeError("Fleet HTTPS bridge failed: " + proxy.stderr.read().decode())
@@ -302,10 +308,11 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                         request = Request("https://127.0.0.2/", headers={"Host": FLEET})
                         with urlopen(request, context=ssl._create_unverified_context(), timeout=1):
                             break
-                    except OSError:
+                    except OSError as error:
+                        last_error = f"{type(error).__name__}: {error}"
                         time.sleep(0.2)
                 else:
-                    raise RuntimeError("Fleet HTTPS bridge did not become ready")
+                    raise RuntimeError(f"Fleet HTTPS bridge did not become ready: {last_error}")
                 outcome.update(browser_flow(password, chromedriver))
             return outcome
         finally:
