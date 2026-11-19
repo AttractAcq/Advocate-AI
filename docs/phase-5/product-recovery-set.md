@@ -44,6 +44,10 @@ has 100); larger vessel datasets require a separate production design.
 The actual-image CI rehearsal verifies the receipt and restores that pair into
 a clean second signed product installation. It checks that the restored trail
 starts with every pre-capture audit byte and continues recording API requests.
+The upload quarantine inventory and free-space estimate are checked before
+Core's first encrypted snapshot; the upload adapter checks them again when it
+creates its own snapshot. A change or space loss between those checks can still
+leave an unpaired Core snapshot for normal retention handling.
 A failed second snapshot leaves no
 receipt; the first encrypted snapshot may remain in its repository and needs
 ordinary retention handling. The receipt does not contain backup passwords.

@@ -311,6 +311,18 @@ def create_upload_snapshot(upload_root: Path, repository: Path, password_file: P
     return {**result, "quarantine_files": len(rows)}
 
 
+def preflight_upload_snapshot(upload_root: Path, repository: Path,
+                              staging_parent: Path) -> int:
+    """Check quarantine inventory and capacity before a coordinated Core backup."""
+    _private_directory(staging_parent)
+    if upload_root.resolve() == staging_parent.resolve():
+        raise UploadBackupError("staging and quarantine must be separate")
+    with quarantine_directory_lock(upload_root, exclusive=False):
+        rows = _scan_inventory(upload_root)
+        _check_backup_space(rows, staging_parent, repository)
+    return len(rows)
+
+
 def restore_upload_snapshot(snapshot_id: str, repository: Path, password_file: Path,
                             restic: Path, restic_sha256: str, destination: Path) -> dict[str, object]:
     """Restore an exact encrypted snapshot to a new private directory."""

@@ -234,6 +234,16 @@ class ProductRecoverySetTests(unittest.TestCase):
                 self._create()
         self.assertFalse(self.receipt.exists())
 
+    def test_upload_preflight_failure_precedes_core_backup(self) -> None:
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.preflight_upload_snapshot",
+                   side_effect=ValueError("upload capacity unavailable")), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as core_backup:
+            with self.assertRaisesRegex(ValueError, "upload capacity unavailable"):
+                self._create()
+        core_backup.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
     def test_missing_or_tampered_audit_prevents_capture(self) -> None:
         audit = self.install / "core-state" / "audit.jsonl"
         for mutation in (lambda: audit.unlink(),
