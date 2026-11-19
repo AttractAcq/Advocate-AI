@@ -18,8 +18,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 import jwt
 
-from infrastructure.deploy.fleet_installer import fleet_status, install_fleet, rotate_fleet_ca
-from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError, stop_runtime
+from infrastructure.deploy.fleet_installer import (
+    FleetInstallError, _private_temp, _state, _write_ca_journal, _write_state,
+    fleet_status, install_fleet, recover_fleet, rotate_fleet_ca,
+)
+from infrastructure.deploy.fleet_runtime import (
+    FleetRuntime, RuntimeError, start_verified_bundle, stop_runtime,
+)
 import infrastructure.deploy.fleet_runtime as fleet_runtime
 
 
@@ -309,6 +314,66 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("stale CA recovery failed")
             _expect_token(handle.api_id, rotated, True)
+
+            # Reproduce a process stop after CA staging but before candidate
+            # activation. Status must fail until recover restores old trust.
+            identity = install_root / "identity"
+            active_ca = identity / "ca.pem"
+            before = _state(install_root)
+            _write_ca_journal(install_root, before, new_ca)
+            staged = _private_temp(identity, ".ca-interrupted-", old_ca)
+            os.replace(staged, active_ca)
+            try:
+                fleet_status(install_root, trusted)
+            except FleetInstallError:
+                pass
+            else:
+                raise AssertionError("pre-commit CA interruption was not reported")
+            if recover_fleet(install_root, trusted, crane)["result"] != "already_healthy":
+                raise AssertionError("pre-commit CA recovery did not keep the old runtime")
+            if active_ca.read_bytes() != new_ca or active_handle().api_id != handle.api_id:
+                raise AssertionError("pre-commit recovery changed Fleet identity")
+            _expect_token(handle.api_id, rotated, True)
+
+            # Reproduce a stop after the signed candidate was committed but
+            # before the old runtime and journal were retired.
+            before = _state(install_root)
+            _write_ca_journal(install_root, before, new_ca)
+            staged = _private_temp(identity, ".ca-interrupted-", new_ca)
+            os.replace(staged, active_ca)
+            stage = install_root / "fleet-releases" / str(before["active"])
+            candidate = None
+            fleet_runtime._docker = synthetic_host_docker
+            try:
+                candidate = start_verified_bundle(stage / "bundle", trusted, crane,
+                                                  stage / "fleet-config.json",
+                                                  install_root / "state", network)
+                _write_state(install_root, str(before["active"]), before["previous"],
+                             candidate)
+            except Exception:
+                if candidate is not None:
+                    stop_runtime(candidate)
+                recover_fleet(install_root, trusted, crane)
+                raise
+            finally:
+                fleet_runtime._docker = original_docker
+            try:
+                fleet_status(install_root, trusted)
+            except FleetInstallError:
+                pass
+            else:
+                raise AssertionError("post-commit CA interruption was not reported")
+            if recover_fleet(install_root, trusted, crane)["result"] != "already_healthy":
+                raise AssertionError("post-commit CA recovery did not verify candidate")
+            handle = active_handle()
+            if handle.api_id != candidate.api_id or active_ca.read_bytes() != new_ca:
+                raise AssertionError("post-commit recovery did not retain new runtime")
+            for identifier in (before["runtime"]["api_id"],
+                               before["runtime"]["portal_id"]):
+                if subprocess.run(["docker", "inspect", identifier],
+                                  capture_output=True).returncode == 0:
+                    raise AssertionError("old Fleet container survived recovery")
+            _expect_token(handle.api_id, rotated, True)
             _run("docker", "stop", server)
             try:
                 fleet_status(install_root, trusted)
@@ -318,7 +383,8 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
                 raise AssertionError("Fleet status passed without its identity provider")
             return {"oidc_runtime": "synthetic-https-token-authorized",
                     "wrong_audience": "denied", "idp_outage": "status-failed-closed",
-                    "trust_rotation": "signed-candidate-overlap-cutover-and-rollback"}
+                    "trust_rotation": "signed-candidate-overlap-cutover-and-rollback",
+                    "rotation_interruption": "precommit-restored-postcommit-verified"}
         finally:
             state_file = install_root / "fleet-state.json"
             if state_file.exists():

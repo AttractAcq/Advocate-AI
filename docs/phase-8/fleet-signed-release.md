@@ -132,6 +132,13 @@ runtime. If the committed candidate is unhealthy after a process crash,
 recovery fails closed and leaves the journal for operator investigation.
 Company CA custody, approved rollover timing, target ingress and interrupted
 host-reboot rehearsal remain B-12.
+The signed-image CI rehearsal also injects a synthetic process interruption
+on each side of active-state replacement. It requires status to stop on the
+journal, restores the previous CA and API before commit, and after commit
+verifies the candidate before removing the old API and portal containers. It
+then checks authorised access again. This covers process interruption on a
+running Docker host; a physical reboot and protected-media restore still need
+target hardware.
 The synthetic runner maps that temporary IdP hostname to its private network
 address because the hosted Linux Docker runner does not resolve its network
 alias from the two-network API container. This mapping is confined to the
