@@ -268,9 +268,12 @@ def _provision_receipt_trust(root: Path, source: Path | None) -> None:
             stat.S_IMODE(source.stat().st_mode) & 0o077):
         raise FleetInstallError("invalid or already provisioned Fleet receipt trust")
     validate_import_trust_dir(source)
+    approved_digest = _trust_digest(source)
     try:
         shutil.copytree(source, target, symlinks=True)
         _import_trust(root / "state")
+        if _trust_digest(target) != approved_digest:
+            raise FleetInstallError("Fleet receipt trust changed during provisioning")
     except Exception:
         shutil.rmtree(target, ignore_errors=True)
         raise
@@ -567,6 +570,7 @@ def rotate_fleet_receipt_trust(root: Path, trusted_key: Path, crane: Path,
         if not source.is_absolute() or source.resolve() == trust.resolve():
             raise FleetInstallError("replacement receipt trust must be separate")
         validate_import_trust_dir(source)
+        approved_digest = _trust_digest(source)
         old_digest = _trust_digest(trust)
         handle = _handle(current)
         probe_runtime(handle, stage / "bundle", trusted_key,
@@ -580,6 +584,8 @@ def rotate_fleet_receipt_trust(root: Path, trusted_key: Path, crane: Path,
             shutil.copytree(source, staged_trust, symlinks=True)
             validate_import_trust_dir(staged_trust)
             new_digest = _trust_digest(staged_trust)
+            if new_digest != approved_digest:
+                raise FleetInstallError("replacement receipt trust changed during staging")
             if new_digest == old_digest:
                 raise FleetInstallError("replacement receipt trust is unchanged")
             journal = _write_receipt_journal(root, current, old_digest, new_digest)

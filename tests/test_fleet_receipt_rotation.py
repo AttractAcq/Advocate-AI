@@ -89,6 +89,33 @@ class FleetReceiptRotationTests(unittest.TestCase):
         self.assertEqual(_trust_digest(self.root / "receipt-import"), self.old_digest)
         self.assertIsNone(_read_receipt_journal(self.root))
 
+    def test_changed_source_copy_is_rejected_before_rotation(self) -> None:
+        original_copy = shutil.copytree
+
+        def changed_copy(source, target, **options):
+            result = original_copy(source, target, **options)
+            replacement = Ed25519PrivateKey.generate().public_key()
+            key = Path(target) / "issuer-1.pem"
+            key.write_bytes(replacement.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo))
+            return result
+
+        with patch("infrastructure.deploy.fleet_installer._verify_stage"), \
+             patch("infrastructure.deploy.fleet_installer.probe_runtime"), \
+             patch("infrastructure.deploy.fleet_installer.shutil.copytree",
+                   side_effect=changed_copy):
+            with self.assertRaisesRegex(FleetInstallError, "changed during staging"):
+                rotate_fleet_receipt_trust(
+                    self.root, self.base / "release.pem", self.base / "crane", self.new)
+            fresh = self.base / "fresh-install"
+            fresh.mkdir(mode=0o700)
+            with self.assertRaisesRegex(FleetInstallError, "changed during provisioning"):
+                _provision_receipt_trust(fresh, self.new)
+            self.assertFalse((fresh / "receipt-import").exists())
+        self.assertEqual(_trust_digest(self.root / "receipt-import"), self.old_digest)
+        self.assertIsNone(_read_receipt_journal(self.root))
+
     def test_recover_precommit_restores_old_trust(self) -> None:
         self._journal_swap(committed=False)
         with patch("infrastructure.deploy.fleet_installer._verify_stage"), \
