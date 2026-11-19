@@ -17,8 +17,12 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from infrastructure.deploy.product_installer import _installation_id, _lock, _mount_config, _owner_directory, _state
+from infrastructure.deploy.product_installer import (
+    _identifier, _installation_id, _lock, _mount_config, _owner_directory,
+    _state, restore_install_product,
+)
 from infrastructure.restic_repository import create_snapshot
+from infrastructure.release.bundle import verify_bundle
 from infrastructure.upload_quarantine_backup import create_upload_snapshot
 from services.knowledge.upload_staging import quarantine_directory_lock
 from services.policy.policy_file import policy_directory_lock
@@ -217,6 +221,30 @@ def verify_product_recovery_set(receipt: Path, trusted_key: Path) -> dict[str, o
         raise RecoverySetError("recovery receipt verification failed") from exc
 
 
+def restore_product_recovery_set(receipt: Path, receipt_trusted_key: Path,
+                                 bundle: Path, bundle_trusted_key: Path,
+                                 crane: Path, console_config: Path,
+                                 install_root: Path, core_password_file: Path,
+                                 upload_password_file: Path, restic: Path,
+                                 restic_sha256: str, lab_password_file: Path,
+                                 emergency_password_file: Path | None = None
+                                 ) -> dict[str, object]:
+    """Restore only the signed pair to a new installation of its captured release."""
+    recovery_set = verify_product_recovery_set(receipt, receipt_trusted_key)
+    manifest = verify_bundle(bundle, bundle_trusted_key)
+    if manifest["schema"] != 4 or _identifier(bundle, console_config) != recovery_set["active_release"]:
+        raise RecoverySetError("recovery receipt release does not match product bundle")
+    restored = restore_install_product(
+        bundle, bundle_trusted_key, crane, console_config, install_root,
+        str(recovery_set["core_snapshot_id"]), Path(str(recovery_set["core_repository"])),
+        core_password_file, restic, restic_sha256, lab_password_file,
+        emergency_password_file, enable_uploads=True,
+        upload_snapshot_id=str(recovery_set["upload_snapshot_id"]),
+        upload_repository=Path(str(recovery_set["upload_repository"])),
+        upload_password_file=upload_password_file)
+    return {**restored, "recovery_set": "signed-pair-verified"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic signed product recovery set")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -229,6 +257,13 @@ def main() -> None:
     verify = commands.add_parser("verify")
     verify.add_argument("--receipt", required=True, type=Path)
     verify.add_argument("--trusted-key", required=True, type=Path)
+    restore = commands.add_parser("restore")
+    for name in ("receipt", "receipt-trusted-key", "bundle", "bundle-trusted-key",
+                 "crane", "console-config", "install-root", "core-password-file",
+                 "upload-password-file", "restic", "lab-password-file"):
+        restore.add_argument("--" + name, required=True, type=Path)
+    restore.add_argument("--restic-sha256", required=True)
+    restore.add_argument("--emergency-password-file", type=Path)
     args = parser.parse_args()
     try:
         if args.command == "create":
@@ -236,8 +271,15 @@ def main() -> None:
                 args.install_root, args.core_repository, args.upload_repository,
                 args.core_password_file, args.upload_password_file, args.restic,
                 args.restic_sha256, args.staging_parent, args.signing_key, args.output)
-        else:
+        elif args.command == "verify":
             result = verify_product_recovery_set(args.receipt, args.trusted_key)
+        else:
+            result = restore_product_recovery_set(
+                args.receipt, args.receipt_trusted_key, args.bundle,
+                args.bundle_trusted_key, args.crane, args.console_config,
+                args.install_root, args.core_password_file,
+                args.upload_password_file, args.restic, args.restic_sha256,
+                args.lab_password_file, args.emergency_password_file)
     except (RecoverySetError, OSError, ValueError) as exc:
         parser.exit(1, f"product recovery set: {exc}\n")
     print(json.dumps(result, sort_keys=True))

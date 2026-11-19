@@ -26,7 +26,8 @@ from infrastructure.deploy.product_installer import (
     refresh_emergency_product, restore_install_product, rollback_product,
 )
 from infrastructure.deploy.product_recovery_set import (
-    create_product_recovery_set, verify_product_recovery_set,
+    create_product_recovery_set, restore_product_recovery_set,
+    verify_product_recovery_set,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -383,15 +384,11 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     if recovery_set != created_set:
                         raise AssertionError("coordinated recovery receipt mismatch")
                     recovered_root = root / "product-upload-restore-install"
-                    combined = restore_install_product(
-                        product_bundle, trusted, crane, config, recovered_root,
-                        str(recovery_set["core_snapshot_id"]), core_repository,
-                        backup_password, restic,
-                        restic_sha256, lab_credential, emergency_credential,
-                        enable_uploads=True,
-                        upload_snapshot_id=str(recovery_set["upload_snapshot_id"]),
-                        upload_repository=upload_repository,
-                        upload_password_file=backup_password)
+                    combined = restore_product_recovery_set(
+                        receipt_path, trusted, product_bundle, trusted,
+                        crane, config, recovered_root, backup_password,
+                        backup_password, restic, restic_sha256, lab_credential,
+                        emergency_credential)
                     try:
                         recovered_state = json.loads((recovered_root / "product-state.json").read_text())
                         recovered_core = str(recovered_state["runtime"]["core_id"])
