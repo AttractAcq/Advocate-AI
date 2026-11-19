@@ -45,6 +45,19 @@ or credential should be placed in this lab.
    The temporary lab login tokens and audit log are discarded. This does not
    replace an independent review of claim support.
 
+   To reconcile the approved manifest once, or poll for changes in the
+   synthetic lab, run respectively:
+
+   ```sh
+   .venv/bin/python -m scripts.phase3_reconcile --once
+   .venv/bin/python -m scripts.phase3_reconcile
+   ```
+
+   Polling defaults to 30 seconds with a full source recheck every ten
+   minutes. The source root must be mounted read-only for the service; Core
+   still checks source hashes and permissions on each request. The poller is
+   not a substitute for target NAS identity and ACL qualification.
+
 4. Prepare and start synthetic Keycloak on loopback. The script creates random
    test passwords in ignored runtime files; it does not print them:
 

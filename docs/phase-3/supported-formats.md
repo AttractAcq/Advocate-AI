@@ -13,6 +13,12 @@ The import records source ID, relative origin, owner, classification, collection
 version and SHA-256. Missing or changed source bytes fail closed. The worker
 reads only paths listed in the manifest under the approved root. The local
 database stores parsed passages and vectors, not a copy of the source file.
+The [synthetic reconciler](runbook.md) polls the approved manifest every
+30 seconds and runs `sync_manifest` when its digest changes; it also repeats a
+full source check every ten minutes. Unchanged approved sources skip parsing.
+Core's retrieval path independently rechecks manifest, policy and source hash
+on each read, so an unapproved source change is denied before the next scan.
+The poller does not map NAS ACLs or prove a target service-account mount.
 
 The current PDF path extracts an existing text layer. Office files now have
 ZIP member-count, expanded-byte, compression-ratio and path checks before
