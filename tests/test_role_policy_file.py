@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from services.policy.policy_file import PolicyUnavailable, load_policy
+from services.policy.policy_file import PolicyUnavailable, active_user, load_policy
 
 
 class RolePolicyFileTests(unittest.TestCase):
@@ -27,6 +28,20 @@ class RolePolicyFileTests(unittest.TestCase):
             policy.write_text('{"allow": {}, "allow": {}}', encoding="utf-8")
             with self.assertRaisesRegex(PolicyUnavailable, "duplicate"):
                 load_policy(policy)
+            policy.write_text('{"ignored": NaN}', encoding="utf-8")
+            with self.assertRaisesRegex(PolicyUnavailable, "constant"):
+                load_policy(policy)
+
+    def test_duplicate_and_expired_identity_is_never_active(self) -> None:
+        now = datetime.now(timezone.utc)
+        user = {"id": "fictional-emergency", "role": "emergency_recovery",
+                "status": "active", "expires_at": (now + timedelta(minutes=5)).isoformat()}
+        policy = {"users": [user], "allow": {"emergency_recovery": []}}
+        self.assertEqual(active_user(policy, user["id"], now=now), user)
+        self.assertIsNone(active_user(policy, user["id"], now=now + timedelta(minutes=5)))
+        self.assertIsNone(active_user({**policy, "users": [user, user]}, user["id"], now=now))
+        self.assertIsNone(active_user({**policy, "users": [{**user, "expires_at": "2030-01-01"}]},
+                                      user["id"], now=now))
 
 
 if __name__ == "__main__":

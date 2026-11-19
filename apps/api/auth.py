@@ -16,7 +16,7 @@ import sqlite3
 from threading import RLock
 import time
 
-from services.policy.policy_file import PolicyUnavailable, load_policy
+from services.policy.policy_file import PolicyUnavailable, active_user, load_policy
 
 
 @dataclass
@@ -28,6 +28,7 @@ class Conversation:
 @dataclass
 class LoginSession:
     user_id: str
+    role: str
     expires_at: float
 
 
@@ -58,24 +59,24 @@ class LabSessions:
             raise RuntimeError("persistent history unavailable")
         return sqlite3.connect(self.history_db.resolve().as_uri() + "?mode=rw", uri=True, timeout=5)
 
-    def _active_user(self, user_id: str) -> dict[str, str] | None:
+    def _active_user(self, user_id: str) -> dict[str, object] | None:
         try:
             policy = load_policy(self.roles_path)
         except PolicyUnavailable:
             return None
-        if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
-            return None
-        return next((user for user in policy["users"] if isinstance(user, dict)
-                     and user.get("id") == user_id and user.get("status") == "active"), None)
+        return active_user(policy, user_id)
 
     def login(self, user_id: str, password: str) -> str | None:
         if not self.password or len(self.password) < 12:
             return None
-        if not secrets.compare_digest(password, self.password) or not self._active_user(user_id):
+        if not secrets.compare_digest(password, self.password):
+            return None
+        user = self._active_user(user_id)
+        if user is None:
             return None
         token = secrets.token_urlsafe(32)
         with self._lock:
-            self._tokens[token] = LoginSession(user_id, time.time() + 1800)
+            self._tokens[token] = LoginSession(user_id, str(user["role"]), time.time() + 1800)
         return token
 
     def user_for(self, token: str) -> dict[str, str] | None:
@@ -85,8 +86,9 @@ class LabSessions:
                 self._tokens.pop(token, None)
                 return None
         user = self._active_user(session.user_id)
-        if not user:
+        if not user or user["role"] != session.role:
             self.logout(token)
+            return None
         return user
 
     def logout(self, token: str) -> None:

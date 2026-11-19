@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 import httpx
 import jwt
 
-from services.policy.policy_file import load_policy
+from services.policy.policy_file import active_user, load_policy
 
 
 class OidcVerifier:
@@ -158,10 +158,7 @@ class OidcVerifier:
             if not isinstance(username, str):
                 return None
             policy = load_policy(self.roles_path)
-            if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
-                return None
-            user = next((item for item in policy.get("users", []) if isinstance(item, dict)
-                         and item.get("id") == username and item.get("status") == "active"), None)
+            user = active_user(policy, username)
             roles = claims.get("realm_access", {}).get("roles", [])
             if user is None or not isinstance(roles, list) or user.get("role") not in roles:
                 return None
