@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 from threading import Event
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -88,6 +89,30 @@ class UploadQuarantineBackupTests(unittest.TestCase):
                 self.root / "password", self.root / "restic", "b" * 64, self.staging)
         self.assertEqual(created["quarantine_files"], 2)
         self.assertEqual(list(self.staging.iterdir()), [])
+
+    def test_backup_refuses_insufficient_space_before_restic(self) -> None:
+        with patch("infrastructure.upload_quarantine_backup.shutil.disk_usage",
+                   return_value=SimpleNamespace(free=0)), \
+             patch("infrastructure.upload_quarantine_backup.create_snapshot") as restic:
+            with self.assertRaisesRegex(UploadBackupError, "insufficient space"):
+                create_upload_snapshot(self.uploads, self.root / "repo",
+                    self.root / "password", self.root / "restic", "b" * 64,
+                    self.staging)
+        restic.assert_not_called()
+        self.assertEqual(list(self.staging.iterdir()), [])
+
+    def test_backup_checks_repository_space_on_separate_volume(self) -> None:
+        with patch("infrastructure.upload_quarantine_backup._device",
+                   side_effect=[1, 2]), \
+             patch("infrastructure.upload_quarantine_backup.shutil.disk_usage",
+                   side_effect=[SimpleNamespace(free=10**12),
+                                SimpleNamespace(free=0)]), \
+             patch("infrastructure.upload_quarantine_backup.create_snapshot") as restic:
+            with self.assertRaisesRegex(UploadBackupError, "insufficient space"):
+                create_upload_snapshot(self.uploads, self.root / "repo",
+                    self.root / "password", self.root / "restic", "b" * 64,
+                    self.staging)
+        restic.assert_not_called()
 
     def test_streaming_profile_covers_full_pending_queue_and_detects_change(self) -> None:
         self.assertGreaterEqual(MAX_TOTAL, 100 * MAX_BYTES)
