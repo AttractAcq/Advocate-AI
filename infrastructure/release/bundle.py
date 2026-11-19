@@ -87,18 +87,22 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
                    *, evidence: dict[str, str] | None = None,
                    images: dict[str, dict[str, str]] | None = None,
-                   fleet: bool = False) -> dict[str, object]:
+                   fleet: bool = False, knowledge: bool = False) -> dict[str, object]:
     """Copy an approved payload and sign its exact manifest bytes."""
     if not isinstance(version, str) or not version or len(version) > 80 or any(c.isspace() for c in version):
         raise BundleError("invalid release version")
     source_files = _files(payload)
     if evidence is not None and images is not None:
         raise BundleError("ambiguous release evidence")
+    if fleet and knowledge:
+        raise BundleError("ambiguous image bundle target")
     if evidence is not None:
         _validate_evidence(evidence, {name for name, _ in source_files})
     if images is not None:
         _validate_image_set(images, {name for name, _ in source_files},
-                            ("fleet-api", "fleet-portal") if fleet else ("core", "console"))
+                            ("fleet-api", "fleet-portal") if fleet else
+                            ("core", "console", "knowledge") if knowledge else
+                            ("core", "console"))
     output = output.absolute()
     if output.exists() or output.is_relative_to(payload.resolve()):
         raise BundleError("output must be new and outside payload")
@@ -116,7 +120,7 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
             shutil.copyfile(source, target)
             rows.append({"path": name, "sha256": _sha256(target), "size": target.stat().st_size})
         manifest: dict[str, object] = {
-            "schema": (5 if fleet else 4) if images is not None else
+            "schema": (5 if fleet else 6 if knowledge else 4) if images is not None else
                       (3 if evidence is not None else 2),
             "version": version, "key_id": _key_id(key.public_key()), "files": rows,
         }
@@ -126,8 +130,8 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
         if images is not None:
             manifest["signed_at"] = datetime.now(timezone.utc).isoformat()
             manifest["images"] = images
-            if fleet:
-                manifest["target"] = "fleet"
+            if fleet or knowledge:
+                manifest["target"] = "fleet" if fleet else "vessel"
         raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
         (output / MANIFEST).write_bytes(raw)
         (output / SIGNATURE).write_bytes(base64.b64encode(key.sign(raw)))
@@ -171,7 +175,7 @@ def _validate_evidence(evidence: object, files: set[str]) -> None:
         raise BundleError("invalid image reference")
 
 
-def _validate_image_set(images: object, files: set[str], roles: tuple[str, str]) -> None:
+def _validate_image_set(images: object, files: set[str], roles: tuple[str, ...]) -> None:
     """Require the exact evidenced image roles for one product boundary."""
     if not isinstance(images, dict) or set(images) != set(roles):
         raise BundleError("bundle image roles do not match its target")
@@ -225,6 +229,30 @@ def create_product_bundle(payload: Path, output: Path, signing_key: Path,
             if copied.get("archive_sha256") != item["archive_sha256"] or \
                     _sha256(output / item["archive_path"]) != item["archive_sha256"]:
                 raise BundleError("copied product archive does not match signed evidence")
+    except (IntakeError, BundleError, OSError):
+        shutil.rmtree(output)
+        raise
+    return manifest
+
+
+def create_knowledge_bundle(payload: Path, output: Path, signing_key: Path,
+                            version: str, images: dict[str, dict[str, str]],
+                            *, crane: Path) -> dict[str, object]:
+    """Sign Core, Console and Knowledge only after all three archives pass intake."""
+    roles = ("core", "console", "knowledge")
+    _validate_image_set(images, {name for name, _ in _files(payload)}, roles)
+    for role in roles:
+        _preflight_image(payload, images[role], crane)
+    manifest = _create_bundle(payload, output, signing_key, version,
+                              images=images, knowledge=True)
+    try:
+        for role in roles:
+            item = images[role]
+            copied = verify_intake(output / item["scan_path"], output / item["sbom_path"],
+                                   item["image_ref"], item["scan_sha256"], item["sbom_sha256"])
+            if copied.get("archive_sha256") != item["archive_sha256"] or \
+                    _sha256(output / item["archive_path"]) != item["archive_sha256"]:
+                raise BundleError("copied knowledge product archive does not match signed evidence")
     except (IntakeError, BundleError, OSError):
         shutil.rmtree(output)
         raise
@@ -305,14 +333,14 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
         raise BundleError("invalid manifest, signature or public key") from exc
     if not isinstance(key, Ed25519PublicKey):
         raise BundleError("trusted key must be Ed25519")
-    if not isinstance(manifest, dict) or manifest.get("schema") not in (2, 3, 4, 5):
+    if not isinstance(manifest, dict) or manifest.get("schema") not in (2, 3, 4, 5, 6):
         raise BundleError("invalid manifest fields")
     required = {"schema", "version", "key_id", "files"}
     if manifest["schema"] == 3:
         required |= {"signed_at", "evidence"}
-    elif manifest["schema"] in (4, 5):
+    elif manifest["schema"] in (4, 5, 6):
         required |= {"signed_at", "images"}
-        if manifest["schema"] == 5:
+        if manifest["schema"] in (5, 6):
             required.add("target")
     if set(manifest) != required:
         raise BundleError("invalid manifest fields")
@@ -348,7 +376,7 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
     actual = {name for name, _ in _files(bundle, allow_control=True)} - {MANIFEST, SIGNATURE}
     if actual != expected:
         raise BundleError("unlisted or missing payload")
-    if manifest["schema"] in (3, 4, 5):
+    if manifest["schema"] in (3, 4, 5, 6):
         try:
             signed_at = datetime.fromisoformat(manifest["signed_at"])
         except (TypeError, ValueError) as exc:
@@ -372,12 +400,15 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
                 raise BundleError("signed image archive does not match the SBOM")
         elif "archive_path" in evidence:
             raise BundleError("signed image archive lacks generated inventory")
-    elif manifest["schema"] in (4, 5):
+    elif manifest["schema"] in (4, 5, 6):
         images = manifest["images"]
-        roles = ("core", "console") if manifest["schema"] == 4 else \
-                ("fleet-api", "fleet-portal")
+        roles = (("core", "console") if manifest["schema"] == 4 else
+                 ("fleet-api", "fleet-portal") if manifest["schema"] == 5 else
+                 ("core", "console", "knowledge"))
         if manifest["schema"] == 5 and manifest["target"] != "fleet":
             raise BundleError("signed Fleet bundle target is invalid")
+        if manifest["schema"] == 6 and manifest["target"] != "vessel":
+            raise BundleError("signed knowledge bundle target is invalid")
         _validate_image_set(images, expected, roles)
         for role in roles:
             item = images[role]
@@ -422,6 +453,13 @@ def main() -> None:
     product.add_argument("--version", required=True)
     product.add_argument("--images-json", required=True, type=Path)
     product.add_argument("--crane", required=True, type=Path)
+    knowledge = commands.add_parser("pack-knowledge")
+    knowledge.add_argument("payload", type=Path)
+    knowledge.add_argument("output", type=Path)
+    knowledge.add_argument("--signing-key", required=True, type=Path)
+    knowledge.add_argument("--version", required=True)
+    knowledge.add_argument("--images-json", required=True, type=Path)
+    knowledge.add_argument("--crane", required=True, type=Path)
     fleet = commands.add_parser("pack-fleet")
     fleet.add_argument("payload", type=Path)
     fleet.add_argument("output", type=Path)
@@ -453,6 +491,13 @@ def main() -> None:
             images = json.loads(args.images_json.read_text(), object_pairs_hook=_unique_object)
             result = create_product_bundle(args.payload, args.output, args.signing_key,
                                            args.version, images, crane=args.crane)
+        elif args.command == "pack-knowledge":
+            if args.images_json.is_symlink() or not args.images_json.is_file() or \
+                    args.images_json.stat().st_size > MAX_MANIFEST_BYTES:
+                raise BundleError("invalid knowledge image descriptor")
+            images = json.loads(args.images_json.read_text(), object_pairs_hook=_unique_object)
+            result = create_knowledge_bundle(args.payload, args.output, args.signing_key,
+                                             args.version, images, crane=args.crane)
         elif args.command == "pack-fleet":
             if args.images_json.is_symlink() or not args.images_json.is_file() or \
                     args.images_json.stat().st_size > MAX_MANIFEST_BYTES:

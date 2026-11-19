@@ -39,3 +39,9 @@ The [PR #32 CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/43
 shows `product_bundle: verified` with both image preflights passing and zero
 unresolved findings in the saved archives. The signer was temporary and does
 not authorize release distribution.
+
+# Three-image Knowledge release
+
+The separate [schema 6 vessel bundle format](signed-knowledge-bundle.md)
+adds an evidenced `knowledge` image alongside Core and Console. Its installer
+and actual-image release qualification remain open.
