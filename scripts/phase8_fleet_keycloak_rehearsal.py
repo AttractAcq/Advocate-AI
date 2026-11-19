@@ -193,11 +193,12 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
             secret = driver_request("POST", f"/session/{session}/execute/sync", {
                 "script": "return document.querySelector('#kc-totp-secret-key').textContent.trim()", "args": []})
             assert isinstance(secret, str) and 16 <= len(secret) <= 128
+            enrollment_code = _totp(secret)
             driver_request("POST", f"/session/{session}/execute/sync", {"script": """
                 document.querySelector('input[name=totp]').value = arguments[0];
                 document.querySelector('input[name=userLabel]').value = 'Synthetic Fleet device';
                 document.querySelector('#kc-totp-settings-form').requestSubmit();
-            """, "args": [_totp(secret)]})
+            """, "args": [enrollment_code]})
         until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
         cleared = driver_request("POST", f"/session/{session}/execute/sync", {"script": """
             return !location.search && !sessionStorage.getItem('sovereign_fleet_oidc_state')
@@ -232,11 +233,25 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                 document.querySelector('#kc-otp-login-form').requestSubmit();
             """, "args": [bad]})
             until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-otp-login-form input[aria-invalid=true]')", 30)
+            # Keycloak may reject reuse of the code used to enrol this device.
+            # Wait for a distinct time-step value before the successful login.
+            deadline = time.monotonic() + 40
+            while _totp(secret) == enrollment_code:
+                if time.monotonic() >= deadline:
+                    raise AssertionError("synthetic OTP did not advance to a new period")
+                time.sleep(0.2)
             driver_request("POST", f"/session/{session}/execute/sync", {"script": """
                 document.querySelector('input[name=otp]').value = arguments[0];
                 document.querySelector('#kc-otp-login-form').requestSubmit();
             """, "args": [_totp(secret)]})
-            until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
+            try:
+                until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
+            except AssertionError as error:
+                state = driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                    return {host: location.hostname, otpForm: !!document.querySelector('#kc-otp-login-form'),
+                        otpError: !!document.querySelector('#kc-otp-login-form input[aria-invalid=true]')};
+                """, "args": []})
+                raise AssertionError(f"valid synthetic OTP did not reach Fleet: {state}") from error
             return {"browser_flow": "keycloak-mfa-enrolled-and-authorized",
                     "invalid_otp": "denied", "callback_state": "cleared", "api_role": "fleet_admin"}
         return {"browser_flow": "real-keycloak-pkce-sign-in-and-sign-out", "callback_state": "cleared",
