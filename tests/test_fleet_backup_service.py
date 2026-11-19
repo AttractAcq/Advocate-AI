@@ -35,7 +35,10 @@ class FleetBackupServiceTests(unittest.TestCase):
         checked = verify_latest(self.archives, self.key, 24, 1)
         self.assertEqual(checked["clean_restore"], "verified")
         self.assertEqual(checked["archive_count"], 1)
-        self.assertEqual(list(self.archives.iterdir()), [Path(created["archive"])])
+        self.assertEqual(set(self.archives.iterdir()),
+                         {Path(created["archive"]), self.archives / ".fleet-backup.lock"})
+        self.assertEqual((self.archives / ".fleet-backup.lock").stat().st_mode & 0o777,
+                         0o600)
         with self.assertRaisesRegex(FleetScheduleError, "capacity reached"):
             create_scheduled(self.db, self.archives, self.key, 1)
 
@@ -57,7 +60,8 @@ class FleetBackupServiceTests(unittest.TestCase):
         archive.write_bytes(data)
         with self.assertRaises(BackupError):
             verify_latest(self.archives, self.key, 24, 2)
-        self.assertEqual(list(self.archives.iterdir()), [archive])
+        self.assertEqual(set(self.archives.iterdir()),
+                         {archive, self.archives / ".fleet-backup.lock"})
 
     def test_timer_is_private_and_rejects_unsafe_paths(self) -> None:
         values = (Path("/srv/fleet/state/fleet.db"), Path("/srv/fleet/backups"),
