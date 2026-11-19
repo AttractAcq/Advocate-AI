@@ -5,10 +5,11 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 
-from apps.api.main import Settings, create_app
+from apps.api.main import Settings, create_app, search_fixture_documents
 from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable, validate_local_endpoint
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,6 +95,67 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
                            for user in policy["users"]]
         (self.fixtures / "roles.json").write_text(json.dumps(policy))
         self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code, 401)
+
+    async def test_revocation_during_model_call_discards_chat_and_incident_answer(self) -> None:
+        policy_path = self.fixtures / "roles.json"
+        initial = policy_path.read_bytes()
+        calls = 0
+
+        async def revoke_during_model(question, context, **kwargs):
+            nonlocal calls
+            calls += 1
+            policy = json.loads(policy_path.read_text())
+            policy["users"] = [user | {"status": "revoked"}
+                               if user["id"] == actor else user
+                               for user in policy["users"]]
+            policy_path.write_text(json.dumps(policy))
+            return "Synthetic answer that must be discarded"
+
+        self.model.complete = revoke_during_model
+        for mode in ("documents", "general"):
+            policy_path.write_bytes(initial)
+            actor = "lab-chief_engineer-1"
+            engineer = await self.login(actor)
+            response = await self.client.post("/api/chat", headers=engineer,
+                                              json={"message": "generator inspection",
+                                                    "mode": mode})
+            self.assertEqual(response.status_code, 403, response.text)
+            self.assertNotIn("Synthetic answer", response.text)
+            for conversation_id in self.app.state.sessions.list_conversations(actor):
+                self.assertEqual(self.app.state.sessions.conversation(
+                    conversation_id, actor).turns, [])
+
+        policy_path.write_bytes(initial)
+        actor = "lab-avit_admin-1"
+        admin = await self.login(actor)
+        listing = await self.client.get("/api/security/incidents", headers=admin)
+        self.assertEqual(listing.status_code, 200)
+        incident_id = listing.json()["incidents"][0]["incident_id"]
+        response = await self.client.post(
+            f"/api/security/incidents/{incident_id}/explain", headers=admin)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertNotIn("Synthetic answer", response.text)
+        self.assertEqual(calls, 3)
+
+    async def test_revocation_after_retrieval_blocks_model_context(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        policy_path = self.fixtures / "roles.json"
+
+        def retrieve_then_revoke(*args, **kwargs):
+            hits = search_fixture_documents(*args, **kwargs)
+            self.assertTrue(hits)
+            policy = json.loads(policy_path.read_text())
+            policy["users"] = [user | {"status": "revoked"}
+                               if user["id"] == "lab-chief_engineer-1" else user
+                               for user in policy["users"]]
+            policy_path.write_text(json.dumps(policy))
+            return hits
+
+        with patch("apps.api.main.search_fixture_documents", side_effect=retrieve_then_revoke):
+            response = await self.client.post("/api/chat", headers=engineer,
+                                              json={"message": "generator inspection"})
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.model.calls, [])
 
     async def test_optional_history_survives_restart_and_rechecks_scope(self) -> None:
         settings = Settings(fixture_root=self.fixtures, lab_password="synthetic-test-passphrase",

@@ -248,6 +248,15 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             raise HTTPException(status.HTTP_403_FORBIDDEN, "security scope required")
         return identity
 
+    def revalidate_identity(identity: tuple[str, dict[str, str]]) -> None:
+        """Discard a result if the caller was revoked or changed while it ran."""
+        token, original = identity
+        current = oidc.user_for(token) if oidc else sessions.user_for(token)
+        if (current is None or current.get("id") != original["id"] or
+                current.get("role") != original["role"]):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "identity changed during request")
+
     def permitted_sources(user_id: str) -> list[dict[str, str]]:
         if settings.knowledge_manifest and settings.knowledge_db:
             try:
@@ -365,6 +374,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             raise HTTPException(status.HTTP_404_NOT_FOUND, "incident not found")
         event = incident["event"]
         if event["asset_status"] != "known" or event["related_asset_status"] == "ambiguous":
+            revalidate_identity(identity)
             record_decision(identity[1]["id"], "explain", incident_id, "mapping-unresolved")
             return {"incident_id": incident_id,
                     "analysis": incident["summary"] + " " + incident["confidence"],
@@ -388,12 +398,14 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                        "capabilities, investigation steps, commands, or facts absent from the supplied fields. "
                        "No Markdown, heading, list, or newline.")
         try:
+            revalidate_identity(identity)
             analysis = await model.complete(prompt, [], general=True,
                                             system_instruction=instruction, max_tokens=96)
         except ModelTimeout as exc:
             raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
         except ModelUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        revalidate_identity(identity)
         if not safe_incident_analysis(analysis):
             record_decision(identity[1]["id"], "explain", incident_id, "format-rejected")
             return {"incident_id": incident_id,
@@ -544,6 +556,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 record_decision(user_id, "retrieve", str(hit["document_id"]), "flagged")
             answer = "A permitted source contains instruction-like text. Its contents were withheld from the AI model; review the cited source directly."
         else:
+            revalidate_identity(identity)
             for hit in context:
                 record_decision(user_id, "retrieve", str(hit["document_id"]), "allow")
             try:
@@ -552,6 +565,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
             except ModelUnavailable as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        revalidate_identity(identity)
         citations = [{"document_id": item["document_id"], "version": item["version"],
                       "collection": item["collection"], "sha256": item["sha256"],
                       "ordinal": item.get("ordinal", 0)} for item in context]
