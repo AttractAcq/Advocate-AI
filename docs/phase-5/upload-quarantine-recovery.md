@@ -21,6 +21,13 @@ backup fails; no partial snapshot is accepted. The
 private plaintext staging parent must be separate from the upload area and
 protected by an encrypted filesystem before vessel use.
 
+Before copying, the adapter checks available space on the staging and restic
+repository volumes. It reserves room for the plaintext archive, the restic
+staging copy, the encrypted pack and a 128 MiB margin. A shared volume must
+have room for all three copies. Insufficient space fails before creating a
+repository snapshot. This estimate is deliberately conservative; target-host
+capacity, filesystem quotas and sustained restore space still need validation.
+
 ```sh
 .venv/bin/python -m infrastructure.upload_quarantine_backup create \
   --upload-root /path/to/product-uploads \

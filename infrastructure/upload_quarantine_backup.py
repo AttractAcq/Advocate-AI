@@ -21,6 +21,7 @@ _ID = re.compile(r"[0-9a-f]{32}\Z")
 MAX_RECORDS = 1024
 MAX_TOTAL = 900 * 1024 * 1024
 MAX_ARCHIVE = MAX_TOTAL + 2 * 1024 * 1024
+FREE_SPACE_RESERVE = 128 * 1024 * 1024
 ARCHIVE = "upload-quarantine.zip"
 INVENTORY = "inventory.json"
 
@@ -160,6 +161,31 @@ def _write_archive_from_root(archive: Path, root: Path,
         raise UploadBackupError("quarantine archive exceeds synthetic size limit")
 
 
+def _check_backup_space(rows: list[dict[str, object]], staging_parent: Path,
+                        repository: Path) -> None:
+    """Reserve room for the private archive, restic copy and encrypted pack."""
+    if not repository.is_absolute() or repository.is_symlink():
+        raise UploadBackupError("repository must be an unlinked absolute path")
+    repository_volume = repository if repository.exists() else repository.parent
+    if repository_volume.is_symlink() or not repository_volume.is_dir():
+        raise UploadBackupError("repository parent is missing or linked")
+    estimated_archive = sum(int(row["size"]) for row in rows) + 2 * 1024 * 1024
+    if estimated_archive > MAX_ARCHIVE:
+        raise UploadBackupError("quarantine archive exceeds synthetic size limit")
+    staging_need = estimated_archive * 2 + FREE_SPACE_RESERVE
+    repository_need = estimated_archive + FREE_SPACE_RESERVE
+    if _device(staging_parent) == _device(repository_volume):
+        if shutil.disk_usage(staging_parent).free < staging_need + estimated_archive:
+            raise UploadBackupError("insufficient space for encrypted quarantine snapshot")
+    elif (shutil.disk_usage(staging_parent).free < staging_need or
+          shutil.disk_usage(repository_volume).free < repository_need):
+        raise UploadBackupError("insufficient space for encrypted quarantine snapshot")
+
+
+def _device(path: Path) -> int:
+    return path.stat().st_dev
+
+
 def _extract_archive(archive: Path, destination: Path) -> int:
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
         raise UploadBackupError("restore needs a new destination")
@@ -231,6 +257,7 @@ def create_upload_snapshot(upload_root: Path, repository: Path, password_file: P
         archive = stage / ARCHIVE
         with quarantine_directory_lock(upload_root, exclusive=False):
             rows = _scan_inventory(upload_root)
+            _check_backup_space(rows, staging_parent, repository)
             _write_archive_from_root(archive, upload_root, rows)
         spec = stage / "spec.json"
         spec.write_text(json.dumps({"schema": 1, "files": [
