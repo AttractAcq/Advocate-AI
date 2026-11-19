@@ -139,6 +139,21 @@ def _expect_token(api_id: str, token: str, allowed: bool) -> None:
     _run("docker", "exec", api_id, "python", "-c", script)
 
 
+def _restart_ready(container: str, *, api: bool) -> None:
+    _run("docker", "restart", container)
+    probe = ("import urllib.request; "
+             "assert urllib.request.urlopen('http://127.0.0.1:18800/health',timeout=2).status==200"
+             if api else
+             "import socket; socket.create_connection(('127.0.0.1',443),timeout=2).close()")
+    for _ in range(20):
+        ready = subprocess.run(["docker", "exec", container, "python", "-c", probe],
+                               capture_output=True, timeout=5)
+        if ready.returncode == 0:
+            return
+        time.sleep(0.5)
+    raise AssertionError("synthetic identity rotation container did not become ready")
+
+
 def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
                    root: Path) -> dict[str, str]:
     """Retain only metadata about actual container and token outcomes."""
@@ -239,7 +254,7 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             rotated = _token(next_signing, kid="fleet-synthetic-next")
 
             _replace_mounted(installed_ca, new_ca)
-            _run("docker", "restart", handle.api_id)
+            _restart_ready(handle.api_id, api=True)
             try:
                 fleet_status(install_root, trusted)
             except RuntimeError:
@@ -247,13 +262,13 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             else:
                 raise AssertionError("untrusted CA rotation remained healthy")
             _replace_mounted(installed_ca, old_ca)
-            _run("docker", "restart", handle.api_id)
+            _restart_ready(handle.api_id, api=True)
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("failed CA rotation did not recover")
             _expect_token(handle.api_id, valid, True)
 
             _replace_mounted(installed_ca, old_ca + new_ca)
-            _run("docker", "restart", handle.api_id)
+            _restart_ready(handle.api_id, api=True)
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("CA overlap denied old issuer")
             _replace_mounted(idp / "jwks.json", json.dumps({"keys": [old_jwk, next_jwk]}).encode())
@@ -261,20 +276,20 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             _expect_token(handle.api_id, valid, True)
             _replace_mounted(idp / "cert.pem", (next_idp / "cert.pem").read_bytes())
             _replace_mounted(idp / "key.pem", (next_idp / "key.pem").read_bytes())
-            _run("docker", "restart", server)
+            _restart_ready(server, api=False)
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("CA overlap denied new issuer")
             _expect_token(handle.api_id, rotated, True)
 
             _replace_mounted(idp / "jwks.json", json.dumps({"keys": [next_jwk]}).encode())
             _replace_mounted(installed_ca, new_ca)
-            _run("docker", "restart", handle.api_id)
+            _restart_ready(handle.api_id, api=True)
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("new trust did not survive cutover")
             _expect_token(handle.api_id, rotated, True)
             _expect_token(handle.api_id, valid, False)
             _replace_mounted(installed_ca, old_ca)
-            _run("docker", "restart", handle.api_id)
+            _restart_ready(handle.api_id, api=True)
             try:
                 fleet_status(install_root, trusted)
             except RuntimeError:
@@ -282,7 +297,7 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             else:
                 raise AssertionError("stale CA trusted new issuer")
             _replace_mounted(installed_ca, new_ca)
-            _run("docker", "restart", handle.api_id)
+            _restart_ready(handle.api_id, api=True)
             if fleet_status(install_root, trusted)["result"] != "healthy":
                 raise AssertionError("stale CA recovery failed")
             _expect_token(handle.api_id, rotated, True)
