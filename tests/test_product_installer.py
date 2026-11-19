@@ -13,6 +13,7 @@ from infrastructure.deploy.product_installer import (
     refresh_emergency_product, restore_install_product, rollback_product,
 )
 from services.knowledge.upload_staging import stage_upload
+from services.policy.audit import verify as verify_audit
 
 
 class ProductInstallerTests(unittest.TestCase):
@@ -61,6 +62,7 @@ class ProductInstallerTests(unittest.TestCase):
             self.assertEqual(mount_record["state"], str(state.resolve()))
             self.assertEqual(mount_record["credential"], str(credential.resolve()))
             self.assertEqual((self.root / "product-core-mount.json").stat().st_mode & 0o077, 0)
+            self.assertEqual(verify_audit(state / "audit.jsonl")[0], 1)
             install_product(self.second, self.key, self.crane, self.config, self.root)
             self.assertEqual(rollback_product(self.root, self.key, self.crane)["active"],
                              first["active"])
@@ -73,6 +75,9 @@ class ProductInstallerTests(unittest.TestCase):
                 self.assertEqual(call.kwargs["lab_password_file"], credential.resolve())
             self.assertEqual(probe.call_args.args[1:],
                              (state.resolve(), credential.resolve(), None))
+            (state / "audit.jsonl").unlink()
+            with self.assertRaisesRegex(ProductInstallError, "audit trail"):
+                product_status(self.root, self.key)
 
     def test_upload_quarantine_is_pinned_across_release_changes(self) -> None:
         state, credential = self._external_state()
@@ -228,12 +233,18 @@ class ProductInstallerTests(unittest.TestCase):
                    side_effect=restore) as restored, \
              patch("infrastructure.deploy.product_installer.start_verified_bundle",
                    return_value=self.old) as started:
+            with self.assertRaisesRegex(ProductInstallError, "snapshot contents"):
+                restore_install_product(self.first, self.key, self.crane,
+                    self.config, self.root, snapshot_id, repository, password, restic,
+                    "b" * 64, credential, require_audit=True)
+            self.assertFalse(self.root.exists())
+            started.assert_not_called()
             result = restore_install_product(self.first, self.key, self.crane,
                 self.config, self.root, snapshot_id, repository, password, restic,
                 "b" * 64, credential)
             self.assertEqual(result["snapshot_id"], snapshot_id)
             self.assertEqual(result["restored_files"], 4)
-            self.assertEqual(restored.call_count, 1)
+            self.assertEqual(restored.call_count, 2)
             self.assertEqual(started.call_args.kwargs["core_state"],
                              (self.root / "core-state").resolve())
 

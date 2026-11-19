@@ -59,6 +59,12 @@ def _core_state_options(state: Path | None, password_file: Path | None,
             sources.stat().st_uid != os.getuid() or
             stat.S_IMODE(sources.stat().st_mode) & 0o022):
         raise RuntimeError("invalid restored Core source directory")
+    audit = state / "audit.jsonl"
+    if audit.exists() or audit.is_symlink():
+        if (audit.is_symlink() or not audit.is_file() or
+                audit.stat().st_uid != os.getuid() or
+                stat.S_IMODE(audit.stat().st_mode) & 0o077):
+            raise RuntimeError("invalid restored Core audit trail")
     if (not password_file.is_absolute() or password_file.is_symlink() or
             not password_file.is_file() or password_file.stat().st_uid != os.getuid()
             or stat.S_IMODE(password_file.stat().st_mode) & 0o077
@@ -86,6 +92,7 @@ def _core_state_options(state: Path | None, password_file: Path | None,
                         "target=/run/secrets/lab-password,readonly"),
             "-e", "SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
             "-e", "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+            "-e", "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
             "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"]
     if emergency_file is not None:
         options += ["--mount", (f"type=bind,source={emergency_file.resolve()},"
@@ -329,6 +336,7 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
     selected = [item for item in mounts if isinstance(item, dict)
                 and item.get("Destination") in targets]
     prefixes = ("SOVEREIGN_FIXTURE_ROOT=", "SOVEREIGN_HISTORY_DB=",
+                "SOVEREIGN_AUDIT_PATH=",
                 "SOVEREIGN_LAB_PASSWORD_FILE=", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=",
                 "SOVEREIGN_UPLOAD_ROOT=")
     relevant = [item for item in environment if isinstance(item, str)
@@ -353,6 +361,7 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
         raise RuntimeError("Core state mount identity mismatch")
     required = {"SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
                 "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                 "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"}
     if emergency_password_file is not None:
         required.add("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password")

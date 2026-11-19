@@ -26,10 +26,38 @@ from infrastructure.deploy.container_runtime import (
 from infrastructure.release.bundle import BundleError, verify_bundle
 from infrastructure.restic_repository import restore_snapshot
 from infrastructure.upload_quarantine_backup import restore_upload_snapshot
+from services.policy.audit import AuditLog, verify as verify_audit
 
 
 class ProductInstallError(ValueError):
     """The staged product or installer state is invalid."""
+
+
+def _require_audit(state: Path) -> int:
+    path = state / "audit.jsonl"
+    if (path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid()
+            or path.stat().st_mode & 0o077):
+        raise ProductInstallError("installed Core audit trail is missing or unsafe")
+    try:
+        count, _ = verify_audit(path, require_current_clock=True)
+    except (OSError, ValueError) as exc:
+        raise ProductInstallError("installed Core audit trail is invalid") from exc
+    if count < 1:
+        raise ProductInstallError("installed Core audit trail is empty")
+    return count
+
+
+def _initialize_audit(state: Path) -> None:
+    path = state / "audit.jsonl"
+    if not path.exists() and not path.is_symlink():
+        try:
+            AuditLog(path).append(
+                actor="synthetic-installer", action="install", resource="core-state",
+                decision="allow",
+                policy_version=hashlib.sha256((state / "roles.json").read_bytes()).hexdigest())
+        except (OSError, ValueError) as exc:
+            raise ProductInstallError("cannot initialise Core audit trail") from exc
+    _require_audit(state)
 
 
 _RELEASE = re.compile(r"[0-9a-f]{24}\Z")
@@ -159,6 +187,7 @@ def _mount_config(root: Path) -> tuple[Path | None, Path | None, Path | None, Pa
         _core_state_options(state, credential, emergency, upload_root)
     except ContainerRuntimeError as exc:
         raise ProductInstallError("Core mount record no longer resolves safely") from exc
+    _require_audit(state)
     if upload_root is not None and upload_root.resolve() != (root / "product-uploads").resolve():
         raise ProductInstallError("upload quarantine path changed")
     return state, credential, emergency, upload_root
@@ -185,6 +214,7 @@ def _configure_mount(root: Path, state: Path | None,
         return existing
     if _state(root) is not None:
         raise ProductInstallError("cannot attach Core state to an active installation")
+    _initialize_audit(state)
     upload_root = root / "product-uploads" if enable_uploads else None
     if upload_root is not None:
         _owner_directory(upload_root, create=True)
@@ -328,7 +358,8 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
                             *, enable_uploads: bool = False,
                             upload_snapshot_id: str | None = None,
                             upload_repository: Path | None = None,
-                            upload_password_file: Path | None = None) -> dict[str, object]:
+                            upload_password_file: Path | None = None,
+                            require_audit: bool = False) -> dict[str, object]:
     """Clean-restore fictional Core state before first signed installation."""
     if not root.is_absolute() or root.exists() or root.is_symlink():
         raise ProductInstallError("restore installation requires a new absolute root")
@@ -346,8 +377,10 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
     try:
         restored = restore_snapshot(snapshot_id, repository, restic_password_file,
                                     restic, restic_sha256, root / "core-state")
-        if restored["files"] != 4:
+        if restored["files"] not in (4, 5) or (require_audit and restored["files"] != 5):
             raise ProductInstallError("unexpected synthetic Core snapshot contents")
+        if restored["files"] == 5:
+            _require_audit(root / "core-state")
         upload_result = None
         if upload_snapshot_id is not None:
             upload_result = restore_upload_snapshot(
