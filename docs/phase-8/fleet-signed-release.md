@@ -215,6 +215,13 @@ TLS, backup or operator access.
 The local Fleet backup command verifies the catalog audit chain, snapshots
 only `fleet.db` through the existing SQLite-safe backup code and encrypts it
 with AES-256-GCM. It excludes the lab token, signing keys and portal config.
+Before creating a snapshot, it estimates space for the SQLite staging copy and
+encrypted archive on the backup volume, with a 128 MiB reserve; insufficient
+space rejects the backup before an archive or staging file is created. Clean
+restore also estimates room for the decrypted payload and restored SQLite copy
+before decryption or destination creation. These are preflight estimates;
+production quotas, concurrent writes and actual peak usage need target-host
+measurement.
 An OIDC roles file and the identity network are also outside the encrypted
 catalog archive and must be reprovisioned separately during recovery.
 Restore authenticates into a new private directory and verifies the catalog
