@@ -245,14 +245,14 @@ def _backup_realm(source: Path, root: Path, archive: Path, key: Path) -> str:
 
 def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
                       identity_network: str, keycloak_ip: str, certs: Path,
-                      data: Path, flow: str,
+                      data_volume: str, flow: str,
                       stale_archive: Path, backup_key: Path) -> dict[str, str]:
     _run("docker", "stop", keycloak)
     exported = root / "exported"
     exported.mkdir(mode=0o777)
     exported.chmod(0o777)
     _run("docker", "run", "--rm", "--network", "none",
-         "--mount", f"type=bind,source={data},target=/opt/keycloak/data",
+         "--mount", f"type=volume,source={data_volume},target=/opt/keycloak/data",
          "--mount", f"type=bind,source={exported},target=/synthetic-export",
          reference, "export", "--realm", "fleet", "--users", "realm_file",
          "--dir", "/synthetic-export", timeout=180)
@@ -461,6 +461,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
     app_network = "fleet-keycloak-app-" + suffix
     browser_network = "fleet-keycloak-browser-" + suffix
     keycloak = "fleet-keycloak-" + suffix
+    data_volume = "fleet-keycloak-data-" + suffix
     api = "fleet-keycloak-api-" + suffix
     portal = "fleet-keycloak-portal-" + suffix
     with tempfile.TemporaryDirectory() as directory:
@@ -475,15 +476,6 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         admin_password = "synthetic-rotator-" + uuid.uuid4().hex
         (realm / "fleet-realm.json").write_text(json.dumps(_realm(password, mfa)))
         (realm / "fleet-realm.json").chmod(0o644)
-        data = root / "keycloak-data"
-        data.mkdir(mode=0o777)
-        # The pinned container runs as a different UID on GitHub's runner.
-        # These paths contain only fictional, short-lived lab identity data.
-        data.chmod(0o777)
-        (data / "import").mkdir(mode=0o777)
-        (data / "import").chmod(0o777)
-        (data / "import" / "fleet-realm.json").write_bytes((realm / "fleet-realm.json").read_bytes())
-        (data / "import" / "fleet-realm.json").chmod(0o644)
         stale_archive = root / "stale.svbk"
         backup_key = root / "backup.key"
         if recovery:
@@ -504,6 +496,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         _run("docker", "network", "create", "--internal", "--label",
              "sovereign.fleet.identity=true", identity_network)
         _run("docker", "network", "create", "--internal", app_network)
+        if recovery:
+            _run("docker", "volume", "create", data_volume)
         if browser:
             # This test-only bridge permits host loopback ingress. The API
             # remains exclusively on the two internal application networks.
@@ -516,7 +510,9 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                  *(["--publish", "127.0.0.3:443:443"] if browser else []),
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
                  "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
-                 "--mount", f"type=bind,source={data},target=/opt/keycloak/data",
+                 *(["--mount", f"type=volume,source={data_volume},target=/opt/keycloak/data"]
+                   if recovery else []),
+                 "--mount", f"type=bind,source={realm},target=/opt/keycloak/data/import,readonly",
                  "--env", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-rotator",
                  "--env", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + admin_password,
                  reference, "start-dev", "--import-realm", "--http-enabled=false",
@@ -614,7 +610,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                     outcome["keycloak_rotation"] = "overlap-old-key-retired"
                     if recovery:
                         outcome.update(_recover_keycloak(root, reference, keycloak, api,
-                            identity_network, keycloak_ip, certs, data, flow,
+                            identity_network, keycloak_ip, certs, data_volume, flow,
                             stale_archive, backup_key))
             if browser:
                 try:
@@ -653,6 +649,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                 subprocess.run(["docker", "rm", "-f", name], capture_output=True)
             for name in (app_network, identity_network, *([browser_network] if browser else [])):
                 subprocess.run(["docker", "network", "rm", name], capture_output=True)
+            if recovery:
+                subprocess.run(["docker", "volume", "rm", data_volume], capture_output=True)
 
 
 if __name__ == "__main__":
