@@ -34,7 +34,7 @@ independent PR/security review.
 | **G1** offline cited chat | Local synthetic model and citations work | Disconnected target-host proof is absent; gate remains open |
 | T-014 ingestion | [Format register](../phase-3/supported-formats.md): Docling PDF/DOCX/XLSX, UTF-8, SHA-256 allowlist, quarantine, bounded worker, Linux address-space/CPU limits, deletion reconciliation, polling manifest watcher, bounded manifest intake with strict duplicate-key rejection, and parsing from the verified byte snapshot | Read-only NAS identity/mount, ACL mapping, OCR qualification and target Linux parser/polling validation |
 | T-015 authorised retrieval | Passage/embedding index, pre-ranking permission filter, source recheck, passage-ordinal citations and [fixed evaluation](../phase-3/evaluation.json); [generated answers](../phase-3/answer-evaluation.json) | Semantic/claim-support assessment by an independent reviewer; target database topology |
-| T-016 identity and policy | Local Keycloak lab, Console PKCE, signed JWTs, bounded role-file intake, unique/unexpired identity checks, lab role-bound tokens, role/source policy, logout revocation, [audit file boundary](../phase-3/audit-file-boundary.md) and [synthetic two-person offline policy change](../phase-3/policy-change-rehearsal.md) | MFA enforcement, service identities, owner-approved production policy administration and emergency access remain unimplemented or unreviewed for deployment; audit retention/anchoring remain |
+| T-016 identity and policy | Local Keycloak lab, Console PKCE, signed JWTs, bounded role-file intake, unique/unexpired identity checks, lab role-bound tokens, role/source policy, logout revocation, [audit file boundary](../phase-3/audit-file-boundary.md), [two-person offline policy change](../phase-3/policy-change-rehearsal.md) and a [restricted emergency diagnostic drill](../phase-3/emergency-access-rehearsal.md) | MFA enforcement, service identities, owner-approved production policy administration and recovery actions remain unimplemented or unreviewed for deployment; audit retention/anchoring remain |
 | T-017 role non-disclosure | Automated five-role/action matrix, revocation, deletion, injection, audit tamper, corrupt-manifest and history-redaction tests | Independent adversarial QA/security execution; target NAS/identity/cache propagation checks |
 | **Phase 3 gate** role, revocation, citation and injection tests | Local regression suite and historical 50-question evidence exist; an [internal reading](../phase-3/claim-support-review.md) finds six wording/support exceptions. A fresh [Core API run](../phase-3/core-answer-evaluation.json) captures 40/40 matching marker and structured citation passages, 10/10 denials and five preliminary prose exceptions | Independent claim review, agreed AT-09 threshold and security sign-off are missing; target boundaries unqualified |
 
@@ -47,10 +47,10 @@ independent PR/security review.
    quality thresholds.
 3. Complete a rendered Console keyboard/screen-reader/zoom run when a browser
    automation surface or human tester is available.
-4. Extend the [synthetic two-person offline policy change](../phase-3/policy-change-rehearsal.md)
-   to an emergency access rehearsal with restricted actions, automatic expiry,
-   credential rotation and retrospective review. Obtain the vessel authority
-   and target identity/key design before deployment.
+4. Extend the [synthetic emergency diagnostic drill](../phase-3/emergency-access-rehearsal.md)
+   to controlled recovery actions, installer secret mounting, operator
+   notification and retrospective review. Obtain the vessel authority and
+   target identity/key design before deployment.
 
 The requested move to Phase 4 can be planned with synthetic fixtures, but
 this audit does not change the original G0A, G1 or Phase 3 exit criteria.

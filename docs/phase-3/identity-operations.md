@@ -68,6 +68,13 @@ document browsing. Verify every action in the audit chain, rotate the secret
 after use and obtain retrospective review. Test activation, expiry, misuse
 denial and audit evidence in the target lab before calling the control complete.
 
+The [synthetic emergency drill](emergency-access-rehearsal.md) now exercises a
+disabled fixture identity, two-person signed activation, a separate owner-only
+lab secret, no document access, a restricted diagnostic endpoint, expiry and
+secret-rotation revocation. Real recovery actions, Keycloak/MFA enrollment,
+custody, notification and retrospective review still need implementation and
+approval before a pilot.
+
 ## Decisions needed for site configuration
 
 - Named vessel approver and two administrators for routine and emergency work.
