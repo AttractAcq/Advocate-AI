@@ -86,6 +86,25 @@ def _core_state_options(state: Path | None, password_file: Path | None,
     return options
 
 
+def _emergency_digest(path: Path) -> str:
+    """Hash only a bounded, owner-only regular credential through a pinned fd."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK |
+                             os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(descriptor, "rb") as stream:
+            details = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid() or
+                    stat.S_IMODE(details.st_mode) & 0o077 or
+                    not 0 < details.st_size <= 4096):
+                raise RuntimeError("invalid emergency credential file")
+            payload = stream.read(4097)
+        if not 0 < len(payload) <= 4096:
+            raise RuntimeError("invalid emergency credential file")
+        return hashlib.sha256(payload).hexdigest()
+    except OSError as exc:
+        raise RuntimeError("emergency credential unavailable") from exc
+
+
 def _archive_image_ids(archive: Path, role: str) -> set[str]:
     """Read IDs bound to the one platform image in a validated Docker save."""
     try:
@@ -279,7 +298,8 @@ def verify_runtime_identity(handle: RuntimeHandle) -> None:
 
 def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
                                lab_password_file: Path | None,
-                               emergency_password_file: Path | None = None) -> None:
+                               emergency_password_file: Path | None = None,
+                               *, allow_stale_emergency: bool = False) -> None:
     """Check that a running Core still uses the installation's declared mounts."""
     _core_state_options(core_state, lab_password_file, emergency_password_file)
     try:
@@ -320,18 +340,27 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
         required.add("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password")
     if len(relevant) != len(required) or set(relevant) != required:
         raise RuntimeError("Core state environment mismatch")
+    if emergency_password_file is not None and not allow_stale_emergency:
+        expected_digest = _emergency_digest(emergency_password_file)
+        code = ("import hashlib; from pathlib import Path; "
+                "print(hashlib.sha256(Path('/run/secrets/emergency-password').read_bytes()).hexdigest())")
+        mounted_digest = _docker("exec", handle.core_id, "python", "-c", code)
+        if mounted_digest != expected_digest:
+            raise RuntimeError("Core emergency credential mount is stale")
 
 
 def probe_runtime(handle: RuntimeHandle, core_state: Path | None = None,
                   lab_password_file: Path | None = None,
-                  emergency_password_file: Path | None = None) -> None:
+                  emergency_password_file: Path | None = None,
+                  *, allow_stale_emergency: bool = False) -> None:
     """Fail if the current Core and Console no longer satisfy lab health checks."""
     verify_runtime_identity(handle)
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
             raise RuntimeError("synthetic runtime is stopped")
     _verify_core_state_runtime(handle, core_state, lab_password_file,
-                               emergency_password_file)
+                               emergency_password_file,
+                               allow_stale_emergency=allow_stale_emergency)
     _health(handle.core_id)
 
 

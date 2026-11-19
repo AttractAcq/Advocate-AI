@@ -10,7 +10,7 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeError as ContainerRuntimeError, RuntimeHandle
 from infrastructure.deploy.product_installer import (
     ProductInstallError, install_product, product_status, recover_product,
-    restore_install_product, rollback_product,
+    refresh_emergency_product, restore_install_product, rollback_product,
 )
 
 
@@ -98,6 +98,49 @@ class ProductInstallerTests(unittest.TestCase):
             record.write_text(json.dumps(tampered))
             with self.assertRaises(ProductInstallError):
                 product_status(self.root, self.key)
+
+    def test_refresh_rebinds_emergency_credential_and_preserves_failed_candidate(self) -> None:
+        state, credential = self._external_state()
+        emergency = self.base / "emergency-password"
+        emergency.write_text(secrets.token_urlsafe(24) + "\n")
+        emergency.chmod(0o600)
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=[self.old, self.new, self.old]) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.stop_runtime") as stop:
+            first = install_product(self.first, self.key, self.crane, self.config,
+                                    self.root, state, credential, emergency)
+            rotated = secrets.token_urlsafe(24)
+            replacement = self.base / "replacement"
+            replacement.write_text(rotated + "\n")
+            replacement.chmod(0o600)
+            replacement.replace(emergency)
+            result = refresh_emergency_product(self.root, self.key, self.crane)
+            self.assertEqual(result["result"], "emergency_credential_refreshed")
+            self.assertEqual(result["active"], first["active"])
+            self.assertEqual(start.call_args.kwargs["emergency_password_file"],
+                             emergency.resolve())
+            self.assertEqual(probe.call_args.args[0], self.new)
+            stop.assert_called_once_with(self.old)
+            active = (self.root / "product-state.json").read_bytes()
+            probe.reset_mock()
+            probe.side_effect = [None, ContainerRuntimeError("candidate invalid")]
+            with self.assertRaises(ContainerRuntimeError):
+                refresh_emergency_product(self.root, self.key, self.crane)
+            self.assertEqual((self.root / "product-state.json").read_bytes(), active)
+            self.assertEqual(stop.call_args.args[0], self.old)
+
+    def test_refresh_requires_preconfigured_emergency_credential(self) -> None:
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old) as start:
+            install_product(self.first, self.key, self.crane, self.config, self.root)
+            with self.assertRaisesRegex(ProductInstallError, "no emergency credential"):
+                refresh_emergency_product(self.root, self.key, self.crane)
+            start.assert_called_once()
 
     def test_late_mount_change_and_tampered_mount_record_fail_closed(self) -> None:
         state, credential = self._external_state()

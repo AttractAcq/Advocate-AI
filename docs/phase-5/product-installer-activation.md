@@ -27,6 +27,10 @@ checks it, changes the active record, and retires the replaced runtime.
   --trusted-key /path/to/pinned-public-key.pem \
   --crane /path/to/pinned-crane \
   --root /path/to/new-synthetic-product-install
+.venv/bin/python -m infrastructure.deploy.product_installer refresh-emergency \
+  --trusted-key /path/to/pinned-public-key.pem \
+  --crane /path/to/pinned-crane \
+  --root /path/to/new-synthetic-product-install
 .venv/bin/python -m infrastructure.deploy.product_installer cleanup-orphans \
   --trusted-key /path/to/pinned-public-key.pem \
   --root /path/to/new-synthetic-product-install
@@ -47,7 +51,8 @@ snapshot, use `restore-install` instead of `install`:
   --restic-password-file /path/to/private-restic-password \
   --restic /path/to/pinned-restic \
   --restic-sha256 exact-binary-sha256 \
-  --lab-password-file /path/to/owner-only-lab-password
+  --lab-password-file /path/to/owner-only-lab-password \
+  --emergency-password-file /path/to/owner-only-emergency-password
 ```
 
 The parent of the new root must be owner-only. The command verifies the signed
@@ -55,19 +60,31 @@ two-image bundle and Console configuration, creates the private root, checks
 and clean-restores the exact snapshot, then activates the signed release with
 the restored Core state. It rejects an existing root. A failed restore or
 activation removes the new root when no active release was recorded. The two
-password files stay outside the signed bundle; only the lab credential path
-is recorded for subsequent runtime recovery.
+password files stay outside the signed bundle; their canonical paths are
+recorded in an owner-only mount record for subsequent runtime recovery.
 
 For a synthetic Core state restored from restic, the first `install` can also
 specify `--core-state /path/to/restored` and
-`--lab-password-file /path/to/owner-only-lab-password`. The installer validates
-both paths and writes only their canonical paths to an owner-only mount record.
+`--lab-password-file /path/to/owner-only-lab-password`. An optional separate
+`--emergency-password-file` can be set only on first install or clean restore.
+The installer validates the paths and writes only their canonical paths to an owner-only mount record.
 It does not copy the credential into the signed release or backup. Later
 installs, rollback and `recover` reuse those paths automatically. `status`
 checks the running Core's bind sources, read/write flags, user and environment;
 a missing or changed mount fails the check. This mount record is fixed for the
 synthetic installation, so changing state locations requires a separate
 reviewed migration instead of an implicit install option.
+
+After atomically replacing the emergency file at its pinned host path, run
+`refresh-emergency`. `status` detects that the old Core still sees the prior
+file contents and returns unhealthy until refresh completes. The installer
+requires an otherwise healthy signed runtime,
+starts a new instance of that same signed release, checks its mounts and health,
+updates the active record, and retires the old runtime. If the new instance
+fails, the old one remains active. All ephemeral Core sessions are lost at
+switchover. The synthetic image rehearsal compares the old and new containers'
+mounted secret digests without recording the secret. This procedure does not
+approve production key custody or a vessel rotation schedule.
 
 The [CI product image rehearsal](product-image-release-rehearsal.md) creates
 two distinct ephemeral signed product versions, installs the first, rejects a

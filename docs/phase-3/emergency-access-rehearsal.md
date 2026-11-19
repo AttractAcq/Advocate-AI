@@ -33,8 +33,11 @@ It rejects a symlinked, exposed, same-inode or state-internal credential and
 rejects later mount changes. The secret itself stays outside the signed bundle
 and the encrypted Core-state snapshot. An atomic replacement of the host file
 does not update an existing Docker file bind mount; rotate the credential by
-restarting the synthetic Core and rechecking its mount before issuing a new
-token. The target-host rotation procedure remains untested.
+running the installer's `refresh-emergency` command after replacing the file.
+It starts a checked runtime with a fresh file bind before switching the active
+record. The [signed-image rehearsal](../phase-5/product-installer-activation.md)
+compares the old and new mounted file digests. The target-host rotation
+procedure remains untested.
 
 This is a restricted diagnostic account, not a completed break-glass recovery
 process. Core does not expose restore actions. Owner-approved authorization, separate custody,

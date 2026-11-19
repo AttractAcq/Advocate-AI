@@ -388,6 +388,40 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
                 "previous": current["previous"]}
 
 
+def refresh_emergency_product(root: Path, trusted_key: Path,
+                              crane: Path) -> dict[str, object]:
+    """Rebind a rotated host emergency file through a new signed lab runtime."""
+    _owner_directory(root, create=False)
+    with _lock(root):
+        core_state, lab_password_file, emergency_password_file = _mount_config(root)
+        if emergency_password_file is None:
+            raise ProductInstallError("no emergency credential is mounted")
+        current = _state(root)
+        if current is None:
+            raise ProductInstallError("no active product release")
+        identifier = str(current["active"])
+        stage = root / "product-releases" / identifier
+        _verify_stage(stage, trusted_key, identifier)
+        probe_runtime(_handle(current), core_state, lab_password_file,
+                      emergency_password_file, allow_stale_emergency=True)
+        candidate = start_verified_bundle(stage / "bundle", trusted_key, crane,
+                                          stage / "console-config.json",
+                                          installation_id=_installation_id(root),
+                                          core_state=core_state,
+                                          lab_password_file=lab_password_file,
+                                          emergency_password_file=emergency_password_file)
+        try:
+            probe_runtime(candidate, core_state, lab_password_file,
+                          emergency_password_file)
+            _write_state(root, identifier, current["previous"], candidate)
+        except Exception:
+            stop_runtime(candidate)
+            raise
+        stop_runtime(_handle(current))
+        return {"result": "emergency_credential_refreshed", "active": identifier,
+                "previous": current["previous"]}
+
+
 def cleanup_product_orphans(root: Path, trusted_key: Path) -> dict[str, object]:
     """Retire validated labelled lab runtimes not named by active state."""
     _owner_directory(root, create=False)
@@ -409,11 +443,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic two-image product installer")
     actions = parser.add_subparsers(dest="action", required=True)
     for action in ("install", "restore-install", "status", "rollback", "recover",
+                   "refresh-emergency",
                    "cleanup-orphans"):
         command = actions.add_parser(action)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
-        if action in ("install", "restore-install", "rollback", "recover"):
+        if action in ("install", "restore-install", "rollback", "recover",
+                      "refresh-emergency"):
             command.add_argument("--crane", required=True, type=Path)
         if action in ("install", "restore-install"):
             command.add_argument("--bundle", required=True, type=Path)
@@ -447,6 +483,8 @@ def main() -> None:
             result = rollback_product(args.root, args.trusted_key, args.crane)
         elif args.action == "recover":
             result = recover_product(args.root, args.trusted_key, args.crane)
+        elif args.action == "refresh-emergency":
+            result = refresh_emergency_product(args.root, args.trusted_key, args.crane)
         elif args.action == "cleanup-orphans":
             result = cleanup_product_orphans(args.root, args.trusted_key)
         else:

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,7 @@ from infrastructure.deploy.container_runtime import (
 )
 from infrastructure.deploy.product_installer import (
     cleanup_product_orphans, install_product, product_status, recover_product,
-    restore_install_product, rollback_product,
+    refresh_emergency_product, restore_install_product, rollback_product,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -43,6 +44,12 @@ def _docker(*arguments: str) -> str:
     completed = subprocess.run(["docker", *arguments], check=True, capture_output=True,
                                text=True, timeout=300)
     return completed.stdout.strip()
+
+
+def _mounted_emergency_digest(core_id: str) -> str:
+    code = ("import hashlib; from pathlib import Path; "
+            "print(hashlib.sha256(Path('/run/secrets/emergency-password').read_bytes()).hexdigest())")
+    return _docker("exec", core_id, "python", "-c", code)
 
 
 def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
@@ -173,6 +180,9 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 lab_credential = root / "lab-password"
                 lab_credential.write_text(PASSPHRASE + "\n")
                 lab_credential.chmod(0o600)
+                emergency_credential = root / "emergency-password"
+                emergency_credential.write_text(secrets.token_urlsafe(24) + "\n")
+                emergency_credential.chmod(0o600)
                 second_bundle = root / "signed-product-trial-2"
                 create_product_bundle(payload, second_bundle, private,
                                       "synthetic-product-trial-2", descriptors,
@@ -188,7 +198,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     first = restore_install_product(
                         product_bundle, trusted, crane, config, install_root,
                         snapshot_id, repository, backup_password, restic,
-                        restic_sha256, lab_credential)
+                        restic_sha256, lab_credential, emergency_credential)
                     state = install_root / "core-state"
                     try:
                         def active_core() -> str:
@@ -196,6 +206,38 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             return str(active["runtime"]["core_id"])
 
                         before = _probe(active_core(), conversation_id, "before")
+                        old_core = active_core()
+                        initial_digest = _sha256(emergency_credential)
+                        if _mounted_emergency_digest(old_core) != initial_digest:
+                            raise AssertionError("initial emergency mount content mismatch")
+                        replacement = root / "replacement-emergency-password"
+                        replacement.write_text(secrets.token_urlsafe(24) + "\n")
+                        replacement.chmod(0o600)
+                        replacement.replace(emergency_credential)
+                        rotated_digest = _sha256(emergency_credential)
+                        if rotated_digest == initial_digest or \
+                                _mounted_emergency_digest(old_core) != initial_digest:
+                            raise AssertionError("old Core did not retain the prior file bind")
+                        try:
+                            product_status(install_root, trusted)
+                        except ContainerRuntimeError as exc:
+                            if "stale" not in str(exc):
+                                raise
+                        else:
+                            raise AssertionError("stale emergency mount passed product status")
+                        refreshed = refresh_emergency_product(install_root, trusted, crane)
+                        if (refreshed["active"] != first["active"] or
+                                active_core() == old_core or
+                                _mounted_emergency_digest(active_core()) != rotated_digest or
+                                product_status(install_root, trusted)["active"] != first["active"]):
+                            raise AssertionError("emergency credential did not rebind")
+                        try:
+                            _docker("inspect", old_core)
+                        except subprocess.CalledProcessError:
+                            pass
+                        else:
+                            raise AssertionError("old Core survived emergency refresh")
+                        result["emergency_rotation"] = "atomic-file-rebound"
                         roles = json.loads((state / "roles.json").read_text())
                         roles["allow"]["chief_engineer"] = ["deck"]
                         (state / "roles.json").write_text(json.dumps(roles))
