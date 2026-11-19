@@ -189,17 +189,14 @@ def sign_proposal(raw: bytes, signer_id: str, key: Ed25519PrivateKey,
                        "signature": base64.b64encode(key.sign(raw)).decode("ascii")})
 
 
-def _verify_approvals(raw: bytes, approvals: tuple[Path, Path], trust_path: Path,
-                      requester: str) -> tuple[tuple[str, str], tuple[bytes, bytes], bytes]:
-    trust_raw = _read_trust(trust_path)
+def _verify_approvals(raw: bytes, approval_records: tuple[bytes, bytes],
+                      trust_raw: bytes, requester: str) -> tuple[str, str]:
     trust = _parse(trust_raw, MAX_TRUST_BYTES)
     signers = trust.get("signers")
     if trust.get("schema") != 1 or not isinstance(signers, dict):
         raise PolicyChangeError("invalid policy change trust store")
     names: list[str] = []
-    approval_records: list[bytes] = []
-    for path in approvals:
-        approval_raw = _read(path, MAX_APPROVAL_BYTES)
+    for approval_raw in approval_records:
         approval = _parse(approval_raw, MAX_APPROVAL_BYTES)
         if set(approval) != {"signer_id", "signature"}:
             raise PolicyChangeError("invalid policy change approval")
@@ -213,10 +210,21 @@ def _verify_approvals(raw: bytes, approvals: tuple[Path, Path], trust_path: Path
         except (InvalidSignature, ValueError, TypeError) as exc:
             raise PolicyChangeError("invalid policy change signature") from exc
         names.append(name)
-        approval_records.append(approval_raw)
     if len(set(names)) != 2 or requester not in names:
         raise PolicyChangeError("two distinct approved signers are required")
-    return (names[0], names[1]), (approval_records[0], approval_records[1]), trust_raw
+    return names[0], names[1]
+
+
+def _decode(value: object, maximum: int) -> bytes:
+    if not isinstance(value, str) or len(value) > (maximum * 4 // 3 + 8):
+        raise PolicyChangeError("invalid policy change evidence field")
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise PolicyChangeError("invalid policy change evidence encoding") from exc
+    if len(raw) > maximum:
+        raise PolicyChangeError("policy change evidence field exceeds size limit")
+    return raw
 
 
 def _sync_directory(path: Path) -> None:
@@ -284,8 +292,11 @@ def apply_change(policy_path: Path, candidate_path: Path, proposal_path: Path,
     current_time = now or datetime.now(timezone.utc)
     proposal_raw = _read(proposal_path, MAX_PROPOSAL_BYTES)
     proposal = _proposal(proposal_raw, current_time)
-    names, approval_records, trust_raw = _verify_approvals(
-        proposal_raw, approvals, trust_path, proposal["requested_by"])
+    approval_records = (_read(approvals[0], MAX_APPROVAL_BYTES),
+                        _read(approvals[1], MAX_APPROVAL_BYTES))
+    trust_raw = _read_trust(trust_path)
+    names = _verify_approvals(proposal_raw, approval_records,
+                              trust_raw, proposal["requested_by"])
     old = read_policy_bytes(policy_path)
     candidate = _read(candidate_path, MAX_POLICY_BYTES)
     _validate_policy(parse_policy_bytes(candidate))
@@ -329,14 +340,34 @@ def recover_change(policy_path: Path, audit_path: Path) -> str:
     if set(record) != {"schema", "request_id", "old_sha256", "new_sha256",
                        "proposal_sha256", "old_policy"} or record["schema"] != 1:
         raise PolicyChangeError("invalid policy change recovery record")
-    try:
-        old = base64.b64decode(record["old_policy"], validate=True)
-    except (ValueError, TypeError) as exc:
-        raise PolicyChangeError("invalid policy change recovery bytes") from exc
-    if (len(old) > MAX_POLICY_BYTES or hashlib.sha256(old).hexdigest() != record["old_sha256"] or
-            not isinstance(record["request_id"], str) or
-            not re.fullmatch(r"[0-9a-f]{32}", record["request_id"])):
+    if (not isinstance(record["request_id"], str) or
+            not re.fullmatch(r"[0-9a-f]{32}", record["request_id"]) or
+            not all(isinstance(record[key], str) and _DIGEST.fullmatch(record[key])
+                    for key in ("old_sha256", "new_sha256", "proposal_sha256"))):
         raise PolicyChangeError("invalid policy change recovery digest")
+    old = _decode(record["old_policy"], MAX_POLICY_BYTES)
+    if hashlib.sha256(old).hexdigest() != record["old_sha256"]:
+        raise PolicyChangeError("invalid policy change recovery digest")
+    evidence_path = policy_path.parent / "policy-change-evidence" / f"{record['request_id']}.json"
+    evidence = _parse(_read(evidence_path, MAX_EVIDENCE_BYTES), MAX_EVIDENCE_BYTES)
+    if set(evidence) != {"schema", "request_id", "proposal", "approvals", "trust", "candidate"} or (
+            evidence["schema"] != 1 or evidence["request_id"] != record["request_id"] or
+            not isinstance(evidence["approvals"], list) or len(evidence["approvals"]) != 2):
+        raise PolicyChangeError("invalid policy change recovery evidence")
+    proposal_raw = _decode(evidence["proposal"], MAX_PROPOSAL_BYTES)
+    approval_records = (_decode(evidence["approvals"][0], MAX_APPROVAL_BYTES),
+                        _decode(evidence["approvals"][1], MAX_APPROVAL_BYTES))
+    trust_raw = _decode(evidence["trust"], MAX_TRUST_BYTES)
+    candidate = _decode(evidence["candidate"], MAX_POLICY_BYTES)
+    proposed = _parse(proposal_raw, MAX_PROPOSAL_BYTES)
+    proposal = _proposal(proposal_raw, _timestamp(proposed.get("issued_at")))
+    _verify_approvals(proposal_raw, approval_records, trust_raw, proposal["requested_by"])
+    if (proposal["request_id"] != record["request_id"] or
+            proposal["current_sha256"] != record["old_sha256"] or
+            proposal["candidate_sha256"] != record["new_sha256"] or
+            hashlib.sha256(proposal_raw).hexdigest() != record["proposal_sha256"] or
+            hashlib.sha256(candidate).hexdigest() != record["new_sha256"]):
+        raise PolicyChangeError("policy change recovery evidence does not match")
     current = _read(policy_path, MAX_POLICY_BYTES)
     if hashlib.sha256(current).hexdigest() not in {record["old_sha256"], record["new_sha256"]}:
         raise PolicyChangeError("unexpected policy state during recovery")

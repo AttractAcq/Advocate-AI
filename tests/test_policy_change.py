@@ -76,6 +76,10 @@ class PolicyChangeTests(unittest.TestCase):
 
     def test_tamper_duplicate_signer_and_expiry_deny_before_mutation(self) -> None:
         original = self.policy.read_bytes()
+        self.trust.chmod(0o644)
+        with self.assertRaisesRegex(PolicyChangeError, "owner-only"):
+            self.apply()
+        self.trust.chmod(0o600)
         with self.assertRaisesRegex(PolicyChangeError, "two distinct"):
             apply_change(self.policy, self.candidate, self.proposal,
                          (self.approvals[0], self.approvals[0]), self.trust, self.audit,
@@ -106,6 +110,16 @@ class PolicyChangeTests(unittest.TestCase):
         self.assertNotEqual(self.policy.read_bytes(), original)
         with self.assertRaisesRegex(PolicyUnavailable, "pending"):
             load_policy(self.policy)
+        request_id = json.loads(self.proposal.read_bytes())["request_id"]
+        evidence_path = self.root / "policy-change-evidence" / f"{request_id}.json"
+        evidence_bytes = evidence_path.read_bytes()
+        evidence = json.loads(evidence_bytes)
+        evidence["candidate"] = base64.b64encode(b"different candidate").decode("ascii")
+        evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+        with self.assertRaisesRegex(PolicyChangeError, "does not match"):
+            recover_change(self.policy, self.audit)
+        self.assertTrue((self.root / "roles.json.pending").exists())
+        evidence_path.write_bytes(evidence_bytes)
         request_id = recover_change(self.policy, self.audit)
         self.assertEqual(request_id, json.loads(self.proposal.read_bytes())["request_id"])
         self.assertEqual(self.policy.read_bytes(), original)
