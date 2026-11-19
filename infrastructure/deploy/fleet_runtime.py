@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -89,6 +90,18 @@ def _import_trust(state: Path) -> Path | None:
     if len({key_id(key) for key in keys}) != len(keys):
         raise RuntimeError("duplicate Fleet receipt trust issuer")
     return root
+
+
+def _trust_digest(root: Path) -> str:
+    """Bind the manifest and public-key bytes to one installed runtime."""
+    digest = hashlib.sha256()
+    manifest = root / "trusted-issuers.json"
+    paths = json.loads(manifest.read_bytes())
+    for name in ("trusted-issuers.json",
+                 *(f"issuer-{index}.pem" for index in range(1, len(paths) + 1))):
+        raw = (root / name).read_bytes()
+        digest.update(name.encode("ascii") + b"\x00" + len(raw).to_bytes(4, "big") + raw)
+    return digest.hexdigest()
 
 
 def validate_state(state: Path, issuer: str | None = None) -> None:
@@ -297,6 +310,7 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
             expected_env = {"SOVEREIGN_FLEET_DB=/state/fleet.db"}
             if import_trust is not None:
                 expected_env.add("SOVEREIGN_FLEET_IMPORT_TRUST_FILE=/etc/fleet-import/trusted-issuers.json")
+                expected_env.add(f"SOVEREIGN_FLEET_IMPORT_TRUST_SHA256={_trust_digest(import_trust)}")
             if issuer is None:
                 expected_env.add("SOVEREIGN_FLEET_TOKEN_FILE=/state/token")
             else:
@@ -357,7 +371,8 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
         if import_trust is not None:
             api_args.extend((
                 "--mount", f"type=bind,source={import_trust.resolve()},target=/etc/fleet-import,readonly",
-                "-e", "SOVEREIGN_FLEET_IMPORT_TRUST_FILE=/etc/fleet-import/trusted-issuers.json"))
+                "-e", "SOVEREIGN_FLEET_IMPORT_TRUST_FILE=/etc/fleet-import/trusted-issuers.json",
+                "-e", f"SOVEREIGN_FLEET_IMPORT_TRUST_SHA256={_trust_digest(import_trust)}"))
         if issuer is None:
             api_args.extend(("-e", "SOVEREIGN_FLEET_TOKEN_FILE=/state/token"))
         else:

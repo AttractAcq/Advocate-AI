@@ -74,7 +74,8 @@ owner-only Ed25519 public PEM files named `issuer-1.pem` through
 for example `["/etc/fleet-import/issuer-1.pem", "/etc/fleet-import/issuer-2.pem"]`.
 The installer copies and validates this directory under its private root.
 The API container sees it at `/etc/fleet-import` through a read-only bind
-mount, and runtime identity checks reject mount or environment drift. The
+mount, and runtime identity checks reject mount, environment or public-key
+content drift. The
 private signing keys stay on the offline issuer workstation. Receipt trust is
 outside the encrypted Fleet catalog backup, so supply the approved trust
 directory again during a clean restore. Trust changes to a running installation

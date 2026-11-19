@@ -20,7 +20,7 @@ from infrastructure.deploy.fleet_installer import (
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError
 from infrastructure.deploy.fleet_runtime import (
-    _health, _import_trust, start_verified_bundle, validate_config,
+    _health, _import_trust, _trust_digest, start_verified_bundle, validate_config,
     verify_runtime_identity,
 )
 from scripts.phase8_fleet_oidc_rehearsal import _identity_material
@@ -50,6 +50,7 @@ class FleetInstallerTests(unittest.TestCase):
             manifest.chmod(0o600)
             _provision_receipt_trust(root, source)
             self.assertEqual(_import_trust(state), trust)
+            original_digest = _trust_digest(trust)
             config = root / "fleet-config.json"
             config.write_text('{"schema":1,"oidc_issuer":null}')
             bundle = root / "bundle"
@@ -80,6 +81,13 @@ class FleetInstallerTests(unittest.TestCase):
                           api)
             self.assertIn(f"type=bind,source={trust.resolve()},target=/etc/fleet-import,readonly",
                           api)
+            self.assertIn(f"SOVEREIGN_FLEET_IMPORT_TRUST_SHA256={original_digest}", api)
+            replacement = Ed25519PrivateKey.generate().public_key()
+            (trust / "issuer-1.pem").write_bytes(replacement.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo))
+            self.assertEqual(_import_trust(state), trust)
+            self.assertNotEqual(_trust_digest(trust), original_digest)
             (trust / "issuer-1.pem").chmod(0o644)
             with self.assertRaises(RuntimeError):
                 _import_trust(state)
