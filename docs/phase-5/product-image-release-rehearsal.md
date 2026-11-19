@@ -36,9 +36,13 @@ through Core and confirms it is still absent from approved sources.
 Before capture, the rehearsal expands the synthetic source manifest to all 100
 fictional fixture files. The signed recovery path copies them through real
 restic, then verifies every restored source against the manifest and expects
-the corresponding 106-file Core snapshot. The Phase 3 passage index remains
-the one-source test index; full multi-source retrieval quality remains separate
-work.
+the corresponding 106-file Core snapshot. It also indexes all 100 sources
+before capture. After restore, the signed Core API verifies that the captain
+can list 80 permitted sources, chief engineer and deckhand can each list 20
+deck sources under the changed synthetic policy, restricted sources stay hidden,
+cross-role previews return 404, and an approved management search returns a
+cited hit. Retrieval quality and policy approval for vessel data remain
+separate work.
 
 This proves the evidence pipeline can process the product images rather than
 only the small fictional test archive. It does not yet produce an approved
