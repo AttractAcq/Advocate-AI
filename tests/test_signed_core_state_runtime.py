@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import secrets
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -57,6 +58,69 @@ class SignedCoreStateMountTests(unittest.TestCase):
         (self.state / "roles.json").chmod(0o666)
         with self.assertRaises(RuntimeError):
             _core_state_options(self.state, self.credential)
+
+    def test_emergency_secret_is_separate_owner_only_and_read_only(self) -> None:
+        emergency = self.root / "emergency-password"
+        emergency.write_text(secrets.token_urlsafe(24) + "\n")
+        emergency.chmod(0o600)
+        options = _core_state_options(self.state, self.credential, emergency)
+        self.assertIn("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password",
+                      options)
+        self.assertTrue(any("target=/run/secrets/emergency-password,readonly" in item
+                            for item in options))
+        with self.assertRaises(RuntimeError):
+            _core_state_options(self.state, self.credential, self.credential)
+        with self.assertRaises(RuntimeError):
+            _core_state_options(None, None, emergency)
+        hardlink = self.root / "hardlink-emergency"
+        os.link(self.credential, hardlink)
+        with self.assertRaises(RuntimeError):
+            _core_state_options(self.state, self.credential, hardlink)
+        emergency.chmod(0o644)
+        with self.assertRaises(RuntimeError):
+            _core_state_options(self.state, self.credential, emergency)
+        emergency.chmod(0o600)
+        linked = self.root / "linked-emergency"
+        linked.symlink_to(emergency)
+        with self.assertRaises(RuntimeError):
+            _core_state_options(self.state, self.credential, linked)
+
+    def test_emergency_mount_identity_detects_removal_or_replacement(self) -> None:
+        emergency = self.root / "emergency-password"
+        emergency.write_text(secrets.token_urlsafe(24) + "\n")
+        emergency.chmod(0o600)
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        mounts = [
+            {"Destination": "/var/lib/sovereign", "Type": "bind",
+             "Source": str(self.state.resolve()), "RW": True},
+            {"Destination": "/run/secrets/lab-password", "Type": "bind",
+             "Source": str(self.credential.resolve()), "RW": False},
+            {"Destination": "/run/secrets/emergency-password", "Type": "bind",
+             "Source": str(emergency.resolve()), "RW": False},
+        ]
+        environment = ["SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
+                       "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                       "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
+                       "SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password"]
+
+        def docker(*args: str, timeout: int = 120) -> str:
+            if args[-1] == "{{json .Mounts}}":
+                return json.dumps(mounts)
+            if args[-1] == "{{json .Config.Env}}":
+                return json.dumps(environment)
+            if args[-1] == "{{.Config.User}}":
+                return f"{os.getuid()}:{os.getgid()}"
+            raise AssertionError("unexpected Docker inspection")
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            _verify_core_state_runtime(handle, self.state, self.credential, emergency)
+            mounts[2]["RW"] = True
+            with self.assertRaises(RuntimeError):
+                _verify_core_state_runtime(handle, self.state, self.credential, emergency)
+            mounts[2]["RW"] = False
+            environment.pop()
+            with self.assertRaises(RuntimeError):
+                _verify_core_state_runtime(handle, self.state, self.credential, emergency)
 
     def test_runtime_mount_identity_catches_replaced_state(self) -> None:
         handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)

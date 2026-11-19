@@ -25,9 +25,19 @@ with an excessive expiry, missing incident or document access. No model call
 is made by the emergency identity. The local `make check` run passes 205 tests
 with five skips.
 
+The synthetic product installer can now pin a separate owner-only emergency
+credential on first install or clean restore with `--emergency-password-file`.
+It mounts that file read-only into Core, retains the path across updates and
+recovery, and checks the running container's mount and environment identity.
+It rejects a symlinked, exposed, same-inode or state-internal credential and
+rejects later mount changes. The secret itself stays outside the signed bundle
+and the encrypted Core-state snapshot. An atomic replacement of the host file
+does not update an existing Docker file bind mount; rotate the credential by
+restarting the synthetic Core and rechecking its mount before issuing a new
+token. The target-host rotation procedure remains untested.
+
 This is a restricted diagnostic account, not a completed break-glass recovery
-process. The installer does not yet mount the emergency secret, and Core does
-not expose restore actions. Owner-approved authorization, separate custody,
+process. Core does not expose restore actions. Owner-approved authorization, separate custody,
 MFA/Keycloak enrollment, local notification, post-use rotation and
 retrospective review, target-host testing and independent security assessment
 remain open. No real vessel identity or secret is stored in this repository.
