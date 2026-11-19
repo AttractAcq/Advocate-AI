@@ -29,6 +29,7 @@ from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from infrastructure.upload_quarantine_backup import create_upload_snapshot
 from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
 
 _UPLOAD_PROBE = r'''
@@ -368,6 +369,33 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     finally:
                         active_state = json.loads((install_root / "product-state.json").read_text())
                         stop_runtime(RuntimeHandle(**active_state["runtime"]))
+                    upload_repository = state_root / "upload-repository"
+                    upload_snapshot = create_upload_snapshot(
+                        install_root / "product-uploads", upload_repository,
+                        backup_password, restic, restic_sha256, state_root)
+                    recovered_root = root / "product-upload-restore-install"
+                    combined = restore_install_product(
+                        product_bundle, trusted, crane, config, recovered_root,
+                        snapshot_id, repository, backup_password, restic,
+                        restic_sha256, lab_credential, emergency_credential,
+                        enable_uploads=True,
+                        upload_snapshot_id=str(upload_snapshot["snapshot_id"]),
+                        upload_repository=upload_repository,
+                        upload_password_file=backup_password)
+                    try:
+                        recovered_state = json.loads((recovered_root / "product-state.json").read_text())
+                        recovered_core = str(recovered_state["runtime"]["core_id"])
+                        recovered_upload = json.loads(_docker(
+                            "exec", recovered_core, "python", "-c", _UPLOAD_PROBE,
+                            "verify", staged_id))
+                        if (combined["restored_upload_files"] != 2 or
+                                recovered_upload["upload_id"] != staged_id or
+                                product_status(recovered_root, trusted)["active"] != combined["active"]):
+                            raise AssertionError("checked upload restore did not activate")
+                        result["combined_upload_restore"] = "encrypted-snapshot-activated"
+                    finally:
+                        recovered_state = json.loads((recovered_root / "product-state.json").read_text())
+                        stop_runtime(RuntimeHandle(**recovered_state["runtime"]))
                 finally:
                     config.unlink(missing_ok=True)
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
