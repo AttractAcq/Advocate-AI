@@ -26,6 +26,8 @@ from infrastructure.deploy.fleet_runtime import (
     FleetRuntime, RuntimeError, start_verified_bundle, stop_runtime,
 )
 import infrastructure.deploy.fleet_runtime as fleet_runtime
+from services.fleet.catalog import Customer, Deployment, FleetCatalog, Release
+from services.fleet.offline_issue import issue_receipt
 
 
 IDENTITY_HOST = "identity.fleet"
@@ -144,6 +146,24 @@ def _expect_token(api_id: str, token: str, allowed: bool) -> None:
     _run("docker", "exec", api_id, "python", "-c", script)
 
 
+def _post_signed_receipt(api_id: str, token: str, envelope: Path) -> int:
+    script = (
+        'import sys,urllib.error,urllib.request\n'
+        'token=sys.stdin.buffer.readline().decode("ascii").strip()\n'
+        'body=sys.stdin.buffer.read()\n'
+        'request=urllib.request.Request('
+        '"http://127.0.0.1:18800/api/fleet/import/deployment-receipts",'
+        'data=body,method="POST",headers={"Content-Type":"application/json",'
+        '"Authorization":"Bearer "+token})\n'
+        'try:\n print(urllib.request.urlopen(request,timeout=10).status)\n'
+        'except urllib.error.HTTPError as exc:\n print(exc.code)\n')
+    response = subprocess.run(
+        ["docker", "exec", "-i", api_id, "python", "-c", script],
+        input=token.encode("ascii") + b"\n" + envelope.read_bytes(),
+        capture_output=True, check=True, timeout=30)
+    return int(response.stdout.strip())
+
+
 def _restart_ready(container: str, *, api: bool) -> None:
     _run("docker", "restart", container)
     probe = ("import urllib.request; "
@@ -160,7 +180,8 @@ def _restart_ready(container: str, *, api: bool) -> None:
 
 
 def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
-                   root: Path) -> dict[str, str]:
+                   root: Path, receipt_trust: Path,
+                   receipt_signing_key: Path) -> dict[str, str]:
     """Retain only metadata about actual container and token outcomes."""
     idp, ca, signing_key = _identity_material(root)
     config = root / "fleet-https-config.json"
@@ -223,7 +244,8 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             try:
                 installed = install_fleet(bundle, trusted, crane, config, install_root,
                                           roles_file=roles, identity_network=network,
-                                          ca_file=ca)
+                                          ca_file=ca,
+                                          receipt_trust_dir=receipt_trust)
             except RuntimeError as exc:
                 status = subprocess.run(
                     ["docker", "inspect", server, "--format", "{{.State.Status}}"],
@@ -246,6 +268,31 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             _expect_token(handle.api_id, valid, True)
             wrong = _token(signing_key, audience="sovereign-core")
             _expect_token(handle.api_id, wrong, False)
+            catalog = FleetCatalog(install_root / "state" / "fleet.db")
+            catalog.add("release", Release(
+                code="REL-OIDC1", version="1.0.0",
+                manifest_sha256="a" * 64, signing_key_id="b" * 64,
+                status="approved"))
+            catalog.add("customer", Customer(code="CUST-OIDC1",
+                                             category="owner_manager"))
+            catalog.add("deployment", Deployment(
+                code="VSL-OIDC1", customer_code="CUST-OIDC1",
+                release_code="REL-OIDC1", hardware_profile="pilot_gpu",
+                status="lab"))
+            receipt_record = root / "oidc-receipt-record.json"
+            receipt_record.write_text(json.dumps({
+                "code": "RCP-OIDC1", "vessel_code": "VSL-OIDC1",
+                "release_code": "REL-OIDC1", "source": "approved_offline_admin",
+                "observed_on": "2026-11-19", "health": "healthy"}))
+            receipt_record.chmod(0o600)
+            envelope = root / "oidc-signed-receipt.json"
+            issue_receipt(receipt_record, receipt_signing_key, envelope)
+            if _post_signed_receipt(handle.api_id, wrong, envelope) != 401:
+                raise AssertionError("wrong-audience Fleet receipt import passed")
+            if _post_signed_receipt(handle.api_id, valid, envelope) != 201:
+                raise AssertionError("OIDC Fleet signed receipt import failed")
+            if [row["code"] for row in catalog.list("receipt")] != ["RCP-OIDC1"]:
+                raise AssertionError("OIDC Fleet receipt was not audited")
 
             # The installer stages trust into a new signed candidate. A failed
             # candidate leaves the old container and mounted CA untouched.
@@ -382,6 +429,7 @@ def rehearse_oidc(bundle: Path, trusted: Path, crane: Path,
             else:
                 raise AssertionError("Fleet status passed without its identity provider")
             return {"oidc_runtime": "synthetic-https-token-authorized",
+                    "oidc_receipt_import": "signed-envelope-authorized",
                     "wrong_audience": "denied", "idp_outage": "status-failed-closed",
                     "trust_rotation": "signed-candidate-overlap-cutover-and-rollback",
                     "rotation_interruption": "precommit-restored-postcommit-verified"}

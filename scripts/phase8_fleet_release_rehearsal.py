@@ -314,7 +314,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     if state_file.exists():
                         current = json.loads(state_file.read_text())
                         stop_runtime(FleetRuntime(**current["runtime"]))
-                result.update(rehearse_oidc(bundle, trusted, crane, root))
+                result.update(rehearse_oidc(bundle, trusted, crane, root,
+                                            retired_trust, next_private))
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
         return result
     except Exception:
