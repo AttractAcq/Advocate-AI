@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import os
@@ -28,6 +30,24 @@ def _directory(root: Path) -> None:
         raise ValueError("upload area must be private")
 
 
+@contextmanager
+def quarantine_directory_lock(root: Path, *, exclusive: bool):
+    """Coordinate upload writers and a backup reader across Core processes."""
+    _directory(root)
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        details = os.fstat(descriptor)
+        if not stat.S_ISDIR(details.st_mode) or stat.S_IMODE(details.st_mode) & 0o077:
+            raise ValueError("upload area changed during lock acquisition")
+        fcntl.flock(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
 def _metadata(root: Path, name: str) -> dict[str, object]:
     path = root / name
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -45,8 +65,8 @@ def _metadata(root: Path, name: str) -> dict[str, object]:
 
 
 def list_uploads(root: Path, actor: str) -> list[dict[str, object]]:
-    _directory(root)
-    records = [_metadata(root, name) for name in os.listdir(root) if re.fullmatch(r"[0-9a-f]{32}\.json", name)]
+    with quarantine_directory_lock(root, exclusive=False):
+        records = [_metadata(root, name) for name in os.listdir(root) if re.fullmatch(r"[0-9a-f]{32}\.json", name)]
     return sorted((item for item in records if item.get("uploader") == actor),
                   key=lambda item: str(item["created_at"]), reverse=True)
 
@@ -57,7 +77,7 @@ def stage_upload(root: Path, actor: str, filename: str, payload: bytes) -> dict[
     if not payload or len(payload) > MAX_BYTES:
         raise ValueError("invalid upload size")
     _directory(root)
-    with _LOCK:
+    with _LOCK, quarantine_directory_lock(root, exclusive=True):
         if sum(_metadata(root, name).get("status") == "pending" for name in os.listdir(root)
                if re.fullmatch(r"[0-9a-f]{32}\.json", name)) >= MAX_PENDING:
             raise ValueError("upload area is full")
@@ -91,5 +111,6 @@ def discard_upload(root: Path, identifier: str) -> None:
     """Remove an uncommitted submission if its audit decision cannot be saved."""
     if not re.fullmatch(r"[0-9a-f]{32}", identifier):
         raise ValueError("invalid upload id")
-    for suffix in (".json", ".blob"):
-        (root / f"{identifier}{suffix}").unlink(missing_ok=True)
+    with quarantine_directory_lock(root, exclusive=True):
+        for suffix in (".json", ".blob"):
+            (root / f"{identifier}{suffix}").unlink(missing_ok=True)

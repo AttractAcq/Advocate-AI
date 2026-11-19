@@ -15,7 +15,7 @@ import zipfile
 
 from infrastructure.restic_repository import MANIFEST, create_snapshot, restore_snapshot
 from services.knowledge.ingestion import MAX_BYTES
-from services.knowledge.upload_staging import MAX_PENDING
+from services.knowledge.upload_staging import MAX_PENDING, quarantine_directory_lock
 
 _ID = re.compile(r"[0-9a-f]{32}\Z")
 MAX_RECORDS = 1024
@@ -226,11 +226,12 @@ def create_upload_snapshot(upload_root: Path, repository: Path, password_file: P
     _private_directory(staging_parent)
     if upload_root.resolve() == staging_parent.resolve():
         raise UploadBackupError("staging and quarantine must be separate")
-    rows = _scan_inventory(upload_root)
     with tempfile.TemporaryDirectory(prefix=".upload-backup-", dir=staging_parent) as temporary:
         stage = Path(temporary)
         archive = stage / ARCHIVE
-        _write_archive_from_root(archive, upload_root, rows)
+        with quarantine_directory_lock(upload_root, exclusive=False):
+            rows = _scan_inventory(upload_root)
+            _write_archive_from_root(archive, upload_root, rows)
         spec = stage / "spec.json"
         spec.write_text(json.dumps({"schema": 1, "files": [
             {"name": ARCHIVE, "kind": "file", "source": ARCHIVE}]}))

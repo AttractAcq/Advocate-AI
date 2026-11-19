@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import json
 from pathlib import Path
 import tempfile
+from threading import Event
 import unittest
 from unittest.mock import patch
 
@@ -12,7 +14,7 @@ from infrastructure.upload_quarantine_backup import (
     create_upload_snapshot, restore_upload_snapshot,
 )
 from services.knowledge.ingestion import MAX_BYTES
-from services.knowledge.upload_staging import stage_upload
+from services.knowledge.upload_staging import quarantine_directory_lock, stage_upload
 
 
 class UploadQuarantineBackupTests(unittest.TestCase):
@@ -103,6 +105,22 @@ class UploadQuarantineBackupTests(unittest.TestCase):
         blob.write_bytes(b"changed")
         with self.assertRaisesRegex(UploadBackupError, "changed"):
             _write_archive_from_root(self.staging / "denied.zip", self.uploads, rows)
+
+    def test_upload_writer_waits_for_snapshot_directory_lock(self) -> None:
+        entered = Event()
+
+        def write_upload() -> dict[str, object]:
+            entered.set()
+            return stage_upload(self.uploads, "lab-engineer", "later.txt", b"later")
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with quarantine_directory_lock(self.uploads, exclusive=False):
+                future = executor.submit(write_upload)
+                self.assertTrue(entered.wait(1))
+                with self.assertRaises(FutureTimeout):
+                    future.result(timeout=0.1)
+            item = future.result(timeout=2)
+        self.assertEqual(item["status"], "pending")
 
     def test_restore_rejects_non_quarantine_snapshot(self) -> None:
         def fake_restore(snapshot: str, repository: Path, password: Path,

@@ -5,8 +5,12 @@ approved source tree. Its existing Core-state restic snapshot does not include
 pending uploads. This adapter makes a separate encrypted restic snapshot of
 that directory and restores it only into a new owner-only location.
 
-Stop Core or put it in a reviewed write-frozen maintenance state before
-creating a snapshot. The adapter checks the exact `.json` and `.blob` file
+The adapter takes a shared directory lock while checking and copying the
+quarantine. Core upload writers and the offline promotion tool take the
+exclusive form of the same lock, so a cooperative writer cannot change files
+during that copy. A production snapshot procedure still needs a reviewed
+maintenance state that coordinates Core, policy and source changes. The adapter
+checks the exact `.json` and `.blob` file
 inventory, owner-only modes, pending metadata, sizes and SHA-256 digests.
 Approved records may retain metadata but no upload bytes. It rejects orphaned,
 linked or unexpected files. The bounded synthetic profile accepts at most 100
