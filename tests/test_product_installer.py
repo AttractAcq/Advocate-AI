@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import secrets
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -70,7 +71,33 @@ class ProductInstallerTests(unittest.TestCase):
                 self.assertEqual(call.kwargs["core_state"], state.resolve())
                 self.assertEqual(call.kwargs["lab_password_file"], credential.resolve())
             self.assertEqual(probe.call_args.args[1:],
-                             (state.resolve(), credential.resolve()))
+                             (state.resolve(), credential.resolve(), None))
+
+    def test_emergency_secret_persists_and_mount_record_rejects_tampering(self) -> None:
+        state, credential = self._external_state()
+        emergency = self.base / "emergency-password"
+        emergency.write_text(secrets.token_urlsafe(24) + "\n")
+        emergency.chmod(0o600)
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=[self.old, self.new]) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.stop_runtime"):
+            install_product(self.first, self.key, self.crane, self.config,
+                            self.root, state, credential, emergency)
+            record = self.root / "product-core-mount.json"
+            self.assertEqual(json.loads(record.read_text())["emergency_credential"],
+                             str(emergency.resolve()))
+            install_product(self.second, self.key, self.crane, self.config, self.root)
+            self.assertEqual(start.call_args.kwargs["emergency_password_file"],
+                             emergency.resolve())
+            self.assertEqual(probe.call_args.args[3], emergency.resolve())
+            tampered = json.loads(record.read_text())
+            tampered["emergency_credential"] = str(self.base / "missing")
+            record.write_text(json.dumps(tampered))
+            with self.assertRaises(ProductInstallError):
+                product_status(self.root, self.key)
 
     def test_late_mount_change_and_tampered_mount_record_fail_closed(self) -> None:
         state, credential = self._external_state()
