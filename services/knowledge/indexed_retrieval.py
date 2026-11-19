@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 import re
 import sqlite3
 
 from services.knowledge.acl import source_access
 from services.knowledge.paths import source_path
-from services.knowledge.manifest_io import read_manifest_bytes
+from services.knowledge.manifest_io import load_manifest
 from services.policy.policy_file import PolicyUnavailable, load_policy
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
@@ -37,7 +36,7 @@ def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> l
     if not isinstance(policy, dict):
         raise SourceManifestError("source policy unavailable")
     try:
-        current = json.loads(read_manifest_bytes(manifest))
+        current = load_manifest(manifest)
     except (OSError, ValueError, UnicodeError) as exc:
         raise SourceManifestError("source manifest unavailable") from exc
     if not isinstance(current, dict) or current.get("schema") != 1 or not isinstance(current.get("sources"), list):

@@ -199,6 +199,30 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
             sync_manifest(self.root, linked, self.database)
         self.assertEqual((await self.client.get("/api/sources", headers=engineer)).status_code, 200)
 
+    async def test_duplicate_manifest_keys_fail_before_index_or_model(self) -> None:
+        engineer = await self.login("engineer")
+        previous_calls = len(self.model.contexts)
+        row = json.dumps(self.rows[0])
+        cases = (
+            '{"schema":1,"sources":[],"sources":[' + row + ']}',
+            '{"schema":1,"sources":[{' + row[1:-1] + ',"classification":"C0_SYNTHETIC_DECK"}]}',
+            '{"schema":1,"sources":[' + row + '],"ignored":NaN}',
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                self.manifest.write_text(payload, encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    sync_manifest(self.root, self.manifest, self.database)
+                with self.assertRaises(ValueError):
+                    approved_rows(self.root, self.manifest, self.database, "engineer")
+                self.assertEqual((await self.client.get("/api/sources", headers=engineer)).status_code, 503)
+                self.assertEqual((await self.client.post(
+                    "/api/chat", headers=engineer,
+                    json={"message": "generator inspection"})).status_code, 503)
+                self.assertEqual(len(self.model.contexts), previous_calls)
+        self.manifest.write_text(json.dumps({"schema": 1, "sources": self.rows}), encoding="utf-8")
+        self.assertEqual((await self.client.get("/api/sources", headers=engineer)).status_code, 200)
+
     async def test_oversized_role_policy_rejects_active_session(self) -> None:
         engineer = await self.login("engineer")
         policy_path = self.root / "roles.json"
