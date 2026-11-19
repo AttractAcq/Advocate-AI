@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -25,11 +28,13 @@ def _run(*args: str, timeout: int = 120) -> str:
     return result.stdout.strip()
 
 
-def _realm(password: str) -> dict[str, object]:
+def _realm(password: str, mfa: bool = False) -> dict[str, object]:
     return {
         "realm": "fleet", "enabled": True, "sslRequired": "all",
         "registrationAllowed": False, "resetPasswordAllowed": False,
         "accessTokenLifespan": 300,
+        "otpPolicyType": "totp", "otpPolicyAlgorithm": "HmacSHA1",
+        "otpPolicyDigits": 6, "otpPolicyPeriod": 30,
         "roles": {"realm": [{"name": "fleet_admin"}]},
         "clients": [{
             "clientId": "sovereign-fleet", "enabled": True,
@@ -54,7 +59,8 @@ def _realm(password: str) -> dict[str, object]:
             "username": "admin", "enabled": True, "emailVerified": True,
             "email": "admin@synthetic.example.invalid", "firstName": "Synthetic",
             "lastName": "Administrator",
-            "requiredActions": [], "realmRoles": ["fleet_admin"],
+            "requiredActions": ["CONFIGURE_TOTP"] if mfa else [],
+            "realmRoles": ["fleet_admin"],
             "credentials": [{"type": "password", "value": password,
                              "temporary": False}],
         }],
@@ -138,7 +144,17 @@ print(json.dumps({"keycloak_flow": "authorization-code-pkce-authorized",
 '''
 
 
-def browser_flow(password: str, chromedriver: str) -> dict[str, str]:
+def _totp(secret: str, offset: int = 0, at: float | None = None) -> str:
+    cleaned = secret.strip().replace(" ", "").replace("-", "").upper()
+    key = base64.b32decode(cleaned + "=" * (-len(cleaned) % 8))
+    counter = int((time.time() if at is None else at) // 30) + offset
+    digest = hmac.new(key, counter.to_bytes(8, "big"), hashlib.sha1).digest()
+    start = digest[-1] & 15
+    number = int.from_bytes(digest[start:start + 4], "big") & 0x7fffffff
+    return f"{number % 1_000_000:06d}"
+
+
+def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[str, str]:
     driver = subprocess.Popen([chromedriver, "--port=9515", "--allowed-ips=127.0.0.1"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     session = None
@@ -166,6 +182,19 @@ def browser_flow(password: str, chromedriver: str) -> dict[str, str]:
             document.querySelector('input[name=password]').value = arguments[1];
             document.querySelector('form#kc-form-login').requestSubmit();
         """, "args": ["admin", password]})
+        secret = ""
+        if mfa:
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-totp-settings-form')", 45)
+            assert not driver_request("POST", f"/session/{session}/execute/sync", {
+                "script": "return location.href.startsWith('https://fleet.example.invalid/?code=')", "args": []})
+            secret = driver_request("POST", f"/session/{session}/execute/sync", {
+                "script": "return document.querySelector('#totpSecret').value", "args": []})
+            assert isinstance(secret, str) and 16 <= len(secret) <= 128
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=totp]').value = arguments[0];
+                document.querySelector('input[name=userLabel]').value = 'Synthetic Fleet device';
+                document.querySelector('#kc-totp-settings-form').requestSubmit();
+            """, "args": [_totp(secret)]})
         until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
         cleared = driver_request("POST", f"/session/{session}/execute/sync", {"script": """
             return !location.search && !sessionStorage.getItem('sovereign_fleet_oidc_state')
@@ -183,6 +212,30 @@ def browser_flow(password: str, chromedriver: str) -> dict[str, str]:
             until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('Sign in with local identity')", 45)
         assert not driver_request("POST", f"/session/{session}/execute/sync",
                                   {"script": "return document.body.textContent.includes('admin · fleet admin')", "args": []})
+        if mfa:
+            driver_request("POST", f"/session/{session}/execute/sync",
+                           {"script": "document.querySelector('button.primary').click()", "args": []})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('form#kc-form-login input[name=username]')", 45)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=username]').value = arguments[0];
+                document.querySelector('input[name=password]').value = arguments[1];
+                document.querySelector('form#kc-form-login').requestSubmit();
+            """, "args": ["admin", password]})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-otp-login-form input[name=otp]')", 45)
+            valid_nearby = {_totp(secret, shift) for shift in (-1, 0, 1)}
+            bad = next(value for value in ("000000", "999999", "123456") if value not in valid_nearby)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=otp]').value = arguments[0];
+                document.querySelector('#kc-otp-login-form').requestSubmit();
+            """, "args": [bad]})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-otp-login-form input[aria-invalid=true]')", 30)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=otp]').value = arguments[0];
+                document.querySelector('#kc-otp-login-form').requestSubmit();
+            """, "args": [_totp(secret)]})
+            until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
+            return {"browser_flow": "keycloak-mfa-enrolled-and-authorized",
+                    "invalid_otp": "denied", "callback_state": "cleared", "api_role": "fleet_admin"}
         return {"browser_flow": "real-keycloak-pkce-sign-in-and-sign-out", "callback_state": "cleared",
                 "api_role": "fleet_admin"}
     finally:
@@ -195,7 +248,10 @@ def browser_flow(password: str, chromedriver: str) -> dict[str, str]:
         driver.wait(timeout=5)
 
 
-def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[str, str]:
+def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
+             mfa: bool = False) -> dict[str, str]:
+    if mfa and not browser:
+        raise ValueError("MFA rehearsal requires the browser")
     image = json.loads(Path("infrastructure/lab/container-image.json").read_text())
     if image.get("schema") != 1 or image.get("purpose") != "synthetic Keycloak lab only":
         raise ValueError("unapproved Keycloak lab image configuration")
@@ -216,7 +272,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
         realm = root / "realm"
         realm.mkdir(mode=0o755)
         password = "synthetic-fleet-" + uuid.uuid4().hex
-        (realm / "fleet-realm.json").write_text(json.dumps(_realm(password)))
+        (realm / "fleet-realm.json").write_text(json.dumps(_realm(password, mfa)))
         (realm / "fleet-realm.json").chmod(0o644)
         state = root / "state"
         state.mkdir(mode=0o700)
@@ -301,9 +357,16 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                                       capture_output=True, text=True)
                 raise AssertionError("synthetic Keycloak did not become ready: " +
                                      logs.stderr[-1600:])
-            flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
-                "__PASSWORD__", repr(password))
-            outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
+            if mfa:
+                _run("docker", "exec", api, "python", "-c",
+                     "import httpx; r=httpx.get('http://fleet-portal:8080/api/fleet/me', "
+                     "headers={'X-Fleet-Lab-Token': 'synthetic-fleet-admin-token-0123456789'}, "
+                     "trust_env=False); assert r.status_code == 401")
+                outcome = {"keycloak_flow": "mfa-required", "lab_token": "denied"}
+            else:
+                flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
+                    "__PASSWORD__", repr(password))
+                outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
             if browser:
                 try:
                     with urlopen("http://127.0.0.1:18080/", timeout=3) as response:
@@ -327,7 +390,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
                         time.sleep(0.2)
                 else:
                     raise RuntimeError(f"Fleet HTTPS bridge did not become ready: {last_error}")
-                outcome.update(browser_flow(password, chromedriver))
+                outcome.update(browser_flow(password, chromedriver, mfa))
             return outcome
         finally:
             if proxy:
@@ -346,6 +409,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver") -> dict[
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", action="store_true")
+    parser.add_argument("--mfa", action="store_true")
     parser.add_argument("--chromedriver", default=os.environ.get("CHROMEDRIVER", "chromedriver"))
     arguments = parser.parse_args()
-    print(json.dumps(rehearse(arguments.browser, arguments.chromedriver), sort_keys=True))
+    print(json.dumps(rehearse(arguments.browser, arguments.chromedriver, arguments.mfa), sort_keys=True))

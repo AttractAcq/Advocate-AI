@@ -239,3 +239,12 @@ session; target ingress certificates and trust policy require later validation.
 The CI fixture uses a temporary Docker browser ingress network for Keycloak
 and the portal while the Fleet API stays on its internal networks. This
 browser fixture is not a zero-egress network proof.
+
+The synthetic MFA variant marks the fictional Keycloak administrator with a
+Configure OTP required action and fixes the lab TOTP policy to SHA-1, six
+digits and 30 seconds. The browser must remain at Keycloak after the password,
+complete OTP enrolment, and then pass a fresh password and OTP challenge before
+the Fleet API grants the administrator role. A deliberately invalid OTP must
+remain at Keycloak. The short-lived seed is read only inside the test process
+and is never written to CI evidence. Company MFA factor choice, recovery,
+enrolment and operator policy still need approval under B-12.
