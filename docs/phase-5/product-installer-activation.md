@@ -56,6 +56,17 @@ snapshot, use `restore-install` instead of `install`:
   --enable-uploads
 ```
 
+To restore a separately encrypted upload quarantine into that new installation,
+add `--upload-snapshot-id`, `--upload-repository` and
+`--upload-password-file` to `restore-install`. All three are required together
+with `--enable-uploads`; the upload repository must differ from the Core
+repository. The installer verifies both exact snapshots before starting either
+service. An invalid upload snapshot removes the unused new installation root.
+The restored files remain quarantined and cannot appear in approved retrieval.
+Use snapshots from a coordinated write-frozen maintenance point; the installer
+does not prove that two independently selected snapshot IDs represent the same
+point in time.
+
 The parent of the new root must be owner-only. The command verifies the signed
 two-image bundle and Console configuration, creates the private root, checks
 and clean-restores the exact snapshot, then activates the signed release with

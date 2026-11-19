@@ -12,6 +12,7 @@ from infrastructure.deploy.product_installer import (
     ProductInstallError, install_product, product_status, recover_product,
     refresh_emergency_product, restore_install_product, rollback_product,
 )
+from services.knowledge.upload_staging import stage_upload
 
 
 class ProductInstallerTests(unittest.TestCase):
@@ -255,6 +256,83 @@ class ProductInstallerTests(unittest.TestCase):
                     self.root, "a" * 64, self.base / "repository", self.base / "password",
                     self.base / "restic", "b" * 64, credential)
             self.assertEqual(restored.call_count, 1)
+
+    def test_restore_install_mounts_checked_upload_snapshot_before_start(self) -> None:
+        _, credential = self._external_state()
+        snapshot_id = "a" * 64
+        upload_id = "c" * 64
+        core_repository = self.base / "core-repository"
+        upload_repository = self.base / "upload-repository"
+
+        def core_restore(_snapshot, _repository, _password, _restic, _digest,
+                         destination: Path) -> dict[str, object]:
+            destination.mkdir(mode=0o700)
+            (destination / "sources").mkdir()
+            for name in ("roles.json", "manifest.csv", "history.db"):
+                item = destination / name
+                item.write_text("synthetic")
+                item.chmod(0o600)
+            return {"files": 4}
+
+        def upload_restore(_snapshot, _repository, _password, _restic, _digest,
+                           destination: Path) -> dict[str, object]:
+            self.assertEqual(_snapshot, upload_id)
+            self.assertEqual(_repository, upload_repository)
+            destination.mkdir(mode=0o700)
+            stage_upload(destination, "lab-engineer", "fictional.txt", b"fictional document")
+            return {"quarantine_files": 2}
+
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_snapshot",
+                   side_effect=core_restore), \
+             patch("infrastructure.deploy.product_installer.restore_upload_snapshot",
+                   side_effect=upload_restore) as uploads_restored, \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old) as started:
+            result = restore_install_product(self.first, self.key, self.crane,
+                self.config, self.root, snapshot_id, core_repository,
+                self.base / "password", self.base / "restic", "b" * 64,
+                credential, enable_uploads=True, upload_snapshot_id=upload_id,
+                upload_repository=upload_repository,
+                upload_password_file=self.base / "upload-password")
+        self.assertEqual(result["upload_snapshot_id"], upload_id)
+        self.assertEqual(result["restored_upload_files"], 2)
+        uploads_restored.assert_called_once()
+        self.assertEqual(started.call_args.kwargs["upload_root"],
+                         (self.root / "product-uploads").resolve())
+        self.assertEqual(len(list((self.root / "product-uploads").glob("*.blob"))), 1)
+
+    def test_restore_install_refuses_partial_or_failed_upload_restore(self) -> None:
+        _, credential = self._external_state()
+        base_args = (self.first, self.key, self.crane, self.config, self.root,
+                     "a" * 64, self.base / "core-repository",
+                     self.base / "password", self.base / "restic", "b" * 64,
+                     credential)
+        with self.assertRaisesRegex(ProductInstallError, "upload restore requires"):
+            restore_install_product(*base_args, enable_uploads=True,
+                                    upload_snapshot_id="c" * 64)
+        self.assertFalse(self.root.exists())
+        with self.assertRaisesRegex(ProductInstallError, "separate repository"):
+            restore_install_product(*base_args, enable_uploads=True,
+                upload_snapshot_id="c" * 64,
+                upload_repository=self.base / "core-repository",
+                upload_password_file=self.base / "password")
+        self.assertFalse(self.root.exists())
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_snapshot",
+                   return_value={"files": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_upload_snapshot",
+                   side_effect=ValueError("corrupt quarantine")), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle") as started:
+            with self.assertRaisesRegex(ValueError, "corrupt quarantine"):
+                restore_install_product(*base_args, enable_uploads=True,
+                    upload_snapshot_id="c" * 64,
+                    upload_repository=self.base / "upload-repository",
+                    upload_password_file=self.base / "upload-password")
+            self.assertFalse(self.root.exists())
+            started.assert_not_called()
 
     def test_activate_then_rollback_and_idempotence(self) -> None:
         with patch("infrastructure.deploy.product_installer.verify_bundle",
