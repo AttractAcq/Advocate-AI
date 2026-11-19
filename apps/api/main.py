@@ -265,6 +265,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.get("/health")
     def health() -> dict[str, str]:
+        if audit is not None:
+            try:
+                verify_audit(audit.path, require_current_clock=True)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                    "audit unavailable") from exc
         return {"service": "core", "status": "ok", "mode": "synthetic-only"}
 
     @app.post("/api/login")

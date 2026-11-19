@@ -61,7 +61,10 @@ class FleetAuditClockApiTests(unittest.IsolatedAsyncioTestCase):
                                          headers={"X-Fleet-Lab-Token": token}) as client:
                 with patch("services.fleet.catalog.datetime", PastClock):
                     response = await client.get("/api/fleet/customers")
+                    unhealthy = await client.get("/health")
                 self.assertEqual(response.status_code, 503)
+                self.assertEqual(unhealthy.status_code, 503)
+                self.assertEqual((await client.get("/health")).status_code, 200)
                 self.assertEqual(len((await client.get("/api/fleet/customers")).json()), 1)
 
 

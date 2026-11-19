@@ -8,7 +8,7 @@ verifies the same condition before catalog reads or changes and immediately
 before inserting an audit event. A synthetic test moves the process clock back
 to 2020 after a fictional event and confirms that subsequent audit append and
 Fleet catalog changes fail closed; normal reads resume when the clock is
-restored. The result is a visible 503 through the existing API error handling.
+restored. The result is a visible 503 through the API and health routes.
 
 This check anchors the current clock only to prior local events. It cannot
 establish that the wall clock is correct before the first event, detect an NTP
