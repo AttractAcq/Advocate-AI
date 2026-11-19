@@ -25,11 +25,13 @@ from infrastructure.deploy.product_installer import (
     cleanup_product_orphans, install_product, product_status, recover_product,
     refresh_emergency_product, restore_install_product, rollback_product,
 )
+from infrastructure.deploy.product_recovery_set import (
+    create_product_recovery_set, verify_product_recovery_set,
+)
 from infrastructure.deploy.boot_service import write_recovery_unit
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
-from infrastructure.upload_quarantine_backup import create_upload_snapshot
 from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
 
 _UPLOAD_PROBE = r'''
@@ -95,6 +97,7 @@ def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
     private.write_bytes(key.private_bytes(serialization.Encoding.PEM,
                                           serialization.PrivateFormat.PKCS8,
                                           serialization.NoEncryption()))
+    private.chmod(0o600)
     trusted.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,
                                                       serialization.PublicFormat.SubjectPublicKeyInfo))
     evidence = {"image_ref": image_ref, "archive_path": "images/core.tar",
@@ -369,17 +372,24 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     finally:
                         active_state = json.loads((install_root / "product-state.json").read_text())
                         stop_runtime(RuntimeHandle(**active_state["runtime"]))
+                    core_repository = state_root / "coordinated-core-repository"
                     upload_repository = state_root / "upload-repository"
-                    upload_snapshot = create_upload_snapshot(
-                        install_root / "product-uploads", upload_repository,
-                        backup_password, restic, restic_sha256, state_root)
+                    receipt_path = root / "coordinated-recovery-set.json"
+                    created_set = create_product_recovery_set(
+                        install_root, core_repository, upload_repository,
+                        backup_password, backup_password, restic, restic_sha256,
+                        state_root, private, receipt_path)
+                    recovery_set = verify_product_recovery_set(receipt_path, trusted)
+                    if recovery_set != created_set:
+                        raise AssertionError("coordinated recovery receipt mismatch")
                     recovered_root = root / "product-upload-restore-install"
                     combined = restore_install_product(
                         product_bundle, trusted, crane, config, recovered_root,
-                        snapshot_id, repository, backup_password, restic,
+                        str(recovery_set["core_snapshot_id"]), core_repository,
+                        backup_password, restic,
                         restic_sha256, lab_credential, emergency_credential,
                         enable_uploads=True,
-                        upload_snapshot_id=str(upload_snapshot["snapshot_id"]),
+                        upload_snapshot_id=str(recovery_set["upload_snapshot_id"]),
                         upload_repository=upload_repository,
                         upload_password_file=backup_password)
                     try:
@@ -387,12 +397,17 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         recovered_core = str(recovered_state["runtime"]["core_id"])
                         recovered_upload = json.loads(_docker(
                             "exec", recovered_core, "python", "-c", _UPLOAD_PROBE,
-                            "verify", staged_id))
+                            "late", staged_id))
                         if (combined["restored_upload_files"] != 2 or
                                 recovered_upload["upload_id"] != staged_id or
                                 product_status(recovered_root, trusted)["active"] != combined["active"]):
                             raise AssertionError("checked upload restore did not activate")
                         result["combined_upload_restore"] = "encrypted-snapshot-activated"
+                        result["coordinated_recovery_set"] = {
+                            "core_snapshot_id": recovery_set["core_snapshot_id"],
+                            "upload_snapshot_id": recovery_set["upload_snapshot_id"],
+                            "signed_receipt": "verified",
+                        }
                     finally:
                         recovered_state = json.loads((recovered_root / "product-state.json").read_text())
                         stop_runtime(RuntimeHandle(**recovered_state["runtime"]))

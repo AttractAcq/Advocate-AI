@@ -24,12 +24,11 @@ It submits a fictional document through Core, verifies that the file is staged
 but absent from approved sources, and checks that the staged record survives a
 runtime refresh. This tests the mounted upload path in the actual container;
 it does not exercise vessel content. After stopping the first product runtime,
-the rehearsal encrypts the staged upload in a separate restic repository. A
-second clean installation verifies both the original Core snapshot and the
-upload snapshot before starting the signed images. It checks the restored
-pending record through Core and confirms it is still absent from approved
-sources. The two synthetic snapshots are selected separately, so this does
-not prove a coordinated production recovery point.
+the rehearsal [captures a signed recovery set](product-recovery-set.md) under
+the policy and upload locks. The receipt binds the fresh Core and upload restic
+snapshot IDs and capture window. A second clean installation uses exactly that
+pair before starting the signed images. It checks the restored pending record
+through Core and confirms it is still absent from approved sources.
 
 This proves the evidence pipeline can process the product images rather than
 only the small fictional test archive. It does not yet produce an approved
