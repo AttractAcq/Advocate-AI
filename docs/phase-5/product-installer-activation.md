@@ -71,9 +71,11 @@ path in the Core mount record, and mounts it read/write at
 from the restored source tree. `status`, update, rollback and recovery verify
 the mount source, write flag and environment; a missing or replaced directory
 fails closed. An existing installation cannot silently enable uploads later.
-The Core-state snapshot in this rehearsal does not include pending uploads;
-an encrypted backup and retention policy for this separate directory remain
-open before vessel use.
+The Core-state snapshot in this rehearsal does not include pending uploads.
+The [separate upload quarantine recovery adapter](upload-quarantine-recovery.md)
+can make and check a bounded encrypted snapshot while Core writes are stopped.
+Coordinated scheduling and an approved retention policy remain open before
+vessel use.
 
 For a synthetic Core state restored from restic, the first `install` can also
 specify `--core-state /path/to/restored` and
