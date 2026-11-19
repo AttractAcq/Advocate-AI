@@ -25,12 +25,29 @@ requires every listed source to be a regular flat file with the listed SHA-256,
 rejects missing or extra files, and includes each listed source in the encrypted
 snapshot. Receipt-bound restore repeats that check and requires the snapshot
 file count to match the restored source inventory before runtime activation.
+Capture copies the manifest and its sources into a private owner-only staging
+directory, rechecks their digests there, and gives that frozen copy to restic.
+Before staging, it estimates the manifest and source file bytes and requires
+that space plus a 128 MiB reserve on the staging volume. This is a source-copy
+preflight; restic's later staging and repository peaks still need a separate
+capacity check. The [restic adapter](restic-repository.md) now makes that
+estimated check before copying; actual target-host peak usage and filesystem
+quotas remain open.
+It checks the live source inventory and manifest again before signing the
+receipt; a change during capture leaves no receipt. This guards the synthetic
+source pair against an external writer while restic copies it. The knowledge
+index, other services and vessel NAS still need a coordinated production
+snapshot procedure.
 This path is bounded to 122 sources of at most 8 MiB each (the current fixture
 has 100); larger vessel datasets require a separate production design.
 
 The actual-image CI rehearsal verifies the receipt and restores that pair into
 a clean second signed product installation. It checks that the restored trail
 starts with every pre-capture audit byte and continues recording API requests.
+The upload quarantine inventory and free-space estimate are checked before
+Core's first encrypted snapshot; the upload adapter checks them again when it
+creates its own snapshot. A change or space loss between those checks can still
+leave an unpaired Core snapshot for normal retention handling.
 A failed second snapshot leaves no
 receipt; the first encrypted snapshot may remain in its repository and needs
 ordinary retention handling. The receipt does not contain backup passwords.

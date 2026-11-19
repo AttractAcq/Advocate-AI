@@ -21,13 +21,16 @@ from infrastructure.deploy.product_installer import (
     _identifier, _installation_id, _lock, _mount_config, _owner_directory,
     _require_audit, _state, restore_install_product,
 )
-from infrastructure.deploy.core_state_inventory import source_files
+from infrastructure.deploy.core_state_inventory import source_files, stage_source_inventory
 from infrastructure.restic_repository import create_snapshot
 from infrastructure.release.bundle import verify_bundle
-from infrastructure.upload_quarantine_backup import create_upload_snapshot
+from infrastructure.upload_quarantine_backup import (
+    create_upload_snapshot, preflight_upload_snapshot,
+)
 from services.knowledge.upload_staging import quarantine_directory_lock
 from services.policy.policy_file import policy_directory_lock
 from services.policy.audit import verify as verify_audit
+from services.policy.regular_file import read_regular_file
 
 
 class RecoverySetError(ValueError):
@@ -148,19 +151,22 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
             raise RecoverySetError("installed synthetic Core and uploads are required")
         runtime = state_record["runtime"]
         _require_stopped(runtime)
-        sources = source_files(state)
         started = datetime.now(timezone.utc)
         with policy_directory_lock(state / "roles.json", exclusive=True), \
                 quarantine_directory_lock(uploads, exclusive=False):
             _require_stopped(runtime)
             _require_audit(state)
             audit_checkpoint = verify_audit(state / "audit.jsonl", require_current_clock=True)
+            preflight_upload_snapshot(uploads, upload_repository, staging_parent)
             with tempfile.TemporaryDirectory(prefix=".product-recovery-set-",
                                              dir=staging_parent) as temporary:
                 spec = Path(temporary) / "core-spec.json"
+                frozen = Path(temporary).resolve() / "frozen-sources"
+                sources = stage_source_inventory(state, frozen)
+                frozen_manifest = read_regular_file(frozen / "manifest.csv", 1024 * 1024)
                 files = [
                     {"name": "roles.json", "kind": "file", "source": str(state / "roles.json")},
-                    {"name": "manifest.csv", "kind": "file", "source": str(state / "manifest.csv")},
+                    {"name": "manifest.csv", "kind": "file", "source": str(frozen / "manifest.csv")},
                     {"name": "history.db", "kind": "sqlite", "source": str(state / "history.db")},
                     {"name": "audit.jsonl", "kind": "file", "source": str(state / "audit.jsonl")},
                 ]
@@ -181,6 +187,8 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                                                 restic_sha256, staging_parent)
             _require_stopped(runtime)
             source_files(state)
+            if read_regular_file(state / "manifest.csv", 1024 * 1024) != frozen_manifest:
+                raise RecoverySetError("Core source manifest changed during capture")
             if verify_audit(state / "audit.jsonl", require_current_clock=True) != audit_checkpoint:
                 raise RecoverySetError("Core audit trail changed during capture")
             value = _payload({

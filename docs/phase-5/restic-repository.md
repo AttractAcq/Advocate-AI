@@ -13,6 +13,13 @@ into place. The restic binary must match an approved SHA-256 value. The
 passphrase is read from an owner-only file outside the repository and never
 passed as a command argument. The adapter disables restic's local cache and
 accepts only local absolute repository paths.
+Before copying plaintext, the adapter estimates every allowlisted source,
+including a SQLite WAL when present, and checks free space on the staging and
+repository volumes. It reserves 128 MiB beyond the estimated staged files
+and encrypted repository packs, combining the requirements when both paths
+share a filesystem. This is an early capacity check; filesystem quotas,
+restic's actual pack overhead and concurrent writers still need target-host
+measurement.
 
 ```sh
 .venv/bin/python -m infrastructure.restic_repository create \

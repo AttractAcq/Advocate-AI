@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -155,6 +156,67 @@ class ProductRecoverySetTests(unittest.TestCase):
             backup.assert_not_called()
             (state / "sources" / "EXTRA.txt").unlink(missing_ok=True)
 
+    def test_capture_uses_private_frozen_manifest_and_source(self) -> None:
+        state = self.install / "core-state"
+        def core(spec: Path, *_args) -> dict[str, object]:
+            rows = {row["name"]: Path(row["source"])
+                    for row in json.loads(spec.read_text())["files"]}
+            for name in ("manifest.csv", "sources/ENG-001.txt"):
+                self.assertNotEqual(rows[name], state / name)
+                self.assertEqual(rows[name].read_bytes(), (state / name).read_bytes())
+                self.assertEqual(rows[name].stat().st_mode & 0o077, 0)
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            self._create()
+        self.assertTrue(self.receipt.is_file())
+
+    def test_low_source_staging_capacity_denies_before_backup(self) -> None:
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.core_state_inventory.shutil.disk_usage",
+                   return_value=SimpleNamespace(free=0)), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+            with self.assertRaisesRegex(ValueError, "insufficient space"):
+                self._create()
+        backup.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
+    def test_live_source_change_during_capture_leaves_no_receipt(self) -> None:
+        state = self.install / "core-state"
+        def core(spec: Path, *_args) -> dict[str, object]:
+            rows = {row["name"]: Path(row["source"])
+                    for row in json.loads(spec.read_text())["files"]}
+            (state / "sources" / "ENG-001.txt").write_text("changed during capture")
+            self.assertEqual(rows["sources/ENG-001.txt"].read_bytes(), b"fictional")
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
+
+    def test_live_manifest_change_during_capture_leaves_no_receipt(self) -> None:
+        state = self.install / "core-state"
+        def core(spec: Path, *_args) -> dict[str, object]:
+            rows = {row["name"]: Path(row["source"])
+                    for row in json.loads(spec.read_text())["files"]}
+            with (state / "manifest.csv").open("a") as stream:
+                stream.write("\n")
+            self.assertNotEqual(rows["manifest.csv"].read_bytes(),
+                                (state / "manifest.csv").read_bytes())
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(RecoverySetError, "manifest changed"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
+
     def test_running_product_or_second_backup_failure_leaves_no_receipt(self) -> None:
         with patch("infrastructure.deploy.product_recovery_set._require_stopped",
                    side_effect=RecoverySetError("runtime running")), \
@@ -170,6 +232,16 @@ class ProductRecoverySetTests(unittest.TestCase):
                    side_effect=ValueError("upload backup failed")):
             with self.assertRaisesRegex(ValueError, "upload backup failed"):
                 self._create()
+        self.assertFalse(self.receipt.exists())
+
+    def test_upload_preflight_failure_precedes_core_backup(self) -> None:
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.preflight_upload_snapshot",
+                   side_effect=ValueError("upload capacity unavailable")), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as core_backup:
+            with self.assertRaisesRegex(ValueError, "upload capacity unavailable"):
+                self._create()
+        core_backup.assert_not_called()
         self.assertFalse(self.receipt.exists())
 
     def test_missing_or_tampered_audit_prevents_capture(self) -> None:
