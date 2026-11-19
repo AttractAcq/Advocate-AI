@@ -480,7 +480,11 @@ def rotate_fleet_ca(root: Path, trusted_key: Path, crane: Path,
         staged = _private_temp(identity, ".ca-next-", replacement)
         try:
             journal = _write_ca_journal(root, current, previous)
-            os.replace(staged, old_ca)
+            try:
+                os.replace(staged, old_ca)
+            except Exception:
+                journal.unlink()
+                raise
             try:
                 candidate = start_verified_bundle(
                     stage / "bundle", trusted_key, crane,
