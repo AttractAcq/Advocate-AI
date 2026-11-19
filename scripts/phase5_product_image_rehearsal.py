@@ -97,6 +97,7 @@ def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
     private.write_bytes(key.private_bytes(serialization.Encoding.PEM,
                                           serialization.PrivateFormat.PKCS8,
                                           serialization.NoEncryption()))
+    private.chmod(0o600)
     trusted.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,
                                                       serialization.PublicFormat.SubjectPublicKeyInfo))
     evidence = {"image_ref": image_ref, "archive_path": "images/core.tar",
