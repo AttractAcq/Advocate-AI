@@ -21,7 +21,10 @@ from infrastructure.deploy.fleet_installer import (
     rollback_fleet,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, stop_runtime
-from infrastructure.deploy.fleet_backup import backup_fleet
+from infrastructure.deploy.fleet_backup_service import (
+    FleetScheduleError, create_scheduled, verify_latest,
+)
+from infrastructure.deploy.fleet_backup_retention import plan_retention, apply_retention
 from infrastructure.backup import generate_key
 from services.fleet.catalog import Customer, Deployment, FleetCatalog, Release
 from services.fleet.offline_issue import issue_receipt
@@ -284,9 +287,39 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     result["recovery"] = "signed-release-restarted"
                     backup_key = root / "fleet-backup.key"
                     generate_key(backup_key)
-                    archive = root / "fleet-backup.svb"
-                    backup_fleet(install_root / "state" / "fleet.db", archive,
-                                 backup_key)
+                    archive_dir = root / "fleet-backups"
+                    archive_dir.mkdir(mode=0o700)
+                    database = install_root / "state" / "fleet.db"
+                    originals = [Path(create_scheduled(database, archive_dir,
+                                                       backup_key, 3)["archive"])
+                                 for _ in range(3)]
+                    try:
+                        create_scheduled(database, archive_dir, backup_key, 3)
+                    except FleetScheduleError as exc:
+                        if "capacity reached" not in str(exc):
+                            raise
+                    else:
+                        raise AssertionError("Fleet full backup directory accepted another archive")
+                    policy = root / "fleet-retention.json"
+                    policy.write_text('{"schema":1,"keep_last":2,"max_age_hours":24}\n')
+                    policy.chmod(0o600)
+                    preview_file = root / "fleet-retention-plan.json"
+                    preview = plan_retention(archive_dir, policy, preview_file)
+                    if preview["remove"] != [originals[0].name] or \
+                            preview["retain"] != [path.name for path in originals[1:]]:
+                        raise AssertionError("Fleet retention plan selected wrong archives")
+                    applied = apply_retention(archive_dir, policy, preview_file,
+                                              str(preview["plan_sha256"]), backup_key)
+                    if (applied["clean_restore"] != "verified" or
+                            applied["removed"] != [originals[0].name] or
+                            originals[0].exists()):
+                        raise AssertionError("Fleet retention did not verify and remove oldest")
+                    archive = Path(create_scheduled(database, archive_dir,
+                                                    backup_key, 3)["archive"])
+                    if verify_latest(archive_dir, backup_key, 24, 3)[
+                            "clean_restore"] != "verified":
+                        raise AssertionError("Fleet backup after retention did not verify")
+                    result["archive_retention"] = "reviewed-plan-applied-and-backup-resumed"
                     restored_root = root / "fleet-restored-install"
                     try:
                         restored = restore_install_fleet(
