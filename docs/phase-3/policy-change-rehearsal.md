@@ -37,6 +37,15 @@ API 503 during a pending change, rollback after a simulated interruption and
 request-ID replay denial. `make check` passes 202 tests with five skips in the
 synthetic workspace.
 
+Core now rechecks the active identity immediately before sending retrieved
+context to the model and again after a model call. A role change or revocation
+at either checkpoint denies the chat or incident-explanation response; a
+discarded chat answer is not stored. The local regression changes the policy
+after retrieval and during model completion. This closes those two observed
+windows, but an external policy writer can still change the file between a
+checkpoint and model dispatch. A full policy-change request drain and target
+storage rehearsal remain open.
+
 Before vessel use, management must approve the signer roster and access model,
 separate and protect private keys, establish MFA and maintenance quiescence,
 retain evidence outside Core's writable state, review audit anchoring, and
