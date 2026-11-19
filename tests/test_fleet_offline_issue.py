@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -18,6 +20,7 @@ from apps.fleet.main import FleetSettings, create_app
 from services.fleet.catalog import Customer, Deployment, FleetCatalog, Release
 from services.fleet.offline_import import SignedDeploymentReceipt, verify_signed_receipt
 from services.fleet.offline_issue import issue_receipt
+from scripts.phase8_fleet_release_rehearsal import _post_receipt
 
 
 class OfflineIssueTests(unittest.TestCase):
@@ -116,6 +119,16 @@ class OfflineIssueTests(unittest.TestCase):
                 self.assertEqual(replay.status_code, 409)
 
         asyncio.run(import_envelope())
+
+    def test_signed_image_receipt_probe_uses_container_api(self) -> None:
+        issue_receipt(self.record, self.key_path, self.output)
+        with patch("scripts.phase8_fleet_release_rehearsal.subprocess.run") as runner:
+            runner.return_value.stdout = b"201\n"
+            _post_receipt("a" * 64, self.output)
+        command = runner.call_args.args[0]
+        self.assertEqual(command[:4], ["docker", "exec", "-i", "a" * 64])
+        ast.parse(command[-1])
+        self.assertEqual(runner.call_args.kwargs["input"], self.output.read_bytes())
 
 
 if __name__ == "__main__":

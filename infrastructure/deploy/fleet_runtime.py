@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ from infrastructure.deploy.container_runtime import (
     RuntimeError, _archive_image_ids, _docker, _image_id,
 )
 from infrastructure.release.bundle import BundleError, verify_bundle
+from services.fleet.offline_import import key_id, load_import_key
 
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 _RUN = re.compile(r"sovereign-fleet-[0-9a-f]{12}\Z")
@@ -52,6 +54,54 @@ def validate_config(path: Path) -> str | None:
     except ValueError as exc:
         raise RuntimeError("invalid Fleet HTTPS issuer") from exc
     return issuer
+
+
+def _import_trust(state: Path) -> Path | None:
+    """Validate optional, separately provisioned offline receipt trust."""
+    root = state.parent / "receipt-import"
+    if not root.exists() and not root.is_symlink():
+        return None
+    if (root.is_symlink() or not root.is_dir() or
+            root.stat().st_uid != os.getuid() or
+            stat.S_IMODE(root.stat().st_mode) & 0o077):
+        raise RuntimeError("Fleet receipt trust directory must be owner-only")
+    manifest = root / "trusted-issuers.json"
+    if (manifest.is_symlink() or not manifest.is_file() or
+            manifest.stat().st_uid != os.getuid() or
+            stat.S_IMODE(manifest.stat().st_mode) & 0o077 or
+            manifest.stat().st_size > 4096):
+        raise RuntimeError("invalid Fleet receipt trust manifest")
+    try:
+        paths = json.loads(manifest.read_bytes())
+    except (ValueError, UnicodeError) as exc:
+        raise RuntimeError("invalid Fleet receipt trust manifest") from exc
+    if (not isinstance(paths, list) or not 1 <= len(paths) <= 4 or
+            paths != [f"/etc/fleet-import/issuer-{index}.pem"
+                      for index in range(1, len(paths) + 1)] or
+            {item.name for item in root.iterdir()} !=
+            {"trusted-issuers.json"} |
+            {f"issuer-{index}.pem" for index in range(1, len(paths) + 1)}):
+        raise RuntimeError("invalid Fleet receipt trust inventory")
+    try:
+        keys = [load_import_key(root / f"issuer-{index}.pem")
+                for index in range(1, len(paths) + 1)]
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("invalid Fleet receipt trust issuer") from exc
+    if len({key_id(key) for key in keys}) != len(keys):
+        raise RuntimeError("duplicate Fleet receipt trust issuer")
+    return root
+
+
+def _trust_digest(root: Path) -> str:
+    """Bind the manifest and public-key bytes to one installed runtime."""
+    digest = hashlib.sha256()
+    manifest = root / "trusted-issuers.json"
+    paths = json.loads(manifest.read_bytes())
+    for name in ("trusted-issuers.json",
+                 *(f"issuer-{index}.pem" for index in range(1, len(paths) + 1))):
+        raw = (root / name).read_bytes()
+        digest.update(name.encode("ascii") + b"\x00" + len(raw).to_bytes(4, "big") + raw)
+    return digest.hexdigest()
 
 
 def validate_state(state: Path, issuer: str | None = None) -> None:
@@ -100,6 +150,7 @@ def validate_state(state: Path, issuer: str | None = None) -> None:
                 ssl.create_default_context(cafile=str(ca))
             except ssl.SSLError as exc:
                 raise RuntimeError("invalid Fleet OIDC CA certificate") from exc
+    _import_trust(state)
 
 
 def stop_runtime(handle: FleetRuntime) -> None:
@@ -177,6 +228,7 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
         raise BundleError("Fleet runtime requires a signed Fleet bundle")
     issuer = validate_config(config)
     custom_ca = issuer is not None and (state.parent / "identity" / "ca.pem").exists()
+    import_trust = _import_trust(state)
     if issuer is None:
         if handle.identity_network_id is not None or handle.identity_network_name is not None:
             raise RuntimeError("lab Fleet runtime has unexpected identity network")
@@ -215,6 +267,8 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
                            if role == "fleet-api" and issuer is not None else
                            {"/state"} if role == "fleet-api" else
                            {"/srv/fleet-config.json"})
+        if role == "fleet-api" and import_trust is not None:
+            required_mounts.add("/etc/fleet-import")
         if {item.get("Destination") for item in mounts} != required_mounts or \
                 len(mounts) != len(required_mounts):
             raise RuntimeError("Fleet container mount set mismatch")
@@ -227,6 +281,13 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
                 selected[0].get("RW") is not writable):
             raise RuntimeError("Fleet container mount identity mismatch")
         if role == "fleet-api":
+            if import_trust is not None:
+                bound_trust = [item for item in mounts if item.get("Destination") ==
+                               "/etc/fleet-import"]
+                if (len(bound_trust) != 1 or bound_trust[0].get("Type") != "bind" or
+                        bound_trust[0].get("Source") != str(import_trust.resolve()) or
+                        bound_trust[0].get("RW") is not False):
+                    raise RuntimeError("Fleet receipt trust mount identity mismatch")
             if issuer is not None:
                 roles = state.parent / "identity" / "roles.json"
                 bound = [item for item in mounts if item.get("Destination") ==
@@ -247,6 +308,9 @@ def verify_runtime_identity(handle: FleetRuntime, bundle: Path,
                                              "{{json .Config.Env}}"))
             relevant = [item for item in environment if item.startswith("SOVEREIGN_FLEET_")]
             expected_env = {"SOVEREIGN_FLEET_DB=/state/fleet.db"}
+            if import_trust is not None:
+                expected_env.add("SOVEREIGN_FLEET_IMPORT_TRUST_FILE=/etc/fleet-import/trusted-issuers.json")
+                expected_env.add(f"SOVEREIGN_FLEET_IMPORT_TRUST_SHA256={_trust_digest(import_trust)}")
             if issuer is None:
                 expected_env.add("SOVEREIGN_FLEET_TOKEN_FILE=/state/token")
             else:
@@ -281,6 +345,7 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
         raise BundleError("Fleet runtime requires a signed Fleet bundle")
     issuer = validate_config(config)
     validate_state(state, issuer)
+    import_trust = _import_trust(state)
     if (issuer is None) != (identity_network is None):
         raise RuntimeError("Fleet identity mode and network do not match")
     identity_id = _identity_network(identity_network) if identity_network else None
@@ -303,6 +368,11 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
             "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
             "--mount", f"type=bind,source={state.resolve()},target=/state",
             "-e", "SOVEREIGN_FLEET_DB=/state/fleet.db"]
+        if import_trust is not None:
+            api_args.extend((
+                "--mount", f"type=bind,source={import_trust.resolve()},target=/etc/fleet-import,readonly",
+                "-e", "SOVEREIGN_FLEET_IMPORT_TRUST_FILE=/etc/fleet-import/trusted-issuers.json",
+                "-e", f"SOVEREIGN_FLEET_IMPORT_TRUST_SHA256={_trust_digest(import_trust)}"))
         if issuer is None:
             api_args.extend(("-e", "SOVEREIGN_FLEET_TOKEN_FILE=/state/token"))
         else:
