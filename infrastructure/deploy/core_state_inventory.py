@@ -57,3 +57,20 @@ def source_files(state: Path) -> list[Path]:
         return [source_dir / name for name in sorted(names)]
     except (OSError, UnicodeError, csv.Error) as exc:
         raise ValueError("invalid synthetic source inventory") from exc
+
+
+def stage_source_inventory(state: Path, destination: Path) -> list[Path]:
+    """Freeze a digest-checked manifest and sources in a private directory."""
+    original = source_files(state)
+    destination.mkdir(mode=0o700)
+    (destination / "sources").mkdir(mode=0o700)
+    manifest = read_regular_file(state / "manifest.csv", 1024 * 1024)
+    staged_manifest = destination / "manifest.csv"
+    staged_manifest.write_bytes(manifest)
+    staged_manifest.chmod(0o600)
+    for source in original:
+        payload = read_source_bytes(state, f"sources/{source.name}", MAX_SOURCE_BYTES)
+        staged = destination / "sources" / source.name
+        staged.write_bytes(payload)
+        staged.chmod(0o600)
+    return source_files(destination)

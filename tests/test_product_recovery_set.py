@@ -155,6 +155,57 @@ class ProductRecoverySetTests(unittest.TestCase):
             backup.assert_not_called()
             (state / "sources" / "EXTRA.txt").unlink(missing_ok=True)
 
+    def test_capture_uses_private_frozen_manifest_and_source(self) -> None:
+        state = self.install / "core-state"
+        def core(spec: Path, *_args) -> dict[str, object]:
+            rows = {row["name"]: Path(row["source"])
+                    for row in json.loads(spec.read_text())["files"]}
+            for name in ("manifest.csv", "sources/ENG-001.txt"):
+                self.assertNotEqual(rows[name], state / name)
+                self.assertEqual(rows[name].read_bytes(), (state / name).read_bytes())
+                self.assertEqual(rows[name].stat().st_mode & 0o077, 0)
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            self._create()
+        self.assertTrue(self.receipt.is_file())
+
+    def test_live_source_change_during_capture_leaves_no_receipt(self) -> None:
+        state = self.install / "core-state"
+        def core(spec: Path, *_args) -> dict[str, object]:
+            rows = {row["name"]: Path(row["source"])
+                    for row in json.loads(spec.read_text())["files"]}
+            (state / "sources" / "ENG-001.txt").write_text("changed during capture")
+            self.assertEqual(rows["sources/ENG-001.txt"].read_bytes(), b"fictional")
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
+
+    def test_live_manifest_change_during_capture_leaves_no_receipt(self) -> None:
+        state = self.install / "core-state"
+        def core(spec: Path, *_args) -> dict[str, object]:
+            rows = {row["name"]: Path(row["source"])
+                    for row in json.loads(spec.read_text())["files"]}
+            with (state / "manifest.csv").open("a") as stream:
+                stream.write("\n")
+            self.assertNotEqual(rows["manifest.csv"].read_bytes(),
+                                (state / "manifest.csv").read_bytes())
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot", side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(RecoverySetError, "manifest changed"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
+
     def test_running_product_or_second_backup_failure_leaves_no_receipt(self) -> None:
         with patch("infrastructure.deploy.product_recovery_set._require_stopped",
                    side_effect=RecoverySetError("runtime running")), \

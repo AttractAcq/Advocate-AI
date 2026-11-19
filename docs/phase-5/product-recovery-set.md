@@ -25,6 +25,13 @@ requires every listed source to be a regular flat file with the listed SHA-256,
 rejects missing or extra files, and includes each listed source in the encrypted
 snapshot. Receipt-bound restore repeats that check and requires the snapshot
 file count to match the restored source inventory before runtime activation.
+Capture copies the manifest and its sources into a private owner-only staging
+directory, rechecks their digests there, and gives that frozen copy to restic.
+It checks the live source inventory and manifest again before signing the
+receipt; a change during capture leaves no receipt. This guards the synthetic
+source pair against an external writer while restic copies it. The knowledge
+index, other services and vessel NAS still need a coordinated production
+snapshot procedure.
 This path is bounded to 122 sources of at most 8 MiB each (the current fixture
 has 100); larger vessel datasets require a separate production design.
 
