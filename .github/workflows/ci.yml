@@ -231,6 +231,8 @@ jobs:
           docker pull "$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)"
       - name: Exercise Keycloak PKCE and Fleet role mapping
         run: .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal
+      - name: Rehearse encrypted Keycloak clean recovery
+        run: .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --recovery
 
   fleet-browser-https-rehearsal:
     if: github.event_name == 'pull_request'

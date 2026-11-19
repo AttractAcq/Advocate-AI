@@ -18,6 +18,7 @@ import ssl
 
 import jwt
 
+from infrastructure.backup import BackupError, create_backup, generate_key, inspect_backup
 from scripts.phase8_fleet_browser_rehearsal import FLEET, certificate, driver_request, until
 from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, ISSUER, _identity_material
 
@@ -208,6 +209,20 @@ def _api_token(api: str, token: str, allowed: bool) -> None:
     _run("docker", "exec", api, "python", "-c", script)
 
 
+def _run_flow(api: str, flow: str) -> dict[str, object]:
+    # Docker's embedded DNS can briefly return EAI_AGAIN while an application
+    # network is settling. Retry only that transport error with a fresh PKCE
+    # exchange; assertion and authorization failures still fail immediately.
+    for attempt in range(3):
+        try:
+            return json.loads(_run("docker", "exec", api, "python", "-c", flow))
+        except RuntimeError as error:
+            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 2:
+                raise
+            time.sleep(1)
+    raise AssertionError("unreachable PKCE retry state")
+
+
 def _admin_rotate(api: str, password: str, action: str, old_kid: str,
                   old_provider: str = "", new_kid: str = "") -> dict[str, object]:
     script = (_ADMIN_ROTATE.replace("__ISSUER__", repr(ISSUER))
@@ -217,6 +232,117 @@ def _admin_rotate(api: str, password: str, action: str, old_kid: str,
               .replace("__OLD_PROVIDER__", repr(old_provider))
               .replace("__NEW_KID__", repr(new_kid)))
     return json.loads(_run("docker", "exec", api, "python", "-c", script))
+
+
+def _checked_realm_restore(archive: Path, key: Path, destination: Path,
+                           trusted_sha256: str) -> None:
+    """Require a separately retained checkpoint before decrypting an export."""
+    actual = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if not hmac.compare_digest(actual, trusted_sha256):
+        raise BackupError("Keycloak archive is stale or differs from trusted checkpoint")
+    manifest = inspect_backup(archive, key, destination)
+    if [row["name"] for row in manifest["files"]] != ["fleet-realm.json"]:
+        raise BackupError("unexpected Keycloak export inventory")
+    realm = json.loads((destination / "fleet-realm.json").read_text())
+    if realm.get("realm") != "fleet" or not realm.get("users"):
+        raise BackupError("restored Keycloak realm or users are missing")
+
+
+def _backup_realm(source: Path, root: Path, archive: Path, key: Path) -> str:
+    spec = root / (archive.stem + "-spec.json")
+    spec.write_text(json.dumps({"schema": 1, "files": [{"name": "fleet-realm.json",
+        "kind": "file", "source": str(source)}]}))
+    spec.chmod(0o600)
+    create_backup(spec, archive, key)
+    return hashlib.sha256(archive.read_bytes()).hexdigest()
+
+
+def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
+                      identity_network: str, keycloak_ip: str, certs: Path,
+                      data_volume: str, flow: str,
+                      stale_archive: Path, backup_key: Path) -> dict[str, str]:
+    _run("docker", "stop", keycloak)
+    exported = root / "exported"
+    exported.mkdir(mode=0o777)
+    exported.chmod(0o777)
+    _run("docker", "run", "--rm", "--network", "none",
+         "--mount", f"type=volume,source={data_volume},target=/opt/keycloak/data",
+         "--mount", f"type=bind,source={exported},target=/synthetic-export",
+         reference, "export", "--realm", "fleet", "--users", "realm_file",
+         "--dir", "/synthetic-export", timeout=180)
+    exported_realm = exported / "fleet-realm.json"
+    if not exported_realm.is_file():
+        raise AssertionError("stopped Keycloak did not export the Fleet realm")
+    archive = root / "current.svbk"
+    checkpoint = _backup_realm(exported_realm, root, archive, backup_key)
+    for candidate, expected in ((stale_archive, checkpoint), (archive, "0" * 64)):
+        try:
+            _checked_realm_restore(candidate, backup_key, root / "rejected", expected)
+        except BackupError:
+            pass
+        else:
+            raise AssertionError("stale Keycloak archive passed checkpoint")
+    altered = root / "altered.svbk"
+    payload = bytearray(archive.read_bytes())
+    payload[len(payload) // 2] ^= 1
+    altered.write_bytes(payload)
+    altered.chmod(0o600)
+    try:
+        _checked_realm_restore(altered, backup_key, root / "rejected",
+                               hashlib.sha256(payload).hexdigest())
+    except BackupError:
+        pass
+    else:
+        raise AssertionError("altered Keycloak archive authenticated")
+    restored = root / "restored"
+    _checked_realm_restore(archive, backup_key, restored, checkpoint)
+    # The disposable Keycloak UID differs from the CI runner UID. This export
+    # contains fictional lab identity data and is deleted with this test.
+    restored.chmod(0o755)
+    (restored / "fleet-realm.json").chmod(0o644)
+    _run("docker", "rm", keycloak)
+    # Recreate identity service from the verified export; no old database or
+    # import directory is mounted into this second instance.
+    _run("docker", "run", "-d", "--name", keycloak,
+         "--network", identity_network, "--network-alias", IDENTITY_HOST,
+         "--ip", keycloak_ip,
+         "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
+         "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
+         "--mount", f"type=bind,source={restored},target=/opt/keycloak/data/import,readonly",
+         reference, "start-dev", "--import-realm", "--http-enabled=false",
+         "--hostname=" + ISSUER.removesuffix("/realms/fleet"),
+         "--https-port=443", "--https-certificate-file=/tmp/fleet-cert.pem",
+         "--https-certificate-key-file=/tmp/fleet-key.pem")
+    for _ in range(90):
+        probe = subprocess.run(["docker", "exec", api, "python", "-c",
+            "import httpx; assert httpx.get('" + ISSUER +
+            "/protocol/openid-connect/certs', verify='/etc/fleet-ca.pem', "
+            "trust_env=False, timeout=3).status_code == 200"],
+            capture_output=True, timeout=10)
+        if probe.returncode == 0:
+            break
+        time.sleep(1)
+    else:
+        logs = subprocess.run(["docker", "logs", "--tail", "30", keycloak],
+                              capture_output=True, text=True)
+        raise AssertionError("restored Keycloak did not become ready: " +
+                             logs.stderr[-1600:])
+    _run("docker", "restart", api)
+    for _ in range(20):
+        probe = subprocess.run(["docker", "exec", api, "python", "-c",
+            "import httpx; assert httpx.get('http://127.0.0.1:18800/health', "
+            "trust_env=False, timeout=2).status_code == 200"],
+            capture_output=True, timeout=5)
+        if probe.returncode == 0:
+            break
+        time.sleep(0.5)
+    else:
+        raise AssertionError("Fleet API did not restart after identity restore")
+    result = _run_flow(api, flow)
+    result.pop("access_token")
+    assert result["fleet_role"] == "fleet_admin" and result["lab_token"] == "denied"
+    return {"keycloak_recovery": "clean-export-import-authorized",
+            "stale_archive": "denied", "altered_archive": "denied"}
 
 
 def _totp(secret: str, offset: int = 0, at: float | None = None) -> str:
@@ -342,9 +468,11 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
 
 
 def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
-             mfa: bool = False) -> dict[str, str]:
+             mfa: bool = False, recovery: bool = False) -> dict[str, str]:
     if mfa and not browser:
         raise ValueError("MFA rehearsal requires the browser")
+    if recovery and (mfa or browser):
+        raise ValueError("clean recovery uses the non-browser fictional realm")
     image = json.loads(Path("infrastructure/lab/container-image.json").read_text())
     if image.get("schema") != 1 or image.get("purpose") != "synthetic Keycloak lab only":
         raise ValueError("unapproved Keycloak lab image configuration")
@@ -354,6 +482,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
     app_network = "fleet-keycloak-app-" + suffix
     browser_network = "fleet-keycloak-browser-" + suffix
     keycloak = "fleet-keycloak-" + suffix
+    data_volume = "fleet-keycloak-data-" + suffix
     api = "fleet-keycloak-api-" + suffix
     portal = "fleet-keycloak-portal-" + suffix
     with tempfile.TemporaryDirectory() as directory:
@@ -368,6 +497,11 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         admin_password = "synthetic-rotator-" + uuid.uuid4().hex
         (realm / "fleet-realm.json").write_text(json.dumps(_realm(password, mfa)))
         (realm / "fleet-realm.json").chmod(0o644)
+        stale_archive = root / "stale.svbk"
+        backup_key = root / "backup.key"
+        if recovery:
+            generate_key(backup_key)
+            _backup_realm(realm / "fleet-realm.json", root, stale_archive, backup_key)
         state = root / "state"
         state.mkdir(mode=0o700)
         roles = root / "roles.json"
@@ -383,6 +517,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         _run("docker", "network", "create", "--internal", "--label",
              "sovereign.fleet.identity=true", identity_network)
         _run("docker", "network", "create", "--internal", app_network)
+        if recovery:
+            _run("docker", "volume", "create", data_volume)
         if browser:
             # This test-only bridge permits host loopback ingress. The API
             # remains exclusively on the two internal application networks.
@@ -395,6 +531,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                  *(["--publish", "127.0.0.3:443:443"] if browser else []),
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
                  "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
+                 *(["--mount", f"type=volume,source={data_volume},target=/opt/keycloak/data"]
+                   if recovery else []),
                  "--mount", f"type=bind,source={realm},target=/opt/keycloak/data/import,readonly",
                  "--env", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-rotator",
                  "--env", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + admin_password,
@@ -462,14 +600,13 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
             else:
                 flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
                     "__PASSWORD__", repr(password))
-                outcome = json.loads(_run("docker", "exec", api, "python", "-c", flow))
+                outcome = _run_flow(api, flow)
                 old_token = outcome.pop("access_token")
                 if not browser:
                     old_kid = jwt.get_unverified_header(old_token)["kid"]
                     added = _admin_rotate(api, admin_password, "add", old_kid)
                     new_kid = added["new_kid"]
-                    new_outcome = json.loads(_run("docker", "exec", api,
-                                                  "python", "-c", flow))
+                    new_outcome = _run_flow(api, flow)
                     new_token = new_outcome.pop("access_token")
                     assert jwt.get_unverified_header(new_token)["kid"] == new_kid
                     _api_token(api, old_token, True)
@@ -491,6 +628,10 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                     _api_token(api, old_token, False)
                     _api_token(api, new_token, True)
                     outcome["keycloak_rotation"] = "overlap-old-key-retired"
+                    if recovery:
+                        outcome.update(_recover_keycloak(root, reference, keycloak, api,
+                            identity_network, keycloak_ip, certs, data_volume, flow,
+                            stale_archive, backup_key))
             if browser:
                 try:
                     with urlopen("http://127.0.0.1:18080/", timeout=3) as response:
@@ -528,12 +669,16 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                 subprocess.run(["docker", "rm", "-f", name], capture_output=True)
             for name in (app_network, identity_network, *([browser_network] if browser else [])):
                 subprocess.run(["docker", "network", "rm", name], capture_output=True)
+            if recovery:
+                subprocess.run(["docker", "volume", "rm", data_volume], capture_output=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--mfa", action="store_true")
+    parser.add_argument("--recovery", action="store_true")
     parser.add_argument("--chromedriver", default=os.environ.get("CHROMEDRIVER", "chromedriver"))
     arguments = parser.parse_args()
-    print(json.dumps(rehearse(arguments.browser, arguments.chromedriver, arguments.mfa), sort_keys=True))
+    print(json.dumps(rehearse(arguments.browser, arguments.chromedriver,
+                             arguments.mfa, arguments.recovery), sort_keys=True))
