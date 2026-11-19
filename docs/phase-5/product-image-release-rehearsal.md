@@ -33,6 +33,12 @@ the policy and upload locks. The receipt binds the fresh Core and upload restic
 snapshot IDs and capture window. A second clean installation uses exactly that
 pair before starting the signed images. It checks the restored pending record
 through Core and confirms it is still absent from approved sources.
+Before capture, the rehearsal expands the synthetic source manifest to all 100
+fictional fixture files. The signed recovery path copies them through real
+restic, then verifies every restored source against the manifest and expects
+the corresponding 106-file Core snapshot. The Phase 3 passage index remains
+the one-source test index; full multi-source retrieval quality remains separate
+work.
 
 This proves the evidence pipeline can process the product images rather than
 only the small fictional test archive. It does not yet produce an approved

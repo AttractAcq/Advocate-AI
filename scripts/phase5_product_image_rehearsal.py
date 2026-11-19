@@ -30,11 +30,26 @@ from infrastructure.deploy.product_recovery_set import (
     verify_product_recovery_set,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
+from infrastructure.deploy.core_state_inventory import source_files
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
 from services.policy.audit import verify as verify_audit
-from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
+from scripts.phase5_core_state_restore import ROOT, PASSPHRASE, _probe, snapshot_synthetic_state
+
+
+def _expand_recovery_sources(state: Path) -> int:
+    """Install the complete fictional manifest after the signed runtime stops."""
+    fixtures = ROOT / "fixtures"
+    for source in (fixtures / "sources").iterdir():
+        if source.is_symlink() or not source.is_file():
+            raise AssertionError("unsafe fictional recovery fixture")
+        shutil.copyfile(source, state / "sources" / source.name)
+    shutil.copyfile(fixtures / "manifest.csv", state / "manifest.csv")
+    count = len(source_files(state))
+    if count != 100:
+        raise AssertionError("fictional recovery inventory is incomplete")
+    return count
 
 _UPLOAD_PROBE = r'''
 import hashlib, json, sys, urllib.request
@@ -374,6 +389,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     finally:
                         active_state = json.loads((install_root / "product-state.json").read_text())
                         stop_runtime(RuntimeHandle(**active_state["runtime"]))
+                    recovery_sources = _expand_recovery_sources(state)
                     core_repository = state_root / "coordinated-core-repository"
                     upload_repository = state_root / "upload-repository"
                     receipt_path = root / "coordinated-recovery-set.json"
@@ -396,13 +412,15 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         emergency_credential)
                     try:
                         recovered_state = json.loads((recovered_root / "product-state.json").read_text())
+                        if len(source_files(recovered_root / "core-state")) != recovery_sources:
+                            raise AssertionError("restored fictional source inventory mismatch")
                         recovered_core = str(recovered_state["runtime"]["core_id"])
                         recovered_upload = json.loads(_docker(
                             "exec", recovered_core, "python", "-c", _UPLOAD_PROBE,
                             "late", staged_id))
                         recovered_audit = recovered_root / "core-state" / "audit.jsonl"
                         recovered_count, _ = verify_audit(recovered_audit)
-                        if (combined["restored_files"] != 7 or
+                        if (combined["restored_files"] != recovery_sources + 6 or
                                 not recovered_audit.read_bytes().startswith(audit_before) or
                                 recovered_count <= audit_count or
                                 combined["restored_upload_files"] != 2 or
@@ -415,6 +433,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             "upload_snapshot_id": recovery_set["upload_snapshot_id"],
                             "signed_receipt": "verified",
                             "audit_continuity": "verified",
+                            "sources_restored": recovery_sources,
                         }
                     finally:
                         recovered_state = json.loads((recovered_root / "product-state.json").read_text())
