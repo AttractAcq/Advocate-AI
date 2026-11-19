@@ -17,11 +17,12 @@ def _canonical(value: dict[str, object]) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def verify(path: Path) -> tuple[int, str]:
+def _verified_state(path: Path) -> tuple[int, str, datetime | None]:
     previous = ZERO
     count = 0
+    latest: datetime | None = None
     if not path.exists():
-        return count, previous
+        return count, previous, latest
     with path.open("rb") as stream:
         for line in stream:
             if not line.endswith(b"\n"):
@@ -29,12 +30,26 @@ def verify(path: Path) -> tuple[int, str]:
             item = json.loads(line)
             if not isinstance(item, dict) or item.get("sequence") != count + 1 or item.get("previous_hash") != previous:
                 raise ValueError("audit sequence or previous hash changed")
+            try:
+                timestamp = datetime.fromisoformat(item["timestamp"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("audit timestamp is invalid") from exc
+            if timestamp.tzinfo is None or (latest is not None and timestamp < latest):
+                raise ValueError("audit timestamp regressed")
             digest = item.pop("record_hash", None)
             expected = hashlib.sha256(previous.encode() + _canonical(item)).hexdigest()
             if digest != expected:
                 raise ValueError("audit record changed")
             previous = expected
             count += 1
+            latest = timestamp
+    return count, previous, latest
+
+
+def verify(path: Path, *, require_current_clock: bool = False) -> tuple[int, str]:
+    count, previous, latest = _verified_state(path)
+    if require_current_clock and latest is not None and datetime.now(timezone.utc) < latest:
+        raise ValueError("local clock precedes the last audit event")
     return count, previous
 
 
@@ -43,18 +58,21 @@ class AuditLog:
         self.path = path
         self._lock = RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._count, self._previous = verify(path)
+        self._count, self._previous, self._latest = _verified_state(path)
 
     def append(self, *, actor: str, action: str, resource: str, decision: str,
                policy_version: str, correlation_id: str | None = None) -> str:
         with self._lock:
-            count, previous = verify(self.path)
-            if (count, previous) != (self._count, self._previous):
+            count, previous, latest = _verified_state(self.path)
+            if (count, previous, latest) != (self._count, self._previous, self._latest):
                 raise ValueError("audit trail changed externally")
+            now = datetime.now(timezone.utc)
+            if latest is not None and now < latest:
+                raise ValueError("local clock precedes the last audit event")
             correlation_id = correlation_id or str(uuid.uuid4())
             event: dict[str, object] = {
                 "sequence": count + 1, "previous_hash": previous,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": now.isoformat(),
                 "actor": actor[:80], "action": action[:80], "resource": resource[:80],
                 "decision": decision, "policy_version": policy_version,
                 "correlation_id": correlation_id,
@@ -67,5 +85,5 @@ class AuditLog:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-            self._count, self._previous = count + 1, digest
+            self._count, self._previous, self._latest = count + 1, digest, now
             return correlation_id

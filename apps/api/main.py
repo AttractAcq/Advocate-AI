@@ -188,7 +188,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if audit is None or not request.url.path.startswith("/api/"):
             return await call_next(request)
         try:
-            verify_audit(audit.path)
+            verify_audit(audit.path, require_current_clock=True)
             policy_version = hashlib.sha256((settings.fixture_root / "roles.json").read_bytes()).hexdigest()
         except (OSError, ValueError, json.JSONDecodeError):
             return JSONResponse({"detail": "audit unavailable"}, status_code=503)

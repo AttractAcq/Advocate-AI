@@ -184,15 +184,25 @@ class FleetCatalog:
     @staticmethod
     def _verify(connection: sqlite3.Connection) -> None:
         previous = "0" * 64
+        latest_at: datetime | None = None
         latest: dict[tuple[str, str], str] = {}
         for row in connection.execute("SELECT at, action, kind, code, digest, prev_hash, "
                                       "chain_hash FROM audit ORDER BY seq"):
             event = {key: row[key] for key in ("at", "action", "kind", "code", "digest")}
+            try:
+                at = datetime.fromisoformat(row["at"])
+            except (TypeError, ValueError) as exc:
+                raise FleetIntegrityError("Fleet audit timestamp is invalid") from exc
+            if at.tzinfo is None or (latest_at is not None and at < latest_at):
+                raise FleetIntegrityError("Fleet audit timestamp regressed")
             calculated = hashlib.sha256(previous.encode() + _canonical(event)).hexdigest()
             if row["prev_hash"] != previous or row["chain_hash"] != calculated:
                 raise FleetIntegrityError("Fleet audit chain failed verification")
             previous = calculated
+            latest_at = at
             latest[(row["kind"], row["code"])] = row["digest"]
+        if latest_at is not None and datetime.now(timezone.utc) < latest_at:
+            raise FleetIntegrityError("local clock precedes the last Fleet audit event")
         seen: set[tuple[str, str]] = set()
         for row in connection.execute("SELECT kind, code, payload FROM records"):
             key = row["kind"], row["code"]
@@ -222,10 +232,13 @@ class FleetCatalog:
     @staticmethod
     def _append_audit(connection: sqlite3.Connection, action: str, kind: str,
                       code: str, payload: str) -> None:
-        last = connection.execute("SELECT chain_hash FROM audit ORDER BY seq DESC "
+        last = connection.execute("SELECT chain_hash, at FROM audit ORDER BY seq DESC "
                                   "LIMIT 1").fetchone()
         previous = last["chain_hash"] if last else "0" * 64
-        at = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        if last is not None and now < datetime.fromisoformat(last["at"]):
+            raise FleetIntegrityError("local clock precedes the last Fleet audit event")
+        at = now.isoformat()
         event = {"at": at, "action": action, "kind": kind,
                  "code": code, "digest": _digest(payload)}
         chain = hashlib.sha256(previous.encode() + _canonical(event)).hexdigest()
