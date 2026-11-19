@@ -162,6 +162,24 @@ class ProductRecoverySetTests(unittest.TestCase):
         backup.assert_not_called()
         self.assertFalse(self.receipt.exists())
 
+    def test_fabricated_knowledge_passage_denies_capture(self) -> None:
+        state = self.install / "core-state"
+        with (state / "manifest.csv").open(newline="") as stream:
+            row = next(csv.DictReader(stream))
+        manifest = state / "knowledge-manifest.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [row]}))
+        database = state / "knowledge.db"
+        sync_manifest(state, manifest, database)
+        with sqlite3.connect(database) as connection:
+            connection.execute("UPDATE passages SET text=? WHERE document_id=?",
+                               ("fabricated answer", "ENG-001"))
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot") as backup:
+            with self.assertRaisesRegex(ValueError, "passages differ"):
+                self._create()
+        backup.assert_not_called()
+        self.assertFalse(self.receipt.exists())
+
     def test_knowledge_manifest_change_during_capture_leaves_no_receipt(self) -> None:
         state = self.install / "core-state"
         with (state / "manifest.csv").open(newline="") as stream:

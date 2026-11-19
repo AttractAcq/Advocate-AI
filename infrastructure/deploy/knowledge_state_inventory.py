@@ -12,6 +12,9 @@ from urllib.parse import quote
 
 from infrastructure.backup import MAX_FILE
 from infrastructure.deploy.core_state_inventory import FIELDS, source_files
+from services.knowledge.ingestion import (
+    _parse_verified_bytes, _valid_source, chunks, parse_local,
+)
 from services.knowledge.manifest_io import load_manifest, read_manifest_bytes
 from services.policy.regular_file import read_regular_file
 
@@ -71,8 +74,11 @@ def verify_knowledge_pair(root: Path) -> int:
                 "version,sha256,source_type,state FROM sources").fetchall()
             quarantine = {row[0] for row in connection.execute(
                 "SELECT document_id FROM quarantine")}
-            passage_counts = {row[0]: row[1] for row in connection.execute(
-                "SELECT document_id,COUNT(*) FROM passages GROUP BY document_id")}
+            passages: dict[str, list[tuple[int, str]]] = {}
+            for document_id, ordinal, content in connection.execute(
+                    "SELECT document_id,ordinal,text FROM passages "
+                    "ORDER BY document_id,ordinal"):
+                passages.setdefault(document_id, []).append((ordinal, content))
     except sqlite3.DatabaseError as exc:
         raise ValueError("invalid synthetic knowledge database") from exc
     ready: set[str] = set()
@@ -81,12 +87,19 @@ def verify_knowledge_pair(root: Path) -> int:
         item = listed.get(document_id)
         if (item is None or document_id in ready or row[-1] != "ready"
                 or any(str(item[key]) != row[index + 1]
-                       for index, key in enumerate(_METADATA))
-                or passage_counts.get(document_id, 0) < 1):
+                       for index, key in enumerate(_METADATA))):
             raise ValueError("knowledge index differs from approved manifest")
+        try:
+            suffix, _, payload = _valid_source(root, item)
+            expected = list(enumerate(chunks(
+                _parse_verified_bytes(payload, suffix, parse_local))))
+        except (OSError, ValueError, UnicodeError, RuntimeError, ImportError) as exc:
+            raise ValueError("approved source cannot be re-parsed for recovery") from exc
+        if passages.get(document_id) != expected:
+            raise ValueError("knowledge passages differ from approved source")
         ready.add(document_id)
     if (ready & quarantine or ready | quarantine != set(listed)
-            or set(passage_counts) != ready):
+            or set(passages) != ready):
         raise ValueError("knowledge index has incomplete source state")
     return len(ready)
 
