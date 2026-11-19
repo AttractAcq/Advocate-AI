@@ -162,6 +162,25 @@ class ProductRecoverySetTests(unittest.TestCase):
         backup.assert_not_called()
         self.assertFalse(self.receipt.exists())
 
+    def test_knowledge_manifest_change_during_capture_leaves_no_receipt(self) -> None:
+        state = self.install / "core-state"
+        with (state / "manifest.csv").open(newline="") as stream:
+            row = next(csv.DictReader(stream))
+        manifest = state / "knowledge-manifest.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [row]}))
+        sync_manifest(state, manifest, state / "knowledge.db")
+        def core(*_args) -> dict[str, object]:
+            manifest.write_text(json.dumps({"schema": 1, "sources": [row]}, indent=2))
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot",
+                   side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            with self.assertRaisesRegex(RecoverySetError, "knowledge manifest changed"):
+                self._create()
+        self.assertFalse(self.receipt.exists())
+
     def test_manifest_inventory_captures_all_sources(self) -> None:
         state = self.install / "core-state"
         with (state / "manifest.csv").open("a", newline="") as stream:
