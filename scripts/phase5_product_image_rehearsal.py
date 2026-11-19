@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
 from pathlib import Path
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -34,6 +36,7 @@ from infrastructure.deploy.core_state_inventory import source_files
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from services.knowledge.ingestion import sync_manifest
 from services.policy.audit import verify as verify_audit
 from scripts.phase5_core_state_restore import ROOT, PASSPHRASE, _probe, snapshot_synthetic_state
 
@@ -49,6 +52,15 @@ def _expand_recovery_sources(state: Path) -> int:
     count = len(source_files(state))
     if count != 100:
         raise AssertionError("fictional recovery inventory is incomplete")
+    with (state / "manifest.csv").open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    manifest = state / "knowledge-manifest.json"
+    manifest.write_text(json.dumps({"schema": 1, "sources": rows}, sort_keys=True))
+    indexed = sync_manifest(state, manifest, state / "knowledge.db")
+    with sqlite3.connect(state / "knowledge.db") as database:
+        ready = database.execute("SELECT COUNT(*) FROM sources WHERE state='ready'").fetchone()[0]
+    if ready != count or indexed["quarantined"]:
+        raise AssertionError("fictional recovery index is incomplete")
     return count
 
 _UPLOAD_PROBE = r'''
@@ -75,8 +87,50 @@ assert len(uploads) == 1 and uploads[0]["id"] == expected_id and uploads[0]["sta
 sources = json.load(urllib.request.urlopen(
     urllib.request.Request(base + "/api/sources", headers=headers), timeout=5))["sources"]
 assert all(item["document_id"] != "synthetic-note" for item in sources)
-assert len(sources) == (0 if phase == "late" else 1)
+assert len(sources) == (20 if phase == "recovered" else 0 if phase == "late" else 1)
 print(json.dumps({"upload_id":expected_id, "status":"pending", "source_count":len(sources)}))
+'''
+
+_RECOVERED_INDEX_PROBE = r'''
+import json, sys, urllib.error, urllib.request
+base = "http://127.0.0.1:18100"
+password = open("/run/secrets/lab-password", encoding="utf-8").read().strip()
+def login(user):
+    request = urllib.request.Request(base + "/api/login",
+        data=json.dumps({"user_id":user,"password":password}).encode(),
+        headers={"Content-Type":"application/json"})
+    return json.load(urllib.request.urlopen(request, timeout=5))["access_token"]
+def get(path, token):
+    request = urllib.request.Request(base + path,
+        headers={"Authorization":"Bearer " + token})
+    return json.load(urllib.request.urlopen(request, timeout=5))
+captain = login("lab-captain-1")
+chief = login("lab-chief_engineer-1")
+deck = login("lab-deckhand-1")
+expected = {"captain": (captain, 80, {"management","engineering","interior","deck"}),
+            "chief": (chief, 20, {"deck"}), "deck": (deck, 20, {"deck"})}
+for role, (token, count, collections) in expected.items():
+    sources = get("/api/sources", token)["sources"]
+    assert len(sources) == count, role
+    assert {row["collection"] for row in sources} == collections, role
+    assert all(row["document_id"] != "RES-001" for row in sources), role
+assert get("/api/sources/MAN-002/preview", captain)["document_id"] == "MAN-002"
+for token, document in ((chief,"MAN-002"),(deck,"ENG-002"),(captain,"RES-001")):
+    try:
+        get("/api/sources/" + document + "/preview", token)
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 404
+    else:
+        raise AssertionError("cross-role source preview was disclosed")
+request = urllib.request.Request(base + "/api/search",
+    data=json.dumps({"query":"SYN-MANAGEMENT-002-ALPHA",
+                     "selected_documents":["MAN-002"]}).encode(),
+    headers={"Content-Type":"application/json", "Authorization":"Bearer " + captain})
+hits = json.load(urllib.request.urlopen(request, timeout=5))["results"]
+assert hits and all(row["document_id"] == "MAN-002" for row in hits)
+print(json.dumps({"ready_sources":100,"captain_sources":80,
+                  "chief_sources":20,"deck_sources":20,"cross_role_denied":True,
+                  "cited_search":True}))
 '''
 
 
@@ -417,7 +471,9 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                         recovered_core = str(recovered_state["runtime"]["core_id"])
                         recovered_upload = json.loads(_docker(
                             "exec", recovered_core, "python", "-c", _UPLOAD_PROBE,
-                            "late", staged_id))
+                            "recovered", staged_id))
+                        recovered_index = json.loads(_docker(
+                            "exec", recovered_core, "python", "-c", _RECOVERED_INDEX_PROBE))
                         recovered_audit = recovered_root / "core-state" / "audit.jsonl"
                         recovered_count, _ = verify_audit(recovered_audit)
                         if (combined["restored_files"] != recovery_sources + 6 or
@@ -425,6 +481,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                                 recovered_count <= audit_count or
                                 combined["restored_upload_files"] != 2 or
                                 recovered_upload["upload_id"] != staged_id or
+                                recovered_upload["source_count"] != 20 or
+                                recovered_index["ready_sources"] != recovery_sources or
                                 product_status(recovered_root, trusted)["active"] != combined["active"]):
                             raise AssertionError("checked upload restore did not activate")
                         result["combined_upload_restore"] = "encrypted-snapshot-activated"
@@ -434,6 +492,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             "signed_receipt": "verified",
                             "audit_continuity": "verified",
                             "sources_restored": recovery_sources,
+                            "indexed_permissions": recovered_index,
                         }
                     finally:
                         recovered_state = json.loads((recovered_root / "product-state.json").read_text())
