@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from services.knowledge.ingestion import MAX_BYTES, SUPPORTED, _valid_source
 from services.knowledge.inspection import inspect_document
 from services.knowledge.manifest_io import MAX_MANIFEST_BYTES, load_manifest, read_manifest_bytes
-from services.knowledge.upload_staging import _directory, _metadata
+from services.knowledge.upload_staging import _directory, _metadata, quarantine_directory_lock
 from services.policy.audit import AuditLog
 from services.policy.change import _canonical, _read_trust, _verify_approvals
 from services.policy.policy_file import load_policy, policy_directory_lock, read_policy_bytes
@@ -106,7 +106,8 @@ def create_proposal(source_root: Path, upload_root: Path, manifest: Path,
                     scan_profile: Path,
                     version: str = "1") -> bytes:
     _separate_roots(source_root, upload_root)
-    item, payload = _staged(upload_root, upload_id)
+    with quarantine_directory_lock(upload_root, exclusive=False):
+        item, payload = _staged(upload_root, upload_id)
     suffix = Path(str(item["filename"])).suffix.lower()
     inspection_profile_sha256 = inspect_document(payload, suffix, scan_profile)
     now = datetime.now(timezone.utc)
@@ -256,14 +257,16 @@ def apply_promotion(source_root: Path, upload_root: Path, manifest: Path,
     _separate_roots(source_root, upload_root)
     trust = _read_trust(trust_path)
     _verify_approvals(proposal_raw, approvals, trust, str(proposal["requested_by"]))
-    staged_item, staged_bytes = _staged(upload_root, str(proposal["upload_id"]))
+    with quarantine_directory_lock(upload_root, exclusive=False):
+        staged_item, staged_bytes = _staged(upload_root, str(proposal["upload_id"]))
     if (staged_item["sha256"] != proposal["upload_sha256"] or
             inspect_document(staged_bytes, str(proposal["suffix"]), scan_profile) !=
             proposal["inspection_profile_sha256"]):
         raise ApprovalError("signed inspection inputs changed")
     audit = AuditLog(audit_path)
     audit.check_clock()
-    with policy_directory_lock(source_root / "roles.json", exclusive=True):
+    with policy_directory_lock(source_root / "roles.json", exclusive=True), \
+            quarantine_directory_lock(upload_root, exclusive=True):
         item, raw = _staged(upload_root, str(proposal["upload_id"]))
         old_manifest = read_manifest_bytes(manifest)
         if (item["sha256"] != proposal["upload_sha256"] or
