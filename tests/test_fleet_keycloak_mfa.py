@@ -11,7 +11,8 @@ from scripts.phase8_fleet_keycloak_rehearsal import _realm, _totp
 class FleetKeycloakMfaTests(unittest.TestCase):
     def test_rfc6238_sha1_vector_with_six_digits(self) -> None:
         # RFC 6238 uses 8 digits; the configured lab realm uses the last 6.
-        secret = base64.b32encode(b"12345678901234567890").decode()
+        encoded = base64.b32encode(b"12345678901234567890").decode()
+        secret = " ".join(encoded[index:index + 4] for index in range(0, len(encoded), 4))
         self.assertEqual(_totp(secret, at=59), "287082")
 
     def test_mfa_realm_requires_otp_setup_only_when_selected(self) -> None:

@@ -187,8 +187,11 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
             until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-totp-settings-form')", 45)
             assert not driver_request("POST", f"/session/{session}/execute/sync", {
                 "script": "return location.href.startsWith('https://fleet.example.invalid/?code=')", "args": []})
+            driver_request("POST", f"/session/{session}/execute/sync", {
+                "script": "document.querySelector('#mode-manual').click()", "args": []})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-totp-secret-key')", 20)
             secret = driver_request("POST", f"/session/{session}/execute/sync", {
-                "script": "return document.querySelector('#totpSecret').value", "args": []})
+                "script": "return document.querySelector('#kc-totp-secret-key').textContent.trim()", "args": []})
             assert isinstance(secret, str) and 16 <= len(secret) <= 128
             driver_request("POST", f"/session/{session}/execute/sync", {"script": """
                 document.querySelector('input[name=totp]').value = arguments[0];
