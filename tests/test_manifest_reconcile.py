@@ -7,11 +7,26 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from services.knowledge.reconcile import ManifestReconciler
 
 
 class ManifestReconcilerTests(unittest.TestCase):
+    def test_oversized_manifest_does_not_reach_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "approved.json"
+            manifest.write_bytes(b"x" * 32)
+            calls = []
+            watcher = ManifestReconciler(root, manifest, root / "index.db",
+                                         sync=lambda *_: calls.append(True) or {})
+            with patch("services.knowledge.manifest_io.MAX_MANIFEST_BYTES", 16):
+                with self.assertRaisesRegex(ValueError, "size limit"):
+                    watcher.poll(now=0)
+            self.assertEqual(calls, [])
+            self.assertIsNotNone(watcher.poll(now=1))
+
     def test_change_and_periodic_scan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

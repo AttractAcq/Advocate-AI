@@ -13,6 +13,10 @@ The import records source ID, relative origin, owner, classification, collection
 version and SHA-256. Missing or changed source bytes fail closed. The worker
 reads only paths listed in the manifest under the approved root. The local
 database stores parsed passages and vectors, not a copy of the source file.
+Ingestion, retrieval and the poller now accept the approved manifest only as
+a regular, non-symlink file of at most 8 MiB. Oversized or linked input is
+rejected before JSON parsing; Core reports the knowledge source unavailable
+instead of using a prior index snapshot.
 The [synthetic reconciler](runbook.md) polls the approved manifest every
 30 seconds and runs `sync_manifest` when its digest changes; it also repeats a
 full source check every ten minutes. Unchanged approved sources skip parsing.
