@@ -52,7 +52,8 @@ snapshot, use `restore-install` instead of `install`:
   --restic /path/to/pinned-restic \
   --restic-sha256 exact-binary-sha256 \
   --lab-password-file /path/to/owner-only-lab-password \
-  --emergency-password-file /path/to/owner-only-emergency-password
+  --emergency-password-file /path/to/owner-only-emergency-password \
+  --enable-uploads
 ```
 
 The parent of the new root must be owner-only. The command verifies the signed
@@ -62,6 +63,17 @@ the restored Core state. It rejects an existing root. A failed restore or
 activation removes the new root when no active release was recorded. The two
 password files stay outside the signed bundle; their canonical paths are
 recorded in an owner-only mount record for subsequent runtime recovery.
+
+`--enable-uploads` is an explicit first-install choice for the synthetic lab.
+It creates `product-uploads` under the private install root, pins its canonical
+path in the Core mount record, and mounts it read/write at
+`/var/lib/sovereign-uploads` with `SOVEREIGN_UPLOAD_ROOT` set. It is separate
+from the restored source tree. `status`, update, rollback and recovery verify
+the mount source, write flag and environment; a missing or replaced directory
+fails closed. An existing installation cannot silently enable uploads later.
+The Core-state snapshot in this rehearsal does not include pending uploads;
+an encrypted backup and retention policy for this separate directory remain
+open before vessel use.
 
 For a synthetic Core state restored from restic, the first `install` can also
 specify `--core-state /path/to/restored` and
@@ -85,6 +97,11 @@ fails, the old one remains active. All ephemeral Core sessions are lost at
 switchover. The synthetic image rehearsal compares the old and new containers'
 mounted secret digests without recording the secret. This procedure does not
 approve production key custody or a vessel rotation schedule.
+
+The actual-image rehearsal also stages a fictional text upload through the
+installed Core API, verifies it remains absent from approved sources, and
+checks the pending record after the emergency runtime refresh. The test data
+is discarded with the disposable installation.
 
 The [CI product image rehearsal](product-image-release-rehearsal.md) creates
 two distinct ephemeral signed product versions, installs the first, rejects a

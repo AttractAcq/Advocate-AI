@@ -19,6 +19,12 @@ The job also attempts the [schema-4 product bundle](multi-image-release.md)
 containing both exact archives. A finding in either image must deny that
 bundle before any product package is signed.
 
+The signed-image installer leg opts into a separate private upload quarantine.
+It submits a fictional document through Core, verifies that the file is staged
+but absent from approved sources, and checks that the staged record survives a
+runtime refresh. This tests the mounted upload path in the actual container;
+it does not exercise vessel content or an approved production backup.
+
 This proves the evidence pipeline can process the product images rather than
 only the small fictional test archive. It does not yet produce an approved
 multi-image appliance package, authenticate base-image publishers, resolve the

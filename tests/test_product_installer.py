@@ -73,6 +73,48 @@ class ProductInstallerTests(unittest.TestCase):
             self.assertEqual(probe.call_args.args[1:],
                              (state.resolve(), credential.resolve(), None))
 
+    def test_upload_quarantine_is_pinned_across_release_changes(self) -> None:
+        state, credential = self._external_state()
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   side_effect=[self.old, self.new, self.old, self.new]) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime") as probe, \
+             patch("infrastructure.deploy.product_installer.verify_runtime_identity"), \
+             patch("infrastructure.deploy.product_installer.stop_runtime"):
+            first = install_product(self.first, self.key, self.crane, self.config,
+                                    self.root, state, credential, enable_uploads=True)
+            upload_root = (self.root / "product-uploads").resolve()
+            record = json.loads((self.root / "product-core-mount.json").read_text())
+            self.assertEqual(record["schema"], 3)
+            self.assertEqual(record["upload_root"], str(upload_root))
+            self.assertEqual(upload_root.stat().st_mode & 0o777, 0o700)
+            install_product(self.second, self.key, self.crane, self.config, self.root)
+            self.assertEqual(rollback_product(self.root, self.key, self.crane)["active"], first["active"])
+            probe.side_effect = ContainerRuntimeError("stopped")
+            self.assertEqual(recover_product(self.root, self.key, self.crane)["result"], "recovered")
+            for call in start.call_args_list:
+                self.assertEqual(call.kwargs["upload_root"], upload_root)
+            self.assertEqual(probe.call_args.kwargs["upload_root"], upload_root)
+            upload_root.rename(self.root / "moved-uploads")
+            with self.assertRaises(ProductInstallError):
+                product_status(self.root, self.key)
+
+    def test_uploads_cannot_be_attached_to_existing_legacy_install(self) -> None:
+        state, credential = self._external_state()
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle",
+                   return_value=self.old) as start, \
+             patch("infrastructure.deploy.product_installer.probe_runtime"):
+            install_product(self.first, self.key, self.crane, self.config,
+                            self.root, state, credential)
+            with self.assertRaises(ProductInstallError):
+                install_product(self.second, self.key, self.crane, self.config,
+                                self.root, enable_uploads=True)
+            self.assertEqual(start.call_count, 1)
+            self.assertFalse((self.root / "product-uploads").exists())
+
     def test_emergency_secret_persists_and_mount_record_rejects_tampering(self) -> None:
         state, credential = self._external_state()
         emergency = self.base / "emergency-password"
