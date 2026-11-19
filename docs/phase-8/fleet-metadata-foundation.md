@@ -190,6 +190,17 @@ approved offline process; production handoff and key revocation remain B-12.
 Receipt import requires `SOVEREIGN_FLEET_IMPORT_KEY_FILE` pointing to an
 owner-only regular PEM file containing the offline issuer's Ed25519 public
 key. If unset, import returns 503 while the rest of Fleet remains available.
+For a synthetic issuer rotation, set `SOVEREIGN_FLEET_IMPORT_TRUST_FILE`
+instead. It names an owner-only JSON file containing an array of one to four
+distinct absolute PEM paths, for example `["/protected/issuer-old.pem",
+"/protected/issuer-new.pem"]`. The two environment settings are mutually
+exclusive. Fleet loads the trust set at startup, selects the verifier by the
+envelope's `key_id`, and rejects unknown issuers before signature validation. Add the new public key
+and restart Fleet for an overlap window; remove the old key from the manifest
+and restart to retire it. Keep the manifest and each key owner-only. The
+database audit retains the issuer key ID for each accepted import. This is a
+local rotation mechanism; issuer approval, secure offline distribution,
+revocation timing and production key custody remain B-12.
 The API accepts a strict JSON envelope with `schema_version: 1`, `key_id`
 (SHA-256 of the raw 32-byte public key), `receipt` (the strict metadata-only
 record) and a standard Base64 `signature`. The issuer signs the ASCII bytes
