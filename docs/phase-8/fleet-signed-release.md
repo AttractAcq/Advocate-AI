@@ -280,6 +280,15 @@ period. The company must approve policy, archive media, legal holds and key
 custody before this process can govern production backups. Target systemd and
 protected-media behavior remain unverified.
 
+The actual-image Fleet release rehearsal now creates three encrypted catalog
+archives against a three-archive limit, confirms that a fourth is refused,
+reviews and applies an exact plan retaining the newest two, creates another
+archive, verifies its clean restore and uses it for the second signed Fleet
+installation. The retained result field is
+`archive_retention: reviewed-plan-applied-and-backup-resumed`. This exercises
+the host-side retention command with a catalog produced by the signed Fleet
+runtime; it does not establish an approved production retention policy.
+
 For boot recovery, render the Fleet one-shot unit into the same private staging
 area and validate it before installation. It waits for Docker, requires an
 installed Fleet state file, restarts the signed active release if unhealthy,
