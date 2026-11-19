@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from infrastructure.backup import BackupError, generate_key, inspect_backup
-from infrastructure.deploy.fleet_backup import backup_fleet, restore_fleet
+from infrastructure.deploy.fleet_backup import (
+    FleetBackupError, backup_fleet, restore_fleet,
+)
 from infrastructure.deploy.fleet_installer import restore_install_fleet
 from infrastructure.deploy.fleet_runtime import FleetRuntime
 from services.fleet.catalog import Customer, FleetCatalog, FleetIntegrityError
@@ -43,6 +46,16 @@ class FleetBackupTests(unittest.TestCase):
         self.assertEqual(FleetCatalog(restored / "fleet.db").list("customer")[0]["code"],
                          "CUST-LAB1")
         self.assertFalse((restored / "token").exists())
+
+    def test_low_archive_volume_space_rejects_before_snapshot(self) -> None:
+        with patch("infrastructure.deploy.fleet_backup.os.statvfs",
+                   return_value=SimpleNamespace(f_bavail=1, f_frsize=4096)):
+            with self.assertRaisesRegex(FleetBackupError, "insufficient Fleet backup"):
+                backup_fleet(self.db, self.archive, self.key)
+        self.assertFalse(self.archive.exists())
+        self.assertFalse(any(path.name.startswith(".fleet-backup-spec-") or
+                             path.name.startswith(".svbk-snapshot-")
+                             for path in self.root.iterdir()))
 
     def test_wrong_key_tamper_and_corrupt_catalog_fail_cleanly(self) -> None:
         backup_fleet(self.db, self.archive, self.key)
