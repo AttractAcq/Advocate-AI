@@ -198,11 +198,12 @@ def serve(folder: Path) -> None:
     identity.serve_forever()
 
 
-def driver_request(method: str, path: str, payload: dict | None = None) -> object:
+def driver_request(method: str, path: str, payload: dict | None = None,
+                   *, timeout: float = 15) -> object:
     raw = None if payload is None else json.dumps(payload).encode()
     request = Request(f"http://127.0.0.1:9515{path}", data=raw, method=method,
                       headers={"Content-Type": "application/json"})
-    with urlopen(request, timeout=15) as response:
+    with urlopen(request, timeout=timeout) as response:
         result = json.load(response)
     if isinstance(result.get("value"), dict) and result["value"].get("error"):
         raise RuntimeError(result["value"])
@@ -235,7 +236,8 @@ def run_browser(chromedriver: str) -> dict[str, str]:
                    "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
                        "--no-proxy-server", "--host-resolver-rules=MAP fleet.example.invalid 127.0.0.2,"
                        "MAP identity.example.invalid 127.0.0.3"]}}
-        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}})
+        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}},
+                                timeout=45)
         assert isinstance(result, dict)
         session = result["sessionId"]
         driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"})

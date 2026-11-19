@@ -370,7 +370,8 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                    "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
                        "--no-proxy-server", "--host-resolver-rules=MAP fleet.example.invalid 127.0.0.2,"
                        "MAP identity.fleet 127.0.0.3"]}}
-        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}})
+        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}},
+                                timeout=45)
         assert isinstance(result, dict)
         session = result["sessionId"]
         driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"})
