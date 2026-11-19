@@ -8,7 +8,7 @@ boundaries have not yet been qualified.
 | Plan item | Implemented and run | Remaining |
 |---|---|---|
 | T-014 ingestion | Allowlisted SHA-256 manifest, local Docling conversion of PDF/DOCX/XLSX, UTF-8 text, chunking, quarantine and deletion reconciliation; 109/112 synthetic sources index. Office ZIP preflight and a time-bounded offline parser worker were added | Read-only service identity and approved local share mount; scanned PDF/OCR, OS-level parser resource limits, NAS ACL mapping and incremental watcher |
-| T-015 index/retrieval | Local passage and embedding index, permission filter before lexical/vector ranking, source recheck before citation and preview; 50/50 fixed selection cases for both guarded modes. Citation metadata now carries the passage ordinal, with an API regression for later-passage preview. Generated-answer run: 40/40 expected synthetic markers, 10/10 no-answer denials, 32/40 source labels in answer text | PostgreSQL/pgvector target topology, semantic quality beyond exact-term guard, independent claim-support assessment and broader adversarial corpus |
+| T-015 index/retrieval | Local passage and embedding index, permission filter before lexical/vector ranking, source recheck before citation and preview; 50/50 fixed selection cases for both guarded modes. Citation metadata carries the passage ordinal, with an API regression for later-passage preview. A fresh [Core API run](core-answer-evaluation.json) captures citation objects and exact preview text: 40/40 expected synthetic markers and matching citations, 10/10 no-answer denials | PostgreSQL/pgvector target topology, semantic quality beyond exact-term guard, independent claim-support assessment and broader adversarial corpus |
 | T-016 identity/policy | Pinned local Keycloak lab realm, PKCE Console path, signed JWT validation, active-role check, source-level deny rules, persistent hash-only logout revocations and hash-chained audit; [identity operations design](identity-operations.md) records MFA, service identity, policy-change and emergency controls for review | Enforce MFA, durable identity store, service accounts, approved admin workflow and emergency access in target deployment; test deployment network controls |
 | T-017 non-disclosure | Automated five-role/collection matrix covering list, search, preview, chat citation, disabled download/export and removed users; revocation, deletion, history, token-signature and audit tamper tests; live engineer/deckhand Keycloak checks and restart-persistent logout check. Local API ACL change denies search, preview, chat context/citation and prior history within 60 seconds. Corrupt or duplicate manifest IDs fail closed across source, preview, search and chat APIs; malformed role policy denies authentication | Repeat propagation and cache probing in target topology, independent QA/security execution and wider adversarial corpus |
 
@@ -23,8 +23,9 @@ answers and proxy scores. Source labels in model prose are not a substitute
 for verifying API citation metadata and support for each claim.
 An [internal answer-by-answer review](claim-support-review.md) found six
 wording or support exceptions among the 40 allowed responses. The historical
-report does not retain structured citation objects or exact passages, so this
-review does not close AT-09 or replace independent assessment.
+report does not retain structured citation objects or exact passages. The
+fresh Core API run records both and has five preliminary prose exceptions;
+neither review closes AT-09 or replaces independent assessment.
 
 Phase 3 does not authorise vessel data. The G1 hardware/offline items from
 [Phase 2](../phase-2/gate.md) also remain open.

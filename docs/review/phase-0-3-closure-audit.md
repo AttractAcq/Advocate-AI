@@ -36,15 +36,15 @@ independent PR/security review.
 | T-015 authorised retrieval | Passage/embedding index, pre-ranking permission filter, source recheck, passage-ordinal citations and [fixed evaluation](../phase-3/evaluation.json); [generated answers](../phase-3/answer-evaluation.json) | Semantic/claim-support assessment by an independent reviewer; target database topology |
 | T-016 identity and policy | Local Keycloak lab, Console PKCE, signed JWTs, role/source policy, logout revocation, audit, [operations design](../phase-3/identity-operations.md) | MFA enforcement, service identities, approved policy administration and emergency access are designed but not implemented or reviewed for deployment |
 | T-017 role non-disclosure | Automated five-role/action matrix, revocation, deletion, injection, audit tamper, corrupt-manifest and history-redaction tests | Independent adversarial QA/security execution; target NAS/identity/cache propagation checks |
-| **Phase 3 gate** role, revocation, citation and injection tests | Local regression suite and 50-question evidence exist; 40/40 expected markers, 10/10 no-answer denials, 32/40 generated source labels; an [internal reading](../phase-3/claim-support-review.md) identifies six wording/support exceptions | Structured citation evidence, independent claim review and security sign-off are missing; target boundaries unqualified |
+| **Phase 3 gate** role, revocation, citation and injection tests | Local regression suite and historical 50-question evidence exist; an [internal reading](../phase-3/claim-support-review.md) finds six wording/support exceptions. A fresh [Core API run](../phase-3/core-answer-evaluation.json) captures 40/40 matching marker and structured citation passages, 10/10 denials and five preliminary prose exceptions | Independent claim review, agreed AT-09 threshold and security sign-off are missing; target boundaries unqualified |
 
 ## Actionable nonhardware work still open
 
 1. Appoint an external reviewer, request PR approval and obtain an
    attributable Phase 0–3 report using the [review brief](phase-0-3-external-review.md).
-2. Have an independent reviewer assess the 50 answers and the six recorded
-   wording exceptions; capture Core citation objects and exact passages in a
-   new run, then agree AT-09 quality thresholds.
+2. Have an independent reviewer assess both 50-answer runs, their recorded
+   wording exceptions and the fresh Core citation passages; then agree AT-09
+   quality thresholds.
 3. Complete a rendered Console keyboard/screen-reader/zoom run when a browser
    automation surface or human tester is available.
 4. Implement and test the synthetic administrative identity/emergency workflow

@@ -36,8 +36,31 @@ The automated report's `source_label_in_answer` field is a text proxy: only
 stores retrieved document IDs but does **not** capture the Core API's citation
 object, passage ordinal, source hash or the exact passage sent to the model.
 It therefore cannot establish citation correctness for the end-to-end chat
-path. The Phase 3 gate still needs an independent claim/citation reviewer, an
-agreed AT-09 quality threshold, and a new evaluation that retains structured
-citation evidence. The six wording exceptions should be included in that
-review, and any mitigation should be judged against a broader, non-marker
-corpus before claiming improved grounding.
+path. The Phase 3 gate still needs an independent claim/citation reviewer and
+an agreed AT-09 quality threshold. The six wording exceptions should be
+included in that review, and any mitigation should be judged against a
+broader, non-marker corpus before claiming improved grounding.
+
+## Fresh Core API run
+
+A separate [Core API evaluation](core-answer-evaluation.json) on
+19 November 2026 used the installed local `qwen3.5:2b` model and the same
+fictional 50-question corpus. It called `/api/chat` through Core, then fetched
+every cited preview by passage ordinal. The report retains the answer, Core
+citation object and exact preview excerpt for each case; temporary lab tokens
+and audit files were discarded. All 40 allowed answers contain their expected
+marker, all 40 expected citations and preview excerpts contain that marker,
+and all ten restricted cases return the no-answer response without a citation.
+All 40 citation hashes and versions match the approved-source manifest. These
+are checks of this local synthetic run, not a claim that every sentence is
+supported or that a target vessel deployment is secure.
+
+A preliminary reading of the fresh prose found five additional wording or
+support exceptions: Q-MAN-004 again calls “Port call” a “Port Call Collection”;
+Q-ENG-001 says the source gives an example of marker formatting, which it
+does not; Q-ENG-008 infers safety protocols from the marker; Q-ENG-009 calls
+“Spare parts” a “Spare parts Collection” and makes an unsupported comparison
+to real-world equipment; and Q-DEC-010 calls “Weather cover” a “Weather cover
+Collection”. The structured citations remain correct in these cases. An
+independent reviewer must assess the complete answer set and an agreed
+threshold before AT-09 can pass.
