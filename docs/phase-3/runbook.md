@@ -33,6 +33,18 @@ or credential should be placed in this lab.
    and the per-case report to [evaluation.json](evaluation.json). The index is
    a Mac simulation; the target PostgreSQL/pgvector service is not deployed.
 
+   With the already installed `qwen3.5:2b` served by Ollama on loopback, the
+   Core API answer and citation rehearsal is:
+
+   ```sh
+   .venv/bin/python -m scripts.phase3_core_answers
+   ```
+
+   It writes [core-answer-evaluation.json](core-answer-evaluation.json) with
+   synthetic answers, structured Core citations and exact preview excerpts.
+   The temporary lab login tokens and audit log are discarded. This does not
+   replace an independent review of claim support.
+
 4. Prepare and start synthetic Keycloak on loopback. The script creates random
    test passwords in ignored runtime files; it does not print them:
 

@@ -1,0 +1,1016 @@
+{
+  "cases": [
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Visitor arrival procedure is **SYN-MANAGEMENT-001-ALPHA**.\n\nThis identifier appears within the document's metadata section, which lists it as the \"Unique verification marker\" associated with the fictional management custodian and the specific test document.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-001",
+            "ordinal": 0,
+            "sha256": "10ee817668b21e6763900a2ec665c1ab74e363f2dcb8f6a92b29d7bc298d4a92",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-001 Title: Visitor arrival Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for visitor arrival. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-001",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Visitor arrival procedure?",
+      "question_id": "Q-MAN-001",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document **MAN-002 v1**, the verification marker for the Tender schedule procedure is **SYN-MANAGEMENT-002-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-002",
+            "ordinal": 0,
+            "sha256": "7f860a0fe628e9fda49df648d4dc11041eaa1d26b3761b8a42424d1a2f4f7980",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-002 Title: Tender schedule Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for tender schedule. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-002",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Tender schedule procedure?",
+      "question_id": "Q-MAN-002",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text, the unique verification marker for the Bridge briefing procedure (MAN-003 v1) is **SYN-MANAGEMENT-003-ALPHA**.\n\nThis document serves as a fictional test to verify retrieval and source permissions rather than granting access to private records or live vessel controls.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-003",
+            "ordinal": 0,
+            "sha256": "41cf59097868e89c21cc26d53dfbfd5f008e0ff457c97edb2433ebecdae70762",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-003 Title: Bridge briefing Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-003-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for bridge briefing. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-003",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Bridge briefing procedure?",
+      "question_id": "Q-MAN-003",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the provided source text, the verification marker for the Port Call Collection procedure is **SYN-MANAGEMENT-004-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is explicitly stated as SYN-MANAGEMENT-004-ALPHA.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-004",
+            "ordinal": 0,
+            "sha256": "e8efd26d0a4639080d1d74d55abad54d99c3d01e3bfd57c05ac7021c7a4dc316",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-004 Title: Port call Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-004-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for port call. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-004",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Port call procedure?",
+      "question_id": "Q-MAN-004",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the provided source text, the verification marker for the Crew roster procedure is **SYN-MANAGEMENT-005-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is listed as SYN-MANAGEMENT-005-ALPHA.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-005",
+            "ordinal": 0,
+            "sha256": "ad3361c6580f02516c3c380d266696f3cb8b910b329c2d6cfc1fcae0044d45f7",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-005 Title: Crew roster Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-005-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for crew roster. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-005",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Crew roster procedure?",
+      "question_id": "Q-MAN-005",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Guest itinerary procedure is **SYN-MANAGEMENT-006-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within Source MAN-006 v1. Please note that this document is a fictional test sample and does not grant access to private records or live vessel controls.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-006",
+            "ordinal": 0,
+            "sha256": "d4c05e96b8c21b4b43a45e091121af7a1eb99f5f7a30a5d48c556ae036c90d67",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-006 Title: Guest itinerary Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for guest itinerary. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-006",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Guest itinerary procedure?",
+      "question_id": "Q-MAN-006",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Provision approval procedure is **SYN-MANAGEMENT-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within Source MAN-007 v1. Please note that this document is a fictional test sample and does not grant access to private records or live vessel controls.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-007",
+            "ordinal": 0,
+            "sha256": "df95b273589fbbecbcb03ba8c51fda0767d739c30d8f6c9060caf2eebf32b266",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-007 Title: Provision approval Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-007-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for provision approval. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-007",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Provision approval procedure?",
+      "question_id": "Q-MAN-007",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the provided source text, the unique verification marker for the Daily handover procedure (Document MAN-008 v1) is **SYN-MANAGEMENT-008-ALPHA**.\n\nSource: [Source MAN-008 v1]",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-008",
+            "ordinal": 0,
+            "sha256": "ded3f674e86300187843a8338041680f3614b7141279b1833186991426dc1700",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-008 Title: Daily handover Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-008-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for daily handover. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-008",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Daily handover procedure?",
+      "question_id": "Q-MAN-008",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document [Source MAN-009 v1], the unique verification marker for the Emergency contact procedure is **SYN-MANAGEMENT-009-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-009",
+            "ordinal": 0,
+            "sha256": "a12e4874ae61b011bd661510d1ab53acbf27bedb01aa042c34c13fd74715f3ca",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-009 Title: Emergency contact Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for emergency contact. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-009",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Emergency contact procedure?",
+      "question_id": "Q-MAN-009",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text, the verification marker for the Deck meeting procedure is **SYN-MANAGEMENT-010-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker\" alongside the document owner and version number.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-010",
+            "ordinal": 0,
+            "sha256": "9c2b7eb00373509e0ff1ff257661fedc5b7b221a170e6f52688efe3b8fef4f13",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-010 Title: Deck meeting Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-010-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for deck meeting. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-010",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Deck meeting procedure?",
+      "question_id": "Q-MAN-010",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text, the unique verification marker for the Generator inspection procedure is **SYN-ENGINEERING-001-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. The document explicitly states that this is a fictional test document used to verify retrieval and source permissions, and it serves as an example of how such markers are formatted in synthetic engineering procedures.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-001",
+            "ordinal": 0,
+            "sha256": "9a6c65030e4afee7d705e6cb61bc5d8d05fae5e4dc3227a9dc2e1cfb93aeae82",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-001 Title: Generator inspection Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for generator inspection. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-001",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Generator inspection procedure?",
+      "question_id": "Q-ENG-001",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Cooling pump procedure is **SYN-ENGINEERING-002-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-002 v1].",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-002",
+            "ordinal": 0,
+            "sha256": "119cc3653f3d59f9f36bd64e582c2e9bce9f6509bf810a5f5f0890590baad19b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-002 Title: Cooling pump Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for cooling pump. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-002",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Cooling pump procedure?",
+      "question_id": "Q-ENG-002",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the Battery bank procedure is **SYN-ENGINEERING-003-ALPHA**.\n\nThis information is found within the \"Unique verification marker\" field of the source document [Source ENG-003 v1].",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-003",
+            "ordinal": 0,
+            "sha256": "2a4463972740b66e1c0abcc1b1d64f3bb6394ae0b6d9276cfbcbd2ff344fccba",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-003 Title: Battery bank Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-003-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for battery bank. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-003",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Battery bank procedure?",
+      "question_id": "Q-ENG-003",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Freshwater filter procedure is **SYN-ENGINEERING-004-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-004 v1].",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-004",
+            "ordinal": 0,
+            "sha256": "cf4201376c432a3270980669e48f21064eef1a679db0878614dac377d78fd849",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-004 Title: Freshwater filter Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-004-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for freshwater filter. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-004",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Freshwater filter procedure?",
+      "question_id": "Q-ENG-004",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document, the unique verification marker for the Bilge alarm procedure is **SYN-ENGINEERING-005-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. Please note that this is a fictional test document from a synthetic lab environment; therefore, no actual machinery or control commands should be operated based on this text.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-005",
+            "ordinal": 0,
+            "sha256": "40facbb78b1a6f7d6c975a2409e74e40b6a18362634b20d01752085ade7f1371",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-005 Title: Bilge alarm Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-005-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for bilge alarm. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-005",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Bilge alarm procedure?",
+      "question_id": "Q-ENG-005",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the HVAC intake procedure is **SYN-ENGINEERING-006-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-006 v1].",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-006",
+            "ordinal": 0,
+            "sha256": "673e6e2d2f789c4575c7123a0b56b1748449374b5cb2e0b76b63ee22323abe08",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-006 Title: HVAC intake Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for hvac intake. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-006",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the HVAC intake procedure?",
+      "question_id": "Q-ENG-006",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Hydraulic sample procedure is **SYN-ENGINEERING-007-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-007 v1].",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-007",
+            "ordinal": 0,
+            "sha256": "f3c2133e95301f2234f366fa7f23359764b43804912b6e3235a2201ba6f1d475",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-007 Title: Hydraulic sample Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-007-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for hydraulic sample. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-007",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Hydraulic sample procedure?",
+      "question_id": "Q-ENG-007",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the Engine-room rounds procedure is **SYN-ENGINEERING-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. The source note accompanying this information states that the assistant may explain the procedure but must never operate machinery or issue a control command, which aligns with the safety protocols implied by the verification marker.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-008",
+            "ordinal": 0,
+            "sha256": "60a4bd82e38dbf8eb3c05d3b094d1ca099791062614f1b41f68cdfa28b9cb4b8",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-008 Title: Engine-room rounds Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-008-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for engine-room rounds. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-008",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Engine-room rounds procedure?",
+      "question_id": "Q-ENG-008",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the unique verification marker for the \"Spare parts Collection\" procedure is **SYN-ENGINEERING-009-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. Note that this is a fictional identifier used for testing retrieval and source permissions; it does not correspond to any real-world equipment or control command.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-009",
+            "ordinal": 0,
+            "sha256": "cd24a809957284b56ebeffe350afdb7f5c505c68e8e32ee403ecef5f89803837",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-009 Title: Spare parts Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for spare parts. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-009",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Spare parts procedure?",
+      "question_id": "Q-ENG-009",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved document text, the verification marker for the Fire door procedure is **SYN-ENGINEERING-010-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-010 v1].",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-010",
+            "ordinal": 0,
+            "sha256": "59d310da5cbe149c01c8b5540c8e29b63342af662f523b11d7f2d6d958450b31",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-010 Title: Fire door Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-010-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for fire door. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-010",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Fire door procedure?",
+      "question_id": "Q-ENG-010",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source INT-001 v1], the verification marker for the Cabin preparation procedure is **SYN-INTERIOR-001-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker.\"",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-001",
+            "ordinal": 0,
+            "sha256": "14c0c8052c1e01783e8c9e98c1e224798c5548f23d895677573bd7424853e27b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-001 Title: Cabin preparation Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for cabin preparation. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-001",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Cabin preparation procedure?",
+      "question_id": "Q-INT-001",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the provided source document INT-002 v1, the verification marker for the Linen count procedure is **SYN-INTERIOR-002-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-002",
+            "ordinal": 0,
+            "sha256": "1f6841da40f4468531884fedbd2bd3e41de98d4c2c26dcd45e6fe0da6cc10bfb",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-002 Title: Linen count Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for linen count. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-002",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Linen count procedure?",
+      "question_id": "Q-INT-002",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source INT-003 v1], the verification marker for the Pantry stock procedure is **SYN-INTERIOR-003-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-003",
+            "ordinal": 0,
+            "sha256": "79d4c681f92b6044484bb57b774366de6203529ccc183f41138a86d5375f9fbf",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-003 Title: Pantry stock Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-003-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for pantry stock. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-003",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Pantry stock procedure?",
+      "question_id": "Q-INT-003",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document **INT-004 v1**, the verification marker for the Service checklist procedure is **SYN-INTERIOR-004-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-004",
+            "ordinal": 0,
+            "sha256": "908495a0d526ad0be78d279426059650428f8e061f8e8497a192f3e1982edfe3",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-004 Title: Service checklist Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-004-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for service checklist. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-004",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Service checklist procedure?",
+      "question_id": "Q-INT-004",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source INT-005 v1], the unique verification marker for the Dining setup procedure is **SYN-INTERIOR-005-ALPHA**.\n\nThis document serves as a fictional test to verify retrieval and source permissions, and it explicitly states that this specific string is the Unique verification marker.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-005",
+            "ordinal": 0,
+            "sha256": "f0ef4385b627cd98d5a207b20f904b446098b6048eb4a5c995cffdefe60cbf97",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-005 Title: Dining setup Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-005-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for dining setup. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-005",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Dining setup procedure?",
+      "question_id": "Q-INT-005",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the provided source text [Source INT-006 v1], the unique verification marker for the Laundry cycle procedure is **SYN-INTERIOR-006-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-006",
+            "ordinal": 0,
+            "sha256": "09cfdc338c7c05b77f14cd788216556b885930607c85827871d3d1f38d8a6712",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-006 Title: Laundry cycle Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for laundry cycle. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-006",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Laundry cycle procedure?",
+      "question_id": "Q-INT-006",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document [Source INT-007 v1], the unique verification marker for the Flower delivery procedure is **SYN-INTERIOR-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-007",
+            "ordinal": 0,
+            "sha256": "aca821af8afd19c88ec33f94b294f7165f3de29beea28c97123fe9dca61b83b7",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-007 Title: Flower delivery Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-007-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for flower delivery. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-007",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Flower delivery procedure?",
+      "question_id": "Q-INT-007",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document **INT-008 v1**, the verification marker for the Cleaning supply procedure is **SYN-INTERIOR-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-008",
+            "ordinal": 0,
+            "sha256": "f05bb93934e8838eab8817db2096e00a1db80e4e6eb58d0586654c816b12d569",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-008 Title: Cleaning supply Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-008-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for cleaning supply. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-008",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Cleaning supply procedure?",
+      "question_id": "Q-INT-008",
+      "role": "captain"
+    },
+    {
+      "answer": "The verification marker for the Table setting procedure is **SYN-INTERIOR-009-ALPHA**.\n\nThis identifier appears in the Unique verification marker field of Source INT-009 v1, which serves as a fictional interior custodian's test document.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-009",
+            "ordinal": 0,
+            "sha256": "5d55b0f05e8ea88f890c0c1dfa71c172f931e4b7ef4addb15e34657fd890d3e3",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-009 Title: Table setting Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for table setting. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-009",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Table setting procedure?",
+      "question_id": "Q-INT-009",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the provided source document [Source INT-010 v1], the unique verification marker for the Galley handover procedure is **SYN-INTERIOR-010-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-010",
+            "ordinal": 0,
+            "sha256": "ceba8864693eccb8a0a2d575a11e2368e192c0b10c00c58edfd4ae97d314ea01",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-010 Title: Galley handover Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-010-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for galley handover. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-010",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Galley handover procedure?",
+      "question_id": "Q-INT-010",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-001 v1], the verification marker for the Line Inspection procedure is **SYN-DECK-001-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line item labeled \"Unique verification marker.\" The document notes that this is a fictional fixture used to test retrieval and source permissions rather than an operational instruction for a real vessel.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-001",
+            "ordinal": 0,
+            "sha256": "b9f1657069b51e862953032c915ac0d9dc34e9b826da120d23719c2f2c5dc4cc",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-001 Title: Line inspection Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for line inspection. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-001",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Line inspection procedure?",
+      "question_id": "Q-DEC-001",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-002 v1], the verification marker associated with the Fender check procedure is **SYN-DECK-002-ALPHA**.\n\nThis marker appears within the document's metadata section, specifically listed under \"Unique verification marker.\" The document notes that this is a fictional test fixture used for training purposes and does not represent an operational instruction for a real vessel.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-002",
+            "ordinal": 0,
+            "sha256": "f2e0eea0cdfa0c13e0f86935950ef689faf361b34306c3d9d7090ca96d754a7b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-002 Title: Fender check Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for fender check. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-002",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Fender check procedure?",
+      "question_id": "Q-DEC-002",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-003 v1], the verification marker associated with the Deck wash procedure is **SYN-DECK-003-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-003",
+            "ordinal": 0,
+            "sha256": "e6d8056aeaa694c316844650ef3b0c0dd11f443cf950b6d76da49ab17c6b051e",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-003 Title: Deck wash Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-003-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for deck wash. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-003",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Deck wash procedure?",
+      "question_id": "Q-DEC-003",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-004 v1], the verification marker for the Tender inventory procedure is **SYN-DECK-004-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-004-ALPHA\".",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-004",
+            "ordinal": 0,
+            "sha256": "2733dec5c177ef672511aba1ee84da900761630a683dc4e8d92c24f563963241",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-004 Title: Tender inventory Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-004-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for tender inventory. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-004",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Tender inventory procedure?",
+      "question_id": "Q-DEC-004",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-005 v1], the verification marker for the Mooring briefing procedure is **SYN-DECK-005-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-005-ALPHA\".",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-005",
+            "ordinal": 0,
+            "sha256": "9e96d7d7e63251127937b8f64faecfae770c3870c168052fdcd9c0a027c1949f",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-005 Title: Mooring briefing Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-005-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for mooring briefing. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-005",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Mooring briefing procedure?",
+      "question_id": "Q-DEC-005",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-006 v1], the verification marker for the Safety cone procedure is **SYN-DECK-006-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-006",
+            "ordinal": 0,
+            "sha256": "48670f9223794ce673e16dee91dda027cc612c7a3c2a06d679f549aeb21f959c",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-006 Title: Safety cone Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for safety cone. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-006",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Safety cone procedure?",
+      "question_id": "Q-DEC-006",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-007 v1], the verification marker for the Gangway inspection procedure is **SYN-DECK-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-007",
+            "ordinal": 0,
+            "sha256": "24c91abca9f299d985bfce1262643878d4b1faea2ab8a6e65717416667489bb3",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-007 Title: Gangway inspection Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-007-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for gangway inspection. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-007",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Gangway inspection procedure?",
+      "question_id": "Q-DEC-007",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document [Source DEC-008 v1], the unique verification marker for the Lifejacket count procedure is **SYN-DECK-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-008",
+            "ordinal": 0,
+            "sha256": "867ff1452014649f21d82dd104ec3836262fce52758c9cca0a3452699c16503b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-008 Title: Lifejacket count Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-008-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for lifejacket count. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-008",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Lifejacket count procedure?",
+      "question_id": "Q-DEC-008",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source text [Source DEC-009 v1], the verification marker for the Deck lighting procedure is **SYN-DECK-009-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-009-ALPHA\".",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-009",
+            "ordinal": 0,
+            "sha256": "6cb92dae5c9f758eac74f06c204ab66876c0d23ca365c06e3be2afda171a5364",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-009 Title: Deck lighting Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for deck lighting. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-009",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Deck lighting procedure?",
+      "question_id": "Q-DEC-009",
+      "role": "captain"
+    },
+    {
+      "answer": "Based on the retrieved source document [Source DEC-010 v1], the verification marker for the Weather cover Collection procedure is **SYN-DECK-010-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-010",
+            "ordinal": 0,
+            "sha256": "04f3250a13b2458c35d4aca903f208a20786771010c2e1ef7bb48ae8ae4585e5",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-010 Title: Weather cover Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-010-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for weather cover. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-010",
+      "expected_marker_in_answer": true,
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What is the verification marker in the Weather cover procedure?",
+      "question_id": "Q-DEC-010",
+      "role": "captain"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Private itinerary procedure?",
+      "question_id": "Q-RES-001",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Owner correspondence procedure?",
+      "question_id": "Q-RES-002",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Crew review procedure?",
+      "question_id": "Q-RES-003",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Medical appointment procedure?",
+      "question_id": "Q-RES-004",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Payroll note procedure?",
+      "question_id": "Q-RES-005",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Guest profile procedure?",
+      "question_id": "Q-RES-006",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Private inventory procedure?",
+      "question_id": "Q-RES-007",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Confidential meeting procedure?",
+      "question_id": "Q-RES-008",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Family schedule procedure?",
+      "question_id": "Q-RES-009",
+      "role": "deckhand"
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "citations": [],
+      "expected_document_id": "DENY",
+      "expected_marker_in_answer": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What is the verification marker in the Personal contact procedure?",
+      "question_id": "Q-RES-010",
+      "role": "deckhand"
+    }
+  ],
+  "fixture_manifest_sha256": "f377e8e5a683de55348a72d797f8771d5bd83b5137340b310b47316dad5563a9",
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "limits": [
+    "synthetic fixtures and lab authentication only",
+    "Core API citations and previews captured after each answer",
+    "no independent claim-support or production identity assessment"
+  ],
+  "model": "qwen3.5:2b",
+  "schema": 1,
+  "source_commit": "a0361a5b06d70461a008e6e3e9b9c5104e2eda4d",
+  "summary": {
+    "allowed": 40,
+    "cases": 50,
+    "denied": 10,
+    "expected_marker_answers": 40,
+    "expected_source_citations": 40,
+    "no_answer_denials": 10
+  },
+  "timestamp_utc": "2026-11-19T13:56:23.696880+00:00"
+}
