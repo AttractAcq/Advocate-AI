@@ -79,8 +79,31 @@ content drift. The
 private signing keys stay on the offline issuer workstation. Receipt trust is
 outside the encrypted Fleet catalog backup, so supply the approved trust
 directory again during a clean restore. Trust changes to a running installation
-need a separate controlled rotation operation; changing installed files in
-place is rejected by the runtime identity check.
+use `rotate-receipt-trust` with a new approved directory. The command copies
+and checks the new trust, starts the active signed release with the candidate
+trust, commits only after the candidate passes, and then retires the old
+runtime. Its owner-only journal makes interrupted rotation visible; `status`,
+`install` and `rollback` fail closed until `recover` reconciles the old or new
+runtime. Editing installed trust files in place is rejected by the runtime
+identity check.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_installer rotate-receipt-trust \
+  --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane \
+  --receipt-trust-dir /protected/approved-next-issuers
+```
+
+For an overlap window, provide both old and new public keys. After receipts
+signed by the new issuer have been proven, use a second rotation containing
+only the new public key. Keep each source directory owner-only and separate
+from the installed trust directory. This local operation does not establish
+company issuer approval, revocation timing, protected media or target-host
+reboot recovery; those remain B-12.
+The signed-image CI rehearsal now attempts both rotations against actual
+Fleet containers. It imports receipts from both issuers during overlap,
+rejects an old-issuer receipt after retirement, then checks update, rollback,
+boot recovery and encrypted catalog restore under the retired trust set.
 The signed Fleet image CI rehearsal now provisions a fictional issuer,
 submits its CLI-signed coded receipt through the running API container, and
 checks that the receipt survives encrypted catalog restore with separately

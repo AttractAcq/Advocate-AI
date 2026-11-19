@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from infrastructure.release.bundle import create_fleet_bundle, verify_bundle
 from infrastructure.deploy.fleet_installer import (
     fleet_status, install_fleet, restore_install_fleet,
+    rotate_fleet_receipt_trust,
     rollback_fleet,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, stop_runtime
@@ -38,20 +39,52 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _post_receipt(api_id: str, envelope: Path) -> None:
+def _post_receipt(api_id: str, envelope: Path, *, expected: int = 201) -> None:
     script = (
-        'import sys, urllib.request\n'
+        'import sys, urllib.error, urllib.request\n'
         'token=open("/state/token").read().strip()\n'
         'request=urllib.request.Request('
         '"http://127.0.0.1:18800/api/fleet/import/deployment-receipts",'
         'data=sys.stdin.buffer.read(),method="POST",'
         'headers={"Content-Type":"application/json","X-Fleet-Lab-Token":token})\n'
-        'print(urllib.request.urlopen(request,timeout=10).status)\n')
+        'try:\n print(urllib.request.urlopen(request,timeout=10).status)\n'
+        'except urllib.error.HTTPError as exc:\n print(exc.code)\n')
     response = subprocess.run(["docker", "exec", "-i", api_id, "python", "-c", script],
                               input=envelope.read_bytes(), capture_output=True,
                               check=True, timeout=30)
-    if response.stdout.strip() != b"201":
-        raise AssertionError("signed Fleet receipt was not imported")
+    if response.stdout.strip() != str(expected).encode("ascii"):
+        raise AssertionError("signed Fleet receipt status differed from expected")
+
+
+def _receipt_trust(root: Path, name: str,
+                   issuers: tuple[Ed25519PrivateKey, ...]) -> Path:
+    directory = root / name
+    directory.mkdir(mode=0o700)
+    paths = []
+    for index, signer in enumerate(issuers, start=1):
+        filename = f"issuer-{index}.pem"
+        key = directory / filename
+        key.write_bytes(signer.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo))
+        key.chmod(0o600)
+        paths.append(f"/etc/fleet-import/{filename}")
+    manifest = directory / "trusted-issuers.json"
+    manifest.write_text(json.dumps(paths))
+    manifest.chmod(0o600)
+    return directory
+
+
+def _signed_receipt(root: Path, code: str, signing_key: Path) -> Path:
+    record = root / f"{code}-record.json"
+    record.write_text(json.dumps({
+        "code": code, "vessel_code": "VSL-LAB01",
+        "release_code": "REL-LAB01", "source": "approved_offline_admin",
+        "observed_on": "2026-11-19", "health": "healthy"}))
+    record.chmod(0o600)
+    envelope = root / f"{code}-signed.json"
+    issue_receipt(record, signing_key, envelope)
+    return envelope
 
 
 def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
@@ -151,16 +184,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                     serialization.NoEncryption()))
                 issuer_private.chmod(0o600)
-                receipt_trust = root / "receipt-trust"
-                receipt_trust.mkdir(mode=0o700)
-                issuer_public = receipt_trust / "issuer-1.pem"
-                issuer_public.write_bytes(issuer_key.public_key().public_bytes(
-                    serialization.Encoding.PEM,
-                    serialization.PublicFormat.SubjectPublicKeyInfo))
-                issuer_public.chmod(0o600)
-                issuer_manifest = receipt_trust / "trusted-issuers.json"
-                issuer_manifest.write_text('["/etc/fleet-import/issuer-1.pem"]')
-                issuer_manifest.chmod(0o600)
+                receipt_trust = _receipt_trust(root, "receipt-trust", (issuer_key,))
                 install_root = root / "fleet-install"
                 active_runtime: FleetRuntime | None = None
                 try:
@@ -180,21 +204,47 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         code="VSL-LAB01", customer_code="CUST-LAB1",
                         release_code="REL-LAB01", hardware_profile="pilot_gpu",
                         status="pilot"))
-                    receipt_record = root / "receipt-record.json"
-                    receipt_record.write_text(json.dumps({
-                        "code": "RCP-LAB01", "vessel_code": "VSL-LAB01",
-                        "release_code": "REL-LAB01",
-                        "source": "approved_offline_admin",
-                        "observed_on": "2026-11-19", "health": "healthy"}))
-                    receipt_record.chmod(0o600)
-                    envelope = root / "signed-receipt.json"
-                    issue_receipt(receipt_record, issuer_private, envelope)
+                    envelope = _signed_receipt(root, "RCP-LAB01", issuer_private)
                     first_runtime = json.loads(
                         (install_root / "fleet-state.json").read_text())["runtime"]
                     _post_receipt(first_runtime["api_id"], envelope)
                     if [row["code"] for row in catalog.list("receipt")] != ["RCP-LAB01"]:
                         raise AssertionError("signed receipt is missing from Fleet catalog")
                     result["receipt_import"] = "signed-image-authorized"
+                    next_issuer = Ed25519PrivateKey.generate()
+                    next_private = root / "receipt-next-private.pem"
+                    next_private.write_bytes(next_issuer.private_bytes(
+                        serialization.Encoding.PEM,
+                        serialization.PrivateFormat.PKCS8,
+                        serialization.NoEncryption()))
+                    next_private.chmod(0o600)
+                    overlap = _receipt_trust(root, "receipt-overlap",
+                                             (issuer_key, next_issuer))
+                    rotated = rotate_fleet_receipt_trust(
+                        install_root, trusted, crane, overlap)
+                    if rotated["result"] != "receipt_trust_rotated":
+                        raise AssertionError("Fleet receipt overlap did not activate")
+                    overlap_runtime = json.loads(
+                        (install_root / "fleet-state.json").read_text())["runtime"]
+                    _post_receipt(overlap_runtime["api_id"],
+                                  _signed_receipt(root, "RCP-LAB02", issuer_private))
+                    _post_receipt(overlap_runtime["api_id"],
+                                  _signed_receipt(root, "RCP-LAB03", next_private))
+                    retired_trust = _receipt_trust(root, "receipt-retired",
+                                                   (next_issuer,))
+                    rotate_fleet_receipt_trust(install_root, trusted, crane,
+                                               retired_trust)
+                    retired_runtime = json.loads(
+                        (install_root / "fleet-state.json").read_text())["runtime"]
+                    _post_receipt(retired_runtime["api_id"],
+                                  _signed_receipt(root, "RCP-LAB04", issuer_private),
+                                  expected=400)
+                    if [row["code"] for row in catalog.list("receipt")] != [
+                            "RCP-LAB01", "RCP-LAB02", "RCP-LAB03"]:
+                        raise AssertionError("retired issuer changed Fleet catalog")
+                    if fleet_status(install_root, trusted)["active"] != first["active"]:
+                        raise AssertionError("Fleet receipt rotation changed release")
+                    result["receipt_rotation"] = "overlap-and-old-issuer-retired"
                     try:
                         install_fleet(root / "missing-bundle", trusted, crane,
                                       config, install_root)
@@ -242,14 +292,14 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         restored = restore_install_fleet(
                             bundle, trusted, crane, config, restored_root,
                             token, archive, backup_key,
-                            receipt_trust_dir=receipt_trust)
+                            receipt_trust_dir=retired_trust)
                         rows = FleetCatalog(restored_root / "state" / "fleet.db").list(
                             "customer")
                         if (restored["restored_files"] != 1 or
                                 [row["code"] for row in rows] != ["CUST-LAB1"] or
                                 [row["code"] for row in FleetCatalog(
                                     restored_root / "state" / "fleet.db").list(
-                                        "receipt")] != ["RCP-LAB01"] or
+                                        "receipt")] != ["RCP-LAB01", "RCP-LAB02", "RCP-LAB03"] or
                                 fleet_status(restored_root, trusted)["result"] != "healthy"):
                             raise AssertionError("Fleet restored catalog is not healthy")
                         result["encrypted_recovery"] = "fictional-customer-restored"
