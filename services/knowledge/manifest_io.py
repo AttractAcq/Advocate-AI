@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from services.policy.regular_file import read_regular_file
@@ -11,7 +12,13 @@ MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 
 
 def read_manifest_bytes(path: Path) -> bytes:
-    return read_regular_file(path, MAX_MANIFEST_BYTES)
+    pending = path.with_name(path.name + ".pending")
+    if os.path.lexists(pending):
+        raise ValueError("approved source manifest change is pending")
+    raw = read_regular_file(path, MAX_MANIFEST_BYTES)
+    if os.path.lexists(pending):
+        raise ValueError("approved source manifest change is pending")
+    return raw
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:

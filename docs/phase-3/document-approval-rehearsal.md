@@ -41,12 +41,28 @@ The fixture tree in Git is an example. Run the rehearsal on a copy, not on the
 tracked fixture corpus. The tool takes the same policy-directory lock as Core,
 copies the verified source to a new owner-only file, atomically updates the
 manifest, appends an audit event, and then marks the submission approved.
+It retains an owner-only evidence packet with the exact signed proposal,
+approvals and trust snapshot. An `approved-sources.json.pending` marker contains the
+prior manifest and keeps retrieval and indexing closed during an interrupted
+change. If the process stops unexpectedly, inspect the marker and evidence,
+then roll back with:
+
+```sh
+python -m scripts.phase3_document_approval recover \
+  --sources "$PWD/fixtures" \
+  --manifest "$PWD/fixtures/phase-3/approved-sources.json" \
+  --audit "$PWD/infrastructure/lab/runtime/phase3-audit/events.jsonl"
+```
+
+Recovery verifies the signed evidence and current source digest, restores the
+exact old manifest, removes the newly copied source and records a rollback
+event before clearing the marker. Tampered evidence leaves retrieval closed.
 It rejects a changed upload or manifest, an existing document ID or content
 hash, an unmapped collection, untrusted or duplicate signatures, and replay.
 The index reconciler must run before the new document becomes searchable; Core
 still checks the manifest, source hash and caller permissions per request.
 
-This is a synthetic candidate. Production still needs independently retained
-signed approval evidence, malware/content inspection, source ownership and
-read-only mount handoff, interruption recovery for a crash between manifest
-publication and audit, approval-role policy, retention and target-host review.
+This is a synthetic candidate. Production still needs independent retention
+outside the Core host, malware/content inspection, source ownership and
+read-only mount handoff, approved signer roles, retention and target-host
+recovery review.
