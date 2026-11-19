@@ -267,7 +267,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     def health() -> dict[str, str]:
         if audit is not None:
             try:
-                verify_audit(audit.path, require_current_clock=True)
+                audit.check_clock()
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                     "audit unavailable") from exc

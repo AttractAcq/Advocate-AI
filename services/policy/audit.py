@@ -60,6 +60,12 @@ class AuditLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._count, self._previous, self._latest = _verified_state(path)
 
+    def check_clock(self) -> None:
+        """Quick health probe; audited requests still verify the whole chain."""
+        with self._lock:
+            if self._latest is not None and datetime.now(timezone.utc) < self._latest:
+                raise ValueError("local clock precedes the last audit event")
+
     def append(self, *, actor: str, action: str, resource: str, decision: str,
                policy_version: str, correlation_id: str | None = None) -> str:
         with self._lock:

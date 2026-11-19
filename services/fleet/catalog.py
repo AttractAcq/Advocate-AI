@@ -181,6 +181,22 @@ class FleetCatalog:
         finally:
             connection.close()
 
+    def check_clock(self) -> None:
+        """Probe the latest event without rescanning the full audit chain."""
+        try:
+            with self._connect() as connection:
+                row = connection.execute("SELECT at FROM audit ORDER BY seq DESC LIMIT 1").fetchone()
+        except sqlite3.Error as exc:
+            raise FleetIntegrityError("Fleet audit clock cannot be checked") from exc
+        if row is None:
+            return
+        try:
+            at = datetime.fromisoformat(row["at"])
+        except (TypeError, ValueError) as exc:
+            raise FleetIntegrityError("Fleet audit timestamp is invalid") from exc
+        if at.tzinfo is None or datetime.now(timezone.utc) < at:
+            raise FleetIntegrityError("local clock precedes the last Fleet audit event")
+
     @staticmethod
     def _verify(connection: sqlite3.Connection) -> None:
         previous = "0" * 64
