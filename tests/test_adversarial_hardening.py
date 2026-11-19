@@ -88,7 +88,43 @@ class IngestionBoundaryTests(unittest.TestCase):
         path.write_bytes(payload)
         result, calls = self.sync_one("sources/MAL-001.pdf", payload)
         self.assertEqual(result["indexed"], ["MAL-001"])
-        self.assertEqual(calls, [path.resolve()])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].suffix, ".pdf")
+        self.assertNotEqual(calls[0], path.resolve())
+        self.assertFalse(calls[0].exists())
+
+    def test_parser_uses_verified_snapshot_after_source_replacement(self) -> None:
+        original = b"approved generator inspection marker"
+        source = self.root / "sources/ENG-001.txt"
+        source.write_bytes(original)
+        entry = {"document_id": "ENG-001", "relative_path": "sources/ENG-001.txt",
+                 "collection": "engineering", "classification": "C0_SYNTHETIC_ENGINEERING",
+                 "owner": "fictional custodian", "version": "1",
+                 "sha256": hashlib.sha256(original).hexdigest(), "source_type": "synthetic-local"}
+        manifest = self.root / "approved.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [entry]}))
+        snapshots: list[Path] = []
+
+        def parser(path: Path) -> str:
+            snapshots.append(path)
+            source.write_text("replacement unapproved marker")
+            return path.read_text(encoding="utf-8")
+
+        database = self.root / "index.db"
+        (self.root / "roles.json").write_text(json.dumps({
+            "users": [{"id": "engineer", "role": "chief_engineer", "status": "active"}],
+            "allow": {"chief_engineer": ["engineering"]}, "document_rules": {},
+        }))
+        result = sync_manifest(self.root, manifest, database, parser)
+        self.assertEqual(result["indexed"], ["ENG-001"])
+        self.assertEqual(len(snapshots), 1)
+        self.assertFalse(snapshots[0].exists())
+        with __import__("sqlite3").connect(database) as connection:
+            passage = connection.execute("SELECT text FROM passages WHERE document_id=?",
+                                         ("ENG-001",)).fetchone()[0]
+        self.assertEqual(passage, original.decode())
+        from services.knowledge.indexed_retrieval import approved_rows
+        self.assertEqual(approved_rows(self.root, manifest, database, "engineer"), [])
 
     def test_office_archive_ambiguity_and_resource_cases_are_quarantined(self) -> None:
         path = self.root / "sources/MAL-001.docx"

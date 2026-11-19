@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 
 from services.knowledge.acl import source_access
-from services.knowledge.paths import source_path
+from services.knowledge.paths import read_source_bytes
 from services.policy.policy_file import load_policy
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
@@ -66,12 +66,9 @@ def search_fixture_documents(
             if not relative.endswith(".txt"):
                 continue
             try:
-                path = source_path(base, relative)
+                payload = read_source_bytes(base, relative, _MAX_DOCUMENT_BYTES)
             except (OSError, ValueError):
                 continue
-            if path.stat().st_size > _MAX_DOCUMENT_BYTES:
-                continue
-            payload = path.read_bytes()
             if hashlib.sha256(payload).hexdigest() != source["sha256"]:
                 continue
             try:
