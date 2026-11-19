@@ -16,6 +16,8 @@ import sqlite3
 from threading import RLock
 import time
 
+from services.policy.policy_file import PolicyUnavailable, load_policy
+
 
 @dataclass
 class Conversation:
@@ -58,8 +60,8 @@ class LabSessions:
 
     def _active_user(self, user_id: str) -> dict[str, str] | None:
         try:
-            policy = json.loads(self.roles_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            policy = load_policy(self.roles_path)
+        except PolicyUnavailable:
             return None
         if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
             return None

@@ -11,6 +11,7 @@ import sqlite3
 from services.knowledge.acl import source_access
 from services.knowledge.paths import source_path
 from services.knowledge.manifest_io import read_manifest_bytes
+from services.policy.policy_file import PolicyUnavailable, load_policy
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
 _STOP = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
@@ -30,8 +31,8 @@ def approved_rows(root: Path, manifest: Path, database: Path, user_id: str) -> l
     """Recheck current manifest, policy and source bytes before exposing metadata."""
     base = root.resolve(strict=True)
     try:
-        policy = json.loads((base / "roles.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        policy = load_policy(base / "roles.json")
+    except PolicyUnavailable as exc:
         raise SourceManifestError("source policy unavailable") from exc
     if not isinstance(policy, dict):
         raise SourceManifestError("source policy unavailable")

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 from pathlib import Path
 import re
 
 from services.knowledge.acl import source_access
 from services.knowledge.paths import source_path
+from services.policy.policy_file import load_policy
 
 _WORDS = re.compile(r"[a-z0-9]{3,}")
 _STOPWORDS = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
@@ -47,7 +47,7 @@ def search_fixture_documents(
         raise ValueError("limit must be between 1 and 10")
     base = fixture_root.resolve(strict=True)
     manifest = base / "manifest.csv"
-    policy = json.loads((base / "roles.json").read_text(encoding="utf-8"))
+    policy = load_policy(base / "roles.json")
     wanted = _terms(query)
     if not wanted:
         return []

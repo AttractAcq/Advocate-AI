@@ -28,6 +28,7 @@ from services.knowledge.indexed_retrieval import SourceManifestError, approved_r
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
 from services.policy.audit import AuditLog, verify as verify_audit
+from services.policy.policy_file import PolicyUnavailable, load_policy, read_policy_bytes
 from services.connectors.wazuh import WazuhIndexerReader, WazuhUnavailable, parse_incident_id
 from services.intelligence.assets import AssetRegistry
 from services.intelligence.engine import load_fixture_incidents, safe_incident_analysis, supported_incidents
@@ -177,7 +178,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if audit is None:
             return
         try:
-            version = hashlib.sha256((settings.fixture_root / "roles.json").read_bytes()).hexdigest()
+            version = hashlib.sha256(read_policy_bytes(settings.fixture_root / "roles.json")).hexdigest()
             audit.append(actor=actor, action=action, resource=resource,
                          decision=decision, policy_version=version)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -189,7 +190,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             return await call_next(request)
         try:
             verify_audit(audit.path, require_current_clock=True)
-            policy_version = hashlib.sha256((settings.fixture_root / "roles.json").read_bytes()).hexdigest()
+            policy_version = hashlib.sha256(read_policy_bytes(settings.fixture_root / "roles.json")).hexdigest()
         except (OSError, ValueError, json.JSONDecodeError):
             return JSONResponse({"detail": "audit unavailable"}, status_code=503)
         auth = request.headers.get("authorization", "")
@@ -246,7 +247,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 return approved_rows(settings.fixture_root, settings.knowledge_manifest, settings.knowledge_db, user_id)
             except (SourceManifestError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
-        policy = json.loads((settings.fixture_root / "roles.json").read_text(encoding="utf-8"))
+        try:
+            policy = load_policy(settings.fixture_root / "roles.json")
+        except PolicyUnavailable as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "source permissions unavailable") from exc
         base = settings.fixture_root.resolve()
         permitted: list[dict[str, str]] = []
         with (settings.fixture_root / "manifest.csv").open(newline="", encoding="utf-8") as stream:
@@ -511,7 +516,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                                            settings.knowledge_db, user_id, request.message, **options)
                 else:
                     context = search_fixture_documents(settings.fixture_root, user_id, request.message, **options)
-            except SourceManifestError as exc:
+            except (SourceManifestError, PolicyUnavailable) as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "source permissions unavailable") from exc
             except ValueError as exc:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
