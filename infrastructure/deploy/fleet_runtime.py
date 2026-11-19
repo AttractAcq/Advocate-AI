@@ -56,11 +56,8 @@ def validate_config(path: Path) -> str | None:
     return issuer
 
 
-def _import_trust(state: Path) -> Path | None:
-    """Validate optional, separately provisioned offline receipt trust."""
-    root = state.parent / "receipt-import"
-    if not root.exists() and not root.is_symlink():
-        return None
+def validate_import_trust_dir(root: Path) -> None:
+    """Validate a separately provisioned offline receipt trust directory."""
     if (root.is_symlink() or not root.is_dir() or
             root.stat().st_uid != os.getuid() or
             stat.S_IMODE(root.stat().st_mode) & 0o077):
@@ -89,6 +86,13 @@ def _import_trust(state: Path) -> Path | None:
         raise RuntimeError("invalid Fleet receipt trust issuer") from exc
     if len({key_id(key) for key in keys}) != len(keys):
         raise RuntimeError("duplicate Fleet receipt trust issuer")
+
+
+def _import_trust(state: Path) -> Path | None:
+    root = state.parent / "receipt-import"
+    if not root.exists() and not root.is_symlink():
+        return None
+    validate_import_trust_dir(root)
     return root
 
 

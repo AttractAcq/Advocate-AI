@@ -20,7 +20,7 @@ from cryptography import x509
 from infrastructure.deploy.fleet_runtime import (
     FleetRuntime, RuntimeError as FleetRuntimeError, _import_trust, probe_runtime,
     start_verified_bundle, stop_runtime, validate_config, validate_state,
-    verify_runtime_identity,
+    validate_import_trust_dir, verify_runtime_identity, _trust_digest,
 )
 from infrastructure.deploy.fleet_backup import restore_fleet
 from infrastructure.release.bundle import BundleError, MANIFEST, verify_bundle
@@ -267,6 +267,7 @@ def _provision_receipt_trust(root: Path, source: Path | None) -> None:
             source.stat().st_uid != os.getuid() or
             stat.S_IMODE(source.stat().st_mode) & 0o077):
         raise FleetInstallError("invalid or already provisioned Fleet receipt trust")
+    validate_import_trust_dir(source)
     try:
         shutil.copytree(source, target, symlinks=True)
         _import_trust(root / "state")
@@ -314,8 +315,7 @@ def install_fleet(bundle: Path, trusted_key: Path, crane: Path,
                   receipt_trust_dir: Path | None = None) -> dict[str, object]:
     _owner_directory(root, create=True)
     with _lock(root):
-        if _read_ca_journal(root) is not None:
-            raise FleetInstallError("recover interrupted Fleet CA rotation first")
+        _require_no_rotation(root)
         issuer = validate_config(config)
         current = _state(root)
         if issuer is not None and identity_network is None and current is not None:
@@ -353,8 +353,7 @@ def restore_install_fleet(bundle: Path, trusted_key: Path, crane: Path,
 
 
 def fleet_status(root: Path, trusted_key: Path) -> dict[str, object]:
-    if _read_ca_journal(root) is not None:
-        raise FleetInstallError("Fleet CA rotation is pending recovery")
+    _require_no_rotation(root)
     current = _state(root)
     if current is None:
         raise FleetInstallError("no active Fleet release")
@@ -475,13 +474,194 @@ def _read_ca_journal(root: Path) -> dict[str, object] | None:
     return value
 
 
+def _receipt_journal(root: Path) -> Path:
+    return root / ".receipt-trust-rotation.json"
+
+
+def _read_receipt_journal(root: Path) -> dict[str, object] | None:
+    path = _receipt_journal(root)
+    if not path.exists() and not path.is_symlink():
+        return None
+    if (path.is_symlink() or not path.is_file() or
+            path.stat().st_uid != os.getuid() or
+            stat.S_IMODE(path.stat().st_mode) & 0o077 or
+            path.stat().st_size > 8192):
+        raise FleetInstallError("invalid Fleet receipt rotation journal")
+    try:
+        value = json.loads(path.read_bytes(), object_pairs_hook=_unique)
+        if (not isinstance(value, dict) or
+                set(value) != {"schema", "old_state", "old_digest", "new_digest"} or
+                value["schema"] != 1 or type(value["schema"]) is not int or
+                any(not isinstance(value[name], str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", value[name]) for name in
+                    ("old_digest", "new_digest"))):
+            raise ValueError("invalid receipt rotation journal fields")
+        old = value["old_state"]
+        if (not isinstance(old, dict) or
+                set(old) != {"schema", "active", "previous", "runtime"} or
+                old["schema"] != 1 or type(old["schema"]) is not int or
+                not isinstance(old["active"], str) or
+                not _RELEASE.fullmatch(old["active"]) or
+                (old["previous"] is not None and
+                 (not isinstance(old["previous"], str) or
+                  not _RELEASE.fullmatch(old["previous"]))) or
+                not isinstance(old["runtime"], dict) or
+                set(old["runtime"]) != {"network_id", "api_id", "portal_id",
+                                        "identity_network_id", "identity_network_name"} or
+                any(not isinstance(old["runtime"].get(name), str) or
+                    not _DOCKER_ID.fullmatch(old["runtime"][name]) for name in
+                    ("network_id", "api_id", "portal_id")) or
+                ((old["runtime"]["identity_network_id"] is None) !=
+                 (old["runtime"]["identity_network_name"] is None)) or
+                (old["runtime"]["identity_network_id"] is not None and
+                 (not isinstance(old["runtime"]["identity_network_id"], str) or
+                  not _DOCKER_ID.fullmatch(old["runtime"]["identity_network_id"]) or
+                  not isinstance(old["runtime"]["identity_network_name"], str)))):
+            raise ValueError("invalid receipt rotation journal state")
+    except (ValueError, UnicodeError) as exc:
+        raise FleetInstallError("invalid Fleet receipt rotation journal") from exc
+    return value
+
+
+def _write_receipt_journal(root: Path, old: dict[str, object],
+                           old_digest: str, new_digest: str) -> Path:
+    path = _receipt_journal(root)
+    payload = json.dumps({"schema": 1, "old_state": old,
+                          "old_digest": old_digest, "new_digest": new_digest},
+                         sort_keys=True, separators=(",", ":")).encode()
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def _require_no_rotation(root: Path) -> None:
+    if _read_ca_journal(root) is not None:
+        raise FleetInstallError("recover interrupted Fleet CA rotation first")
+    if _read_receipt_journal(root) is not None:
+        raise FleetInstallError("recover interrupted Fleet receipt rotation first")
+
+
+def rotate_fleet_receipt_trust(root: Path, trusted_key: Path, crane: Path,
+                               source: Path) -> dict[str, object]:
+    """Activate a signed candidate with replacement receipt issuer trust."""
+    _owner_directory(root)
+    with _lock(root):
+        _require_no_rotation(root)
+        current = _state(root)
+        if current is None:
+            raise FleetInstallError("no active Fleet release")
+        identifier = str(current["active"])
+        stage = root / "fleet-releases" / identifier
+        _verify_stage(stage, trusted_key, identifier)
+        trust = _import_trust(root / "state")
+        if trust is None:
+            raise FleetInstallError("Fleet receipt trust is not installed")
+        if not source.is_absolute() or source.resolve() == trust.resolve():
+            raise FleetInstallError("replacement receipt trust must be separate")
+        validate_import_trust_dir(source)
+        old_digest = _trust_digest(trust)
+        handle = _handle(current)
+        probe_runtime(handle, stage / "bundle", trusted_key,
+                      root / "state", stage / "fleet-config.json")
+        previous = root / ".receipt-trust-previous"
+        if previous.exists() or previous.is_symlink():
+            raise FleetInstallError("previous Fleet receipt trust is unresolved")
+        staging = Path(tempfile.mkdtemp(prefix=".receipt-trust-next-", dir=root))
+        staged_trust = staging / "receipt-import"
+        try:
+            shutil.copytree(source, staged_trust, symlinks=True)
+            validate_import_trust_dir(staged_trust)
+            new_digest = _trust_digest(staged_trust)
+            if new_digest == old_digest:
+                raise FleetInstallError("replacement receipt trust is unchanged")
+            journal = _write_receipt_journal(root, current, old_digest, new_digest)
+            try:
+                os.rename(trust, previous)
+                os.rename(staged_trust, trust)
+                candidate = start_verified_bundle(
+                    stage / "bundle", trusted_key, crane,
+                    stage / "fleet-config.json", root / "state",
+                    handle.identity_network_name)
+                try:
+                    _write_state(root, identifier, current["previous"], candidate)
+                except Exception:
+                    stop_runtime(candidate)
+                    raise
+            except Exception:
+                if previous.exists():
+                    if trust.exists() or trust.is_symlink():
+                        shutil.rmtree(trust)
+                    os.rename(previous, trust)
+                journal.unlink()
+                raise
+            stop_runtime(handle)
+            shutil.rmtree(previous)
+            journal.unlink()
+            return {"result": "receipt_trust_rotated", "active": identifier,
+                    "previous": current["previous"]}
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def _reconcile_receipt_rotation(root: Path, trusted_key: Path) -> None:
+    pending = _read_receipt_journal(root)
+    if pending is None:
+        return
+    current = _state(root)
+    old = pending["old_state"]
+    if current is None or current["active"] != old["active"]:
+        raise FleetInstallError("receipt rotation journal does not match active release")
+    trust = root / "receipt-import"
+    previous = root / ".receipt-trust-previous"
+    old_runtime = _handle(old)
+    current_runtime = _handle(current)
+    if current_runtime.api_id == old_runtime.api_id:
+        if previous.exists():
+            validate_import_trust_dir(previous)
+            if _trust_digest(previous) != pending["old_digest"]:
+                raise FleetInstallError("previous receipt trust changed")
+            if trust.exists() or trust.is_symlink():
+                validate_import_trust_dir(trust)
+                if _trust_digest(trust) != pending["new_digest"]:
+                    raise FleetInstallError("staged receipt trust changed")
+                shutil.rmtree(trust)
+            os.rename(previous, trust)
+        else:
+            validate_import_trust_dir(trust)
+            if _trust_digest(trust) != pending["old_digest"]:
+                raise FleetInstallError("old receipt trust changed")
+    else:
+        validate_import_trust_dir(trust)
+        if _trust_digest(trust) != pending["new_digest"]:
+            raise FleetInstallError("receipt rotation trust changed after commit")
+        if previous.exists() or previous.is_symlink():
+            validate_import_trust_dir(previous)
+            if _trust_digest(previous) != pending["old_digest"]:
+                raise FleetInstallError("previous receipt trust changed after commit")
+        stage = root / "fleet-releases" / str(current["active"])
+        _verify_stage(stage, trusted_key, str(current["active"]))
+        probe_runtime(current_runtime, stage / "bundle", trusted_key,
+                      root / "state", stage / "fleet-config.json")
+        stop_runtime(old_runtime)
+        if previous.exists():
+            shutil.rmtree(previous)
+    _receipt_journal(root).unlink()
+
+
 def rotate_fleet_ca(root: Path, trusted_key: Path, crane: Path,
                     ca_file: Path) -> dict[str, object]:
     """Start a signed candidate with staged CA trust; retain the old runtime on failure."""
     _owner_directory(root)
     with _lock(root):
-        if _read_ca_journal(root) is not None:
-            raise FleetInstallError("recover interrupted Fleet CA rotation first")
+        _require_no_rotation(root)
         current = _state(root)
         if current is None:
             raise FleetInstallError("no active Fleet release")
@@ -558,8 +738,7 @@ def _reconcile_ca_rotation(root: Path, trusted_key: Path) -> None:
 def rollback_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, object]:
     _owner_directory(root)
     with _lock(root):
-        if _read_ca_journal(root) is not None:
-            raise FleetInstallError("recover interrupted Fleet CA rotation first")
+        _require_no_rotation(root)
         current = _state(root)
         if current is None or current["previous"] is None:
             raise FleetInstallError("no previous Fleet release")
@@ -573,6 +752,7 @@ def recover_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
     _owner_directory(root)
     with _lock(root):
         _reconcile_ca_rotation(root, trusted_key)
+        _reconcile_receipt_rotation(root, trusted_key)
         current = _state(root)
         if current is None:
             raise FleetInstallError("no active Fleet release")
@@ -612,7 +792,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic signed Fleet installer")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("install", "restore-install", "status", "rollback", "recover",
-                 "rotate-ca"):
+                 "rotate-ca", "rotate-receipt-trust"):
         command = commands.add_parser(name)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
@@ -631,6 +811,8 @@ def main() -> None:
             command.add_argument("--backup-key", required=True, type=Path)
         if name == "rotate-ca":
             command.add_argument("--ca-file", required=True, type=Path)
+        if name == "rotate-receipt-trust":
+            command.add_argument("--receipt-trust-dir", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "install":
@@ -651,6 +833,9 @@ def main() -> None:
         elif args.command == "rotate-ca":
             result = rotate_fleet_ca(args.root, args.trusted_key,
                                      args.crane, args.ca_file)
+        elif args.command == "rotate-receipt-trust":
+            result = rotate_fleet_receipt_trust(
+                args.root, args.trusted_key, args.crane, args.receipt_trust_dir)
         elif args.command == "rollback":
             result = rollback_fleet(args.root, args.trusted_key, args.crane)
         else:
