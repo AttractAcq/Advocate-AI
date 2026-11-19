@@ -299,6 +299,43 @@ class ProductInstallerTests(unittest.TestCase):
             self.assertEqual(result["restored_files"], 5)
             started.assert_called_once()
 
+    def test_inconsistent_restored_knowledge_pair_denies_activation(self) -> None:
+        _, credential = self._external_state()
+        def restore(_snapshot, _repository, _password, _restic, _digest,
+                    destination: Path) -> dict[str, object]:
+            destination.mkdir(mode=0o700)
+            (destination / "sources").mkdir()
+            (destination / "sources" / "ENG-001.txt").write_bytes(b"fictional")
+            (destination / "roles.json").write_text("synthetic")
+            (destination / "history.db").write_text("synthetic")
+            with (destination / "manifest.csv").open("w", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(("document_id", "relative_path", "collection", "classification",
+                                 "version", "sha256", "owner", "source_type"))
+                writer.writerow(("ENG-001", "sources/ENG-001.txt", "engineering",
+                                 "C0_SYNTHETIC", "1", hashlib.sha256(b"fictional").hexdigest(),
+                                 "fictional", "synthetic-local"))
+            AuditLog(destination / "audit.jsonl").append(
+                actor="synthetic-installer", action="install", resource="core-state",
+                decision="allow", policy_version="a" * 64)
+            (destination / "knowledge-manifest.json").write_text(
+                '{"schema":1,"sources":[]}')
+            (destination / "knowledge.db").write_bytes(b"not a SQLite database")
+            return {"files": 7}
+
+        with patch("infrastructure.deploy.product_installer.verify_bundle",
+                   return_value={"schema": 4}), \
+             patch("infrastructure.deploy.product_installer.restore_snapshot",
+                   side_effect=restore), \
+             patch("infrastructure.deploy.product_installer.start_verified_bundle") as started:
+            with self.assertRaisesRegex(ProductInstallError, "knowledge index is inconsistent"):
+                restore_install_product(self.first, self.key, self.crane,
+                    self.config, self.root, "a" * 64, self.base / "repository",
+                    self.base / "password", self.base / "restic", "b" * 64,
+                    credential, require_audit=True)
+        started.assert_not_called()
+        self.assertFalse(self.root.exists())
+
     def test_restore_install_rejects_existing_root_and_failed_restore(self) -> None:
         _, credential = self._external_state()
         with patch("infrastructure.deploy.product_installer.verify_bundle",

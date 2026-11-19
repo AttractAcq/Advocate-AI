@@ -22,6 +22,7 @@ from infrastructure.deploy.product_installer import (
     _require_audit, _state, restore_install_product,
 )
 from infrastructure.deploy.core_state_inventory import source_files, stage_source_inventory
+from infrastructure.deploy.knowledge_state_inventory import stage_knowledge_pair
 from infrastructure.restic_repository import create_snapshot
 from infrastructure.release.bundle import verify_bundle
 from infrastructure.upload_quarantine_backup import (
@@ -30,6 +31,7 @@ from infrastructure.upload_quarantine_backup import (
 from services.knowledge.upload_staging import quarantine_directory_lock
 from services.policy.policy_file import policy_directory_lock
 from services.policy.audit import verify as verify_audit
+from services.knowledge.manifest_io import read_manifest_bytes
 from services.policy.regular_file import read_regular_file
 
 
@@ -164,6 +166,9 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                 frozen = Path(temporary).resolve() / "frozen-sources"
                 sources = stage_source_inventory(state, frozen)
                 frozen_manifest = read_regular_file(frozen / "manifest.csv", 1024 * 1024)
+                knowledge = stage_knowledge_pair(state, frozen)
+                frozen_knowledge_manifest = (read_manifest_bytes(knowledge[0])
+                                             if knowledge is not None else None)
                 files = [
                     {"name": "roles.json", "kind": "file", "source": str(state / "roles.json")},
                     {"name": "manifest.csv", "kind": "file", "source": str(frozen / "manifest.csv")},
@@ -172,12 +177,12 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
                 ]
                 files.extend({"name": f"sources/{source.name}", "kind": "file",
                               "source": str(source)} for source in sources)
-                if (state / "knowledge-manifest.json").exists():
+                if knowledge is not None:
                     files.extend([
                         {"name": "knowledge-manifest.json", "kind": "file",
-                         "source": str(state / "knowledge-manifest.json")},
+                         "source": str(knowledge[0])},
                         {"name": "knowledge.db", "kind": "sqlite",
-                         "source": str(state / "knowledge.db")},
+                         "source": str(knowledge[1])},
                     ])
                 spec.write_text(json.dumps({"schema": 1, "files": files}))
                 core = create_snapshot(spec, core_repository, core_password_file,
@@ -189,6 +194,9 @@ def create_product_recovery_set(install_root: Path, core_repository: Path,
             source_files(state)
             if read_regular_file(state / "manifest.csv", 1024 * 1024) != frozen_manifest:
                 raise RecoverySetError("Core source manifest changed during capture")
+            if (frozen_knowledge_manifest is not None and
+                    read_manifest_bytes(state / "knowledge-manifest.json") != frozen_knowledge_manifest):
+                raise RecoverySetError("Core knowledge manifest changed during capture")
             if verify_audit(state / "audit.jsonl", require_current_clock=True) != audit_checkpoint:
                 raise RecoverySetError("Core audit trail changed during capture")
             value = _payload({

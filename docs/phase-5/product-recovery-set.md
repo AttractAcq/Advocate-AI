@@ -20,6 +20,14 @@ When an installed Core also has a Phase 3 `knowledge-manifest.json` and
 `knowledge.db`, capture requires both and includes both in the Core snapshot.
 The index is taken as a SQLite snapshot; the signed runtime pins both paths in
 its environment after restore.
+Capture now checks that the JSON manifest names approved source rows and that
+every ready SQLite row matches its source metadata and has passages. It copies
+the JSON and takes a consistent SQLite backup into private staging beside the
+frozen sources, then checks that staged pair before restic runs. Clean restore
+repeats the semantic check before starting Core. An invalid or incomplete
+knowledge pair denies capture or activation. A later external update to the
+live index may differ from this captured point in time; a coordinated vessel
+data freeze remains a production gate.
 The Core source inventory comes from its synthetic `manifest.csv`. Capture
 requires every listed source to be a regular flat file with the listed SHA-256,
 rejects missing or extra files, and includes each listed source in the encrypted
