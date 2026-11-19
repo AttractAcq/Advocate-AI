@@ -391,6 +391,7 @@ class FleetCatalog:
         attention: list[tuple[int, str, str, dict[str, object]]] = []
         attention_total = 0
         with self._connect() as connection:
+            connection.execute("BEGIN")
             self._verify(connection)
             for row in connection.execute("SELECT kind, payload FROM records ORDER BY kind, code"):
                 kind = str(row["kind"])
