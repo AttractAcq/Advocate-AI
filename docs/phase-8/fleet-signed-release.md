@@ -104,13 +104,30 @@ HTTPS JWKS service on a labelled internal identity network. It installs the
 same signed Fleet images in OIDC mode, checks a signed Fleet-audience token,
 rejects a Core-audience token, and confirms status fails when the IdP stops.
 The synthetic rotation rehearsal first proves that replacing the installed CA
-before the IdP changes fails closed and recovers when the old trust is restored.
-It then overlaps old and new CA certificates and JWKS signing keys, verifies
-both tokens, switches the IdP certificate, removes the old trust, restarts the
-API to clear its five-minute JWKS cache, and verifies that the old token and
-old CA are rejected. The test directly updates temporary bind-mounted files;
-it is evidence for a rotation sequence, not an operator-facing production
-rotation command or an approved company trust policy.
+before the IdP changes fails closed and keeps the old runtime. It then overlaps
+old and new CA certificates and JWKS signing keys, verifies both tokens,
+switches the IdP certificate, removes the old trust, and verifies that the old
+token and old CA are rejected. Each CA change uses the installer's `rotate-ca`
+operation to start a candidate from the active signed bundle. The operation
+checks that the replacement is an owner-only file containing current CA
+certificates, probes the existing runtime, stages the new trust, and writes the
+active state only after the candidate passes the signed runtime checks. A
+failed candidate restores the old CA file and leaves the old runtime active.
+The new API instance clears the five-minute JWKS cache at signing-key cutover.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_installer rotate-ca \
+  --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane --ca-file /protected/next-company-idp-ca.pem
+```
+
+Stage an overlapping CA bundle before changing the IdP certificate. After
+the IdP serves the new certificate and signing key, rotate to the new-only CA
+bundle. The local rehearsal checks rejected candidate rollback, overlapping
+trust, cutover and stale-trust denial. An abrupt interruption between CA
+staging and active-state replacement is not yet automatically reconciled;
+recover the previous CA from protected media before restarting the installer.
+Company CA custody, approved rollover timing and target ingress remain B-12.
 The synthetic runner maps that temporary IdP hostname to its private network
 address because the hosted Linux Docker runner does not resolve its network
 alias from the two-network API container. This mapping is confined to the

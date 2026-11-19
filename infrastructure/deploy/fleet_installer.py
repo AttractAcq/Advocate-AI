@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,8 @@ import re
 import shutil
 import stat
 import tempfile
+
+from cryptography import x509
 
 from infrastructure.deploy.fleet_runtime import (
     FleetRuntime, RuntimeError as FleetRuntimeError, probe_runtime,
@@ -339,6 +342,95 @@ def fleet_status(root: Path, trusted_key: Path) -> dict[str, object]:
             "previous": current["previous"]}
 
 
+def _read_ca_source(source: Path) -> bytes:
+    if not source.is_absolute() or source.is_symlink():
+        raise FleetInstallError("invalid Fleet CA source")
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        details = os.fstat(descriptor)
+        if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid() or
+                stat.S_IMODE(details.st_mode) & 0o077 or
+                not 1 <= details.st_size <= 64 * 1024):
+            raise FleetInstallError("Fleet CA source must be an owner-only regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(64 * 1024 + 1)
+    finally:
+        os.close(descriptor)
+    if len(data) > 64 * 1024:
+        raise FleetInstallError("Fleet CA source is too large")
+    try:
+        certificates = x509.load_pem_x509_certificates(data)
+        now = datetime.now(timezone.utc)
+        if not certificates or any(
+                not certificate.extensions.get_extension_for_class(
+                    x509.BasicConstraints).value.ca or
+                certificate.not_valid_before_utc > now or
+                certificate.not_valid_after_utc <= now
+                for certificate in certificates):
+            raise FleetInstallError("Fleet CA bundle must contain valid CA certificates")
+    except (ValueError, x509.ExtensionNotFound) as exc:
+        raise FleetInstallError("invalid Fleet CA bundle") from exc
+    return data
+
+
+def _private_temp(directory: Path, prefix: str, data: bytes) -> Path:
+    descriptor, filename = tempfile.mkstemp(prefix=prefix, dir=directory)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        Path(filename).unlink(missing_ok=True)
+        raise
+    return Path(filename)
+
+
+def rotate_fleet_ca(root: Path, trusted_key: Path, crane: Path,
+                    ca_file: Path) -> dict[str, object]:
+    """Start a signed candidate with staged CA trust; retain the old runtime on failure."""
+    _owner_directory(root)
+    with _lock(root):
+        current = _state(root)
+        if current is None:
+            raise FleetInstallError("no active Fleet release")
+        identifier = str(current["active"])
+        stage = root / "fleet-releases" / identifier
+        _verify_stage(stage, trusted_key, identifier)
+        if validate_config(stage / "fleet-config.json") is None:
+            raise FleetInstallError("Fleet CA rotation requires OIDC mode")
+        identity = root / "identity"
+        _owner_directory(identity)
+        old_ca = identity / "ca.pem"
+        previous = _read_ca_source(old_ca)
+        replacement = _read_ca_source(ca_file)
+        handle = _handle(current)
+        probe_runtime(handle, stage / "bundle", trusted_key,
+                      root / "state", stage / "fleet-config.json")
+        staged = _private_temp(identity, ".ca-next-", replacement)
+        try:
+            os.replace(staged, old_ca)
+            try:
+                candidate = start_verified_bundle(
+                    stage / "bundle", trusted_key, crane,
+                    stage / "fleet-config.json", root / "state",
+                    handle.identity_network_name)
+                try:
+                    _write_state(root, identifier, current["previous"], candidate)
+                except Exception:
+                    stop_runtime(candidate)
+                    raise
+            except Exception:
+                fallback = _private_temp(identity, ".ca-restore-", previous)
+                os.replace(fallback, old_ca)
+                raise
+        finally:
+            staged.unlink(missing_ok=True)
+        stop_runtime(handle)
+        return {"result": "identity_rotated", "active": identifier,
+                "previous": current["previous"]}
+
+
 def rollback_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, object]:
     _owner_directory(root)
     with _lock(root):
@@ -392,7 +484,8 @@ def recover_fleet(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic signed Fleet installer")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("install", "restore-install", "status", "rollback", "recover"):
+    for name in ("install", "restore-install", "status", "rollback", "recover",
+                 "rotate-ca"):
         command = commands.add_parser(name)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
@@ -408,6 +501,8 @@ def main() -> None:
         if name == "restore-install":
             command.add_argument("--archive", required=True, type=Path)
             command.add_argument("--backup-key", required=True, type=Path)
+        if name == "rotate-ca":
+            command.add_argument("--ca-file", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "install":
@@ -423,6 +518,9 @@ def main() -> None:
                                            args.roles_file, args.identity_network, args.ca_file)
         elif args.command == "status":
             result = fleet_status(args.root, args.trusted_key)
+        elif args.command == "rotate-ca":
+            result = rotate_fleet_ca(args.root, args.trusted_key,
+                                     args.crane, args.ca_file)
         elif args.command == "rollback":
             result = rollback_fleet(args.root, args.trusted_key, args.crane)
         else:
