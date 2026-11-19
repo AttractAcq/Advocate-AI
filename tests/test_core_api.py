@@ -157,6 +157,19 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(self.model.calls, [])
 
+    async def test_pending_policy_change_blocks_new_api_and_health_requests(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        marker = self.fixtures / "roles.json.pending"
+        marker.write_text("synthetic pending change")
+        try:
+            self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code,
+                             503)
+            self.assertEqual((await self.client.get("/health")).status_code, 503)
+        finally:
+            marker.unlink()
+        self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code,
+                         200)
+
     async def test_optional_history_survives_restart_and_rechecks_scope(self) -> None:
         settings = Settings(fixture_root=self.fixtures, lab_password="synthetic-test-passphrase",
                             history_db=self.fixtures / "runtime/history.sqlite3")
