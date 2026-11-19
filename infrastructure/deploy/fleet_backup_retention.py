@@ -143,6 +143,10 @@ def apply_retention(directory: Path, policy_file: Path, plan_file: Path,
                         raise FleetRetentionError("latest Fleet backup is outside freshness limit")
             finally:
                 shutil.rmtree(stage)
+        if (_digest(plan_file) != expected_sha256 or
+                _digest(policy_file) != policy_hash or
+                _inventory(directory) != inventory):
+            raise FleetRetentionError("Fleet retention inputs changed during verification")
         removed = []
         for item in inventory[:-policy["keep_last"]]:
             archive = directory / str(item["name"])

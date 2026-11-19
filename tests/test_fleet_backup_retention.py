@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from infrastructure.backup import BackupError, generate_key
 from infrastructure.deploy.fleet_backup_service import create_scheduled
 from infrastructure.deploy.fleet_backup_retention import (
     FleetRetentionError, apply_retention, plan_retention,
 )
+from infrastructure.deploy.fleet_backup import restore_fleet
 from services.fleet.catalog import Customer, FleetCatalog
 
 
@@ -81,6 +83,22 @@ class FleetBackupRetentionTests(unittest.TestCase):
                                            "max_age_hours": 24}))
         with self.assertRaisesRegex(FleetRetentionError, "invalid Fleet retention policy"):
             plan_retention(self.archives, self.policy, self.plan)
+
+    def test_policy_change_during_restore_denies_deletion(self) -> None:
+        preview = plan_retention(self.archives, self.policy, self.plan)
+
+        def changed_policy(*args: object) -> dict[str, object]:
+            result = restore_fleet(*args)
+            self.policy.write_text(json.dumps({"schema": 1, "keep_last": 3,
+                                               "max_age_hours": 24}))
+            return result
+
+        with patch("infrastructure.deploy.fleet_backup_retention.restore_fleet",
+                   side_effect=changed_policy):
+            with self.assertRaisesRegex(FleetRetentionError, "changed during verification"):
+                apply_retention(self.archives, self.policy, self.plan,
+                                str(preview["plan_sha256"]), self.key)
+        self.assertTrue(all(path.exists() for path in self.created))
 
 
 if __name__ == "__main__":
