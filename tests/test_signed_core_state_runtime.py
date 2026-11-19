@@ -122,6 +122,22 @@ class SignedCoreStateMountTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "audit trail"):
             _core_state_options(self.state, self.credential)
 
+    def test_indexed_knowledge_files_are_paired_and_exposed_to_core(self) -> None:
+        manifest = self.state / "knowledge-manifest.json"
+        database = self.state / "knowledge.db"
+        manifest.write_text('{"schema":1,"sources":[]}')
+        with self.assertRaisesRegex(RuntimeError, "together"):
+            _core_state_options(self.state, self.credential)
+        database.write_bytes(b"synthetic")
+        options = _core_state_options(self.state, self.credential)
+        self.assertIn("SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/knowledge-manifest.json",
+                      options)
+        self.assertIn("SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db", options)
+        manifest.unlink()
+        manifest.symlink_to(self.state / "roles.json")
+        with self.assertRaisesRegex(RuntimeError, "linked Core knowledge"):
+            _core_state_options(self.state, self.credential)
+
     def test_emergency_secret_is_separate_owner_only_and_read_only(self) -> None:
         emergency = self.root / "emergency-password"
         emergency.write_text(secrets.token_urlsafe(24) + "\n")

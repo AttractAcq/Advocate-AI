@@ -210,7 +210,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 state_root = root / "core-restore"
                 state_root.mkdir(mode=0o700)
                 repository, backup_password, snapshot_id, conversation_id = snapshot_synthetic_state(
-                    state_root, restic, restic_sha256)
+                    state_root, restic, restic_sha256, include_index=True)
                 lab_credential = root / "lab-password"
                 lab_credential.write_text(PASSPHRASE + "\n")
                 lab_credential.chmod(0o600)
@@ -402,7 +402,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             "late", staged_id))
                         recovered_audit = recovered_root / "core-state" / "audit.jsonl"
                         recovered_count, _ = verify_audit(recovered_audit)
-                        if (combined["restored_files"] != 5 or
+                        if (combined["restored_files"] != 7 or
                                 not recovered_audit.read_bytes().startswith(audit_before) or
                                 recovered_count <= audit_count or
                                 combined["restored_upload_files"] != 2 or

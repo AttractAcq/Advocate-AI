@@ -20,6 +20,10 @@ containing both exact archives. A finding in either image must deny that
 bundle before any product package is signed.
 
 The signed-image installer leg opts into a separate private upload quarantine.
+It also restores a one-source Phase 3 manifest and SQLite passage index into
+Core's external state, so the signed runtime exercises permission-aware indexed
+retrieval rather than the earlier CSV fallback. The later recovery set captures
+and restores that index with the audit trail.
 It submits a fictional document through Core, verifies that the file is staged
 but absent from approved sources, and checks that the staged record survives a
 runtime refresh. This tests the mounted upload path in the actual container;

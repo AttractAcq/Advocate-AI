@@ -380,9 +380,13 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
     try:
         restored = restore_snapshot(snapshot_id, repository, restic_password_file,
                                     restic, restic_sha256, root / "core-state")
-        if restored["files"] not in (4, 5) or (require_audit and restored["files"] != 5):
+        if restored["files"] not in (4, 5, 6, 7) or (require_audit and restored["files"] not in (5, 7)):
             raise ProductInstallError("unexpected synthetic Core snapshot contents")
-        if restored["files"] == 5:
+        knowledge = root / "core-state" / "knowledge-manifest.json"
+        knowledge_db = root / "core-state" / "knowledge.db"
+        if (restored["files"] in (6, 7)) != (knowledge.is_file() and knowledge_db.is_file()):
+            raise ProductInstallError("unexpected Core knowledge snapshot contents")
+        if restored["files"] in (5, 7):
             _require_audit(root / "core-state")
             if (audit_checkpoint is not None and
                     verify_audit(root / "core-state" / "audit.jsonl",

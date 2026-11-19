@@ -94,6 +94,23 @@ class ProductRecoverySetTests(unittest.TestCase):
         self.assertEqual(verify_product_recovery_set(self.receipt, self.public_key), result)
         self.assertEqual(self.receipt.stat().st_mode & 0o077, 0)
 
+    def test_indexed_knowledge_pair_is_included_in_core_snapshot(self) -> None:
+        state = self.install / "core-state"
+        (state / "knowledge-manifest.json").write_text('{"schema":1,"sources":[]}')
+        (state / "knowledge.db").write_bytes(b"synthetic")
+        def core(spec: Path, *_args) -> dict[str, object]:
+            names = {row["name"] for row in json.loads(spec.read_text())["files"]}
+            self.assertEqual(names, {"roles.json", "manifest.csv", "history.db",
+                                     "audit.jsonl", "sources/ENG-001.txt",
+                                     "knowledge-manifest.json", "knowledge.db"})
+            return {"snapshot_id": "1" * 64}
+        with patch("infrastructure.deploy.product_recovery_set._require_stopped"), \
+             patch("infrastructure.deploy.product_recovery_set.create_snapshot",
+                   side_effect=core), \
+             patch("infrastructure.deploy.product_recovery_set.create_upload_snapshot",
+                   return_value={"snapshot_id": "2" * 64}):
+            self._create()
+
     def test_running_product_or_second_backup_failure_leaves_no_receipt(self) -> None:
         with patch("infrastructure.deploy.product_recovery_set._require_stopped",
                    side_effect=RecoverySetError("runtime running")), \
