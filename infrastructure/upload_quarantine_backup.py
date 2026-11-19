@@ -14,11 +14,13 @@ import tempfile
 import zipfile
 
 from infrastructure.restic_repository import MANIFEST, create_snapshot, restore_snapshot
+from services.knowledge.ingestion import MAX_BYTES
 from services.knowledge.upload_staging import MAX_PENDING
 
 _ID = re.compile(r"[0-9a-f]{32}\Z")
 MAX_RECORDS = 1024
-MAX_TOTAL = 240 * 1024 * 1024
+MAX_TOTAL = 900 * 1024 * 1024
+MAX_ARCHIVE = MAX_TOTAL + 2 * 1024 * 1024
 ARCHIVE = "upload-quarantine.zip"
 INVENTORY = "inventory.json"
 
@@ -37,12 +39,14 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _read_inventory(root: Path) -> tuple[dict[str, bytes], list[dict[str, object]]]:
+def _scan_inventory(root: Path) -> list[dict[str, object]]:
     _private_directory(root)
     names = sorted(os.listdir(root))
     if len(names) > MAX_RECORDS * 2:
         raise UploadBackupError("quarantine file limit exceeded")
-    files: dict[str, bytes] = {}
+    metadata: dict[str, bytes] = {}
+    sizes: dict[str, int] = {}
+    digests: dict[str, str] = {}
     total = 0
     for name in names:
         match = re.fullmatch(r"([0-9a-f]{32})\.(json|blob)", name)
@@ -53,16 +57,27 @@ def _read_inventory(root: Path) -> tuple[dict[str, bytes], list[dict[str, object
         try:
             info = os.fstat(descriptor)
             if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
-                    or info.st_size > (2048 if match[2] == "json" else MAX_TOTAL)):
+                    or info.st_size > (2048 if match[2] == "json" else MAX_BYTES)):
                 raise UploadBackupError("unsafe quarantine file")
             total += info.st_size
             if total > MAX_TOTAL:
                 raise UploadBackupError("quarantine size limit exceeded")
+            checksum = hashlib.sha256()
+            read_size = 0
             with os.fdopen(descriptor, "rb", closefd=False) as stream:
-                content = stream.read(info.st_size + 1)
-            if len(content) != info.st_size:
+                if match[2] == "json":
+                    content = stream.read(info.st_size + 1)
+                    checksum.update(content)
+                    read_size = len(content)
+                    metadata[name] = content
+                else:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        checksum.update(block)
+                        read_size += len(block)
+            if read_size != info.st_size:
                 raise UploadBackupError("quarantine file changed during snapshot")
-            files[name] = content
+            sizes[name] = info.st_size
+            digests[name] = checksum.hexdigest()
         finally:
             os.close(descriptor)
     metadata_names = [name for name in names if name.endswith(".json")]
@@ -72,7 +87,7 @@ def _read_inventory(root: Path) -> tuple[dict[str, bytes], list[dict[str, object
     for name in metadata_names:
         identifier = name[:-5]
         try:
-            record = json.loads(files[name])
+            record = json.loads(metadata[name])
         except (ValueError, UnicodeError) as exc:
             raise UploadBackupError("invalid quarantine metadata") from exc
         if (not isinstance(record, dict) or record.get("id") != identifier
@@ -84,17 +99,22 @@ def _read_inventory(root: Path) -> tuple[dict[str, bytes], list[dict[str, object
         blob = f"{identifier}.blob"
         if record["status"] == "pending":
             pending += 1
-            if (blob not in files or len(files[blob]) != record["size"]
-                    or _sha256(files[blob]) != record["sha256"]):
+            if (blob not in sizes or sizes[blob] != record["size"]
+                    or digests[blob] != record["sha256"]):
                 raise UploadBackupError("pending upload bytes do not match metadata")
-        elif blob in files:
+        elif blob in sizes:
             raise UploadBackupError("approved upload retains quarantine bytes")
-    if pending > MAX_PENDING or any(name.endswith(".blob") and f"{name[:-5]}.json" not in files
+    if pending > MAX_PENDING or any(name.endswith(".blob") and f"{name[:-5]}.json" not in sizes
                                     for name in names):
         raise UploadBackupError("orphan or excessive pending upload")
-    rows = [{"name": name, "size": len(content), "sha256": _sha256(content)}
-            for name, content in files.items()]
-    return files, rows
+    return [{"name": name, "size": sizes[name], "sha256": digests[name]}
+            for name in names]
+
+
+def _read_inventory(root: Path) -> tuple[dict[str, bytes], list[dict[str, object]]]:
+    """Small fixture helper; the backup path uses the streaming scan above."""
+    rows = _scan_inventory(root)
+    return {row["name"]: (root / row["name"]).read_bytes() for row in rows}, rows
 
 
 def _write_archive(archive: Path, files: dict[str, bytes], rows: list[dict[str, object]]) -> None:
@@ -107,9 +127,44 @@ def _write_archive(archive: Path, files: dict[str, bytes], rows: list[dict[str, 
     archive.chmod(0o600)
 
 
+def _write_archive_from_root(archive: Path, root: Path,
+                             rows: list[dict[str, object]]) -> None:
+    """Copy checked files into a ZIP without buffering upload blobs in memory."""
+    with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_STORED,
+                         allowZip64=True) as output:
+        output.writestr(INVENTORY, json.dumps({"schema": 1, "files": rows},
+                                              sort_keys=True))
+        for row in rows:
+            descriptor = os.open(root / row["name"], os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                info = os.fstat(descriptor)
+                if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
+                        or info.st_size != row["size"]):
+                    raise UploadBackupError("quarantine file changed during snapshot")
+                checksum = hashlib.sha256()
+                copied = 0
+                with os.fdopen(descriptor, "rb", closefd=False) as source:
+                    with output.open(row["name"], "w", force_zip64=True) as target:
+                        for block in iter(lambda: source.read(1024 * 1024), b""):
+                            checksum.update(block)
+                            copied += len(block)
+                            if copied > row["size"]:
+                                raise UploadBackupError("quarantine file grew during snapshot")
+                            target.write(block)
+                if copied != row["size"] or checksum.hexdigest() != row["sha256"]:
+                    raise UploadBackupError("quarantine file changed during snapshot")
+            finally:
+                os.close(descriptor)
+    archive.chmod(0o600)
+    if archive.stat().st_size > MAX_ARCHIVE:
+        raise UploadBackupError("quarantine archive exceeds synthetic size limit")
+
+
 def _extract_archive(archive: Path, destination: Path) -> int:
     if destination.exists() or destination.is_symlink() or not destination.parent.is_dir():
         raise UploadBackupError("restore needs a new destination")
+    if archive.is_symlink() or archive.stat().st_size > MAX_ARCHIVE:
+        raise UploadBackupError("quarantine archive exceeds synthetic size limit")
     with zipfile.ZipFile(archive) as source:
         entries = source.infolist()
         names = [entry.filename for entry in entries]
@@ -140,19 +195,27 @@ def _extract_archive(archive: Path, destination: Path) -> int:
                         or not isinstance(row["name"], str)
                         or not re.fullmatch(r"[0-9a-f]{32}\.(json|blob)", row["name"])
                         or type(row["size"]) is not int or row["size"] < 0
+                        or row["size"] > (2048 if row["name"].endswith(".json") else MAX_BYTES)
                         or not isinstance(row["sha256"], str)
                         or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])):
                     raise UploadBackupError("invalid quarantine file record")
                 total += row["size"]
                 if total > MAX_TOTAL or source.getinfo(row["name"]).file_size != row["size"]:
                     raise UploadBackupError("quarantine size limit exceeded")
-                content = source.read(row["name"])
-                if _sha256(content) != row["sha256"]:
-                    raise UploadBackupError("quarantine file changed")
                 target = stage / row["name"]
-                target.write_bytes(content)
+                checksum = hashlib.sha256()
+                copied = 0
+                with source.open(row["name"]) as input_stream, target.open("xb") as output_stream:
+                    for block in iter(lambda: input_stream.read(1024 * 1024), b""):
+                        checksum.update(block)
+                        copied += len(block)
+                        if copied > row["size"]:
+                            raise UploadBackupError("quarantine file grew during restore")
+                        output_stream.write(block)
+                if copied != row["size"] or checksum.hexdigest() != row["sha256"]:
+                    raise UploadBackupError("quarantine file changed")
                 target.chmod(0o600)
-            _read_inventory(stage)
+            _scan_inventory(stage)
             shutil.move(stage, destination)
     return len(rows)
 
@@ -163,16 +226,17 @@ def create_upload_snapshot(upload_root: Path, repository: Path, password_file: P
     _private_directory(staging_parent)
     if upload_root.resolve() == staging_parent.resolve():
         raise UploadBackupError("staging and quarantine must be separate")
-    files, rows = _read_inventory(upload_root)
+    rows = _scan_inventory(upload_root)
     with tempfile.TemporaryDirectory(prefix=".upload-backup-", dir=staging_parent) as temporary:
         stage = Path(temporary)
         archive = stage / ARCHIVE
-        _write_archive(archive, files, rows)
+        _write_archive_from_root(archive, upload_root, rows)
         spec = stage / "spec.json"
         spec.write_text(json.dumps({"schema": 1, "files": [
             {"name": ARCHIVE, "kind": "file", "source": ARCHIVE}]}))
         result = create_snapshot(spec, repository, password_file, restic,
-                                 restic_sha256, staging_parent)
+                                 restic_sha256, staging_parent,
+                                 max_file=MAX_ARCHIVE)
     return {**result, "quarantine_files": len(rows)}
 
 
