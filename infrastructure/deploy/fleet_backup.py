@@ -38,6 +38,15 @@ def _check_backup_space(db: Path, directory: Path) -> None:
         raise FleetBackupError("insufficient Fleet backup staging and archive space")
 
 
+def _check_restore_space(archive: Path, directory: Path) -> None:
+    """Reserve room for decrypted payload and its clean restored SQLite copy."""
+    size = archive.stat().st_size
+    required = 2 * size + _FREE_SPACE_RESERVE
+    volume = os.statvfs(directory)
+    if volume.f_bavail * volume.f_frsize < required:
+        raise FleetBackupError("insufficient Fleet restore staging space")
+
+
 def _owner_file(path: Path) -> None:
     if (not path.is_absolute() or path.is_symlink() or not path.is_file() or
             path.stat().st_uid != os.getuid() or
@@ -84,6 +93,7 @@ def restore_fleet(archive: Path, key: Path, destination: Path) -> dict[str, obje
     _owner_directory(destination.parent)
     if destination.exists() or destination.is_symlink():
         raise FleetBackupError("Fleet restore requires a new directory")
+    _check_restore_space(archive, destination.parent)
     try:
         manifest = inspect_backup(archive, key, destination)
         if [(item["name"], item["kind"]) for item in manifest["files"]] != \

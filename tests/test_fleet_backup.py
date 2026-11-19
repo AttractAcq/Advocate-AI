@@ -57,6 +57,17 @@ class FleetBackupTests(unittest.TestCase):
                              path.name.startswith(".svbk-snapshot-")
                              for path in self.root.iterdir()))
 
+    def test_low_restore_volume_space_rejects_before_decryption(self) -> None:
+        backup_fleet(self.db, self.archive, self.key)
+        destination = self.root / "no-space-restore"
+        with patch("infrastructure.deploy.fleet_backup.os.statvfs",
+                   return_value=SimpleNamespace(f_bavail=1, f_frsize=4096)):
+            with self.assertRaisesRegex(FleetBackupError, "insufficient Fleet restore"):
+                restore_fleet(self.archive, self.key, destination)
+        self.assertFalse(destination.exists())
+        self.assertFalse(any(path.name.startswith(".svbk-restore-")
+                             for path in self.root.iterdir()))
+
     def test_wrong_key_tamper_and_corrupt_catalog_fail_cleanly(self) -> None:
         backup_fleet(self.db, self.archive, self.key)
         wrong = self.root / "wrong.key"
