@@ -66,6 +66,8 @@ class VesselInstallerTests(unittest.TestCase):
         self.assertIn("SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_ingest@/postgres?host=/run/postgresql", ingest)
         self.assertIn(f"type=bind,source={migrate.resolve()},target=/run/secrets/pgpass,readonly", schema)
         self.assertIn(f"type=bind,source={writer.resolve()},target=/run/secrets/pgpass,readonly", ingest)
+        self.assertFalse(any("target=/var/lib/sovereign" in argument for argument in schema))
+        self.assertTrue(any("target=/var/lib/sovereign" in argument for argument in ingest))
 
     def test_failed_activation_has_no_active_record(self) -> None:
         knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)

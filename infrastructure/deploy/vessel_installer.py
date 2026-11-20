@@ -125,18 +125,20 @@ if result['quarantined']:
 print(json.dumps({'indexed':len(result['indexed']),'unchanged':len(result['unchanged'])}))
 """
     def run_task(role: str, credential: Path, code: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["docker", "run", "--rm", "--pull", "never", "--network", "none",
+        command = ["docker", "run", "--rm", "--pull", "never", "--network", "none",
              "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
              "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
              "--user", f"{os.getuid()}:{os.getgid()}",
              "--mount", (f"type=volume,source={knowledge.socket_volume},"
                          "target=/run/postgresql,readonly"),
-             "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign,readonly",
              "--mount", (f"type=bind,source={credential.resolve()},"
-                         "target=/run/secrets/pgpass,readonly"),
+                         "target=/run/secrets/pgpass,readonly")]
+        if role == "sovereign_ingest":
+            command += ["--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign,readonly"]
+        command += [
              "-e", f"SOVEREIGN_KNOWLEDGE_DB=postgresql://{role}@/postgres?host=/run/postgresql",
-             "-e", "PGPASSFILE=/run/secrets/pgpass", image, "python", "-c", code],
+             "-e", "PGPASSFILE=/run/secrets/pgpass", image, "python", "-c", code]
+        return subprocess.run(command,
             capture_output=True, text=True, check=True, timeout=180)
     try:
         run_task("sovereign_migrate", migrate, schema_program)
