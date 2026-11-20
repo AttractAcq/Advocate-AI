@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -69,6 +71,20 @@ class VesselRecoverySetTests(unittest.TestCase):
         put(self.state / "sources/unlisted.txt", b"secret")
         with self.assertRaisesRegex(VesselRecoveryError, "inventory"):
             _stage_core(self.state, self.root / "frozen")
+
+    def test_hard_linked_core_file_denies_capture(self) -> None:
+        for relative in ("approved.json", "roles.json", "audit.jsonl",
+                         "history.db", "sources/ENG-001.txt"):
+            with self.subTest(relative=relative):
+                alias = self.root / "external-alias"
+                os.link(self.state / relative, alias)
+                try:
+                    with self.assertRaises(VesselRecoveryError):
+                        _stage_core(self.state, self.root / "frozen")
+                finally:
+                    alias.unlink()
+                    if (self.root / "frozen").exists():
+                        shutil.rmtree(self.root / "frozen")
 
     def test_signed_receipt_rejects_tampering(self) -> None:
         key = Ed25519PrivateKey.generate()
