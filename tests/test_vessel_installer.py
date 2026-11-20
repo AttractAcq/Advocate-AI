@@ -9,7 +9,8 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _read_state, _state_payload, _write_state, install_vessel,
+    VesselInstallError, _cleanup_failed_install, _read_state, _state_payload,
+    _write_state, install_vessel,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -47,7 +48,7 @@ class VesselInstallerTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
                    side_effect=VesselInstallError("unhealthy")), \
              patch("infrastructure.deploy.vessel_installer.stop_knowledge") as stopped, \
-             patch("infrastructure.deploy.vessel_installer.subprocess.run"):
+             patch("infrastructure.deploy.vessel_installer._docker", return_value=""):
             with self.assertRaises(VesselInstallError):
                 install_vessel(self.parent, self.parent / "key", self.parent / "crane",
                                self.parent / "config", self.root,
@@ -55,6 +56,44 @@ class VesselInstallerTests(unittest.TestCase):
             self.assertFalse((self.root / "vessel-state.json").exists())
             self.assertFalse(self.root.exists())
             stopped.assert_called_once_with(knowledge)
+
+    def test_incomplete_cleanup_retains_private_root_and_no_active_record(self) -> None:
+        knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel"}), \
+             patch("infrastructure.deploy.vessel_installer._stage",
+                   return_value=("c" * 24, self.parent)), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
+                   return_value=knowledge), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._ingest",
+                   return_value={"indexed": 1, "unchanged": 0}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
+                   side_effect=VesselInstallError("unhealthy")), \
+             patch("infrastructure.deploy.vessel_installer.stop_knowledge"), \
+             patch("infrastructure.deploy.vessel_installer._docker",
+                   return_value="a" * 64) as docker:
+            with self.assertRaisesRegex(VesselInstallError, "cleanup incomplete"):
+                install_vessel(self.parent, self.parent / "key", self.parent / "crane",
+                               self.parent / "config", self.root,
+                               self.parent / "state", self.parent / "password")
+            self.assertTrue(self.root.is_dir())
+            self.assertFalse((self.root / "vessel-state.json").exists())
+            self.assertFalse(any(call.args[:2] == ("volume", "rm")
+                                 for call in docker.call_args_list))
+
+    def test_cleanup_requires_empty_scoped_inventory_after_volume_removal(self) -> None:
+        installation_id = "b" * 32
+        data_volume = f"sovereign-{installation_id}-knowledge-data"
+        with patch("infrastructure.deploy.vessel_installer._docker",
+                   side_effect=["", "", data_volume, "", ""]) as docker:
+            self.assertTrue(_cleanup_failed_install(installation_id, None, None,
+                                                    data_volume))
+            docker.assert_any_call("volume", "rm", data_volume)
+        with patch("infrastructure.deploy.vessel_installer._docker",
+                   side_effect=RuntimeError("daemon unavailable")):
+            self.assertFalse(_cleanup_failed_install(installation_id, None, None,
+                                                     data_volume))
 
     def test_active_state_rejects_duplicate_and_tampered_runtime(self) -> None:
         self.root.mkdir(mode=0o700)
