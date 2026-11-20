@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -69,6 +70,14 @@ class VesselRuntimeTests(unittest.TestCase):
         audit.unlink()
         (self.state / "history.db").symlink_to(self.state / "roles.json")
         with self.assertRaisesRegex(VesselRuntimeError, "persistent"):
+            _state_options(self.state, self.lab_password, self.knowledge_root)
+
+    def test_future_history_format_denies_before_runtime_start(self) -> None:
+        history = self.state / "history.db"
+        with sqlite3.connect(history) as database:
+            database.execute("PRAGMA user_version=2")
+        history.chmod(0o600)
+        with self.assertRaisesRegex(VesselRuntimeError, "history format"):
             _state_options(self.state, self.lab_password, self.knowledge_root)
 
     def test_non_vessel_bundle_never_loads_images(self) -> None:

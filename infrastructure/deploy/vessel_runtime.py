@@ -7,10 +7,12 @@ coordinated database recovery belong to the installer.
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import stat
 import time
 import uuid
@@ -29,6 +31,7 @@ from infrastructure.release.bundle import (
 from services.knowledge.manifest_io import load_manifest
 from services.policy.audit import verify as verify_audit
 from services.policy.policy_file import load_policy
+from apps.api.auth import verify_history_format
 
 
 class VesselRuntimeError(ValueError):
@@ -85,6 +88,14 @@ def _state_options(state: Path, lab_password: Path,
     _persistent_file(audit_path)
     for name in ("history.db", "history.db-wal", "history.db-shm"):
         _persistent_file(state / name)
+    history = state / "history.db"
+    if history.exists():
+        try:
+            with closing(sqlite3.connect(history.resolve().as_uri() + "?mode=ro",
+                                         uri=True)) as database:
+                verify_history_format(database)
+        except (sqlite3.DatabaseError, ValueError) as exc:
+            raise VesselRuntimeError("unsupported vessel Core history format") from exc
     try:
         verify_audit(audit_path, require_current_clock=True)
     except (OSError, ValueError) as exc:

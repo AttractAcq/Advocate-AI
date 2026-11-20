@@ -4,8 +4,9 @@ The persistent Core `history.db` now records SQLite `user_version=1` when a
 fresh database is created. Core verifies that version, the three conversation
 columns, owner index and database integrity before serving requests. It refuses
 an existing version-0, future-version or malformed database rather than
-silently creating missing tables. Stopped vessel recovery capture checks the
-same format before and after its SQLite backup copy.
+silently creating missing tables. The vessel runtime checks an existing file
+before creating Core containers, and stopped recovery capture checks the same
+format before and after its SQLite backup copy.
 
 The Core image build compares the signed bundle's Knowledge and Core-state
 schema labels with the implementation constants. The release verifier still
