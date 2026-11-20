@@ -30,6 +30,13 @@ jobs:
           docker pull "$image"
           python3 -m scripts.phase3_pgvector_core_socket \
             --pgvector-image "$image" --core-image sovereign-core:synthetic
+      - name: Exercise Core against pinned Trixie pgvector candidate
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d"
+          docker pull "$image"
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image "$image" --core-image sovereign-core:synthetic
       - name: Build and exercise separate Fleet images
         run: |
           docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
@@ -387,6 +394,28 @@ jobs:
         with:
           name: synthetic-knowledge-image-release-evidence
           path: ${{ runner.temp }}/knowledge-image-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Compare updated pgvector Trixie image intake
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d"
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_pgvector_image_intake \
+            --image "$image" --output "$RUNNER_TEMP/knowledge-trixie-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Trixie Knowledge comparison
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-knowledge-trixie-comparison
+          path: ${{ runner.temp }}/knowledge-trixie-evidence
           if-no-files-found: ignore
           retention-days: 30
       - name: Bind actual Fleet image archives to release evidence

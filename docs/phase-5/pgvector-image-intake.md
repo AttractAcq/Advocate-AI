@@ -27,3 +27,24 @@ UNKNOWN. Trivy attributed 133 package findings to Debian 12.15 and 28 to the
 no fixed version in this report; no finding has been accepted or waived.
 Release owners must choose and qualify a fixed image or review each exception
 before a signed Knowledge bundle can be a release candidate.
+
+The next CI comparison scans the official `pg17-trixie` amd64 image pinned to
+`sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d`.
+This digest came from the [publisher's Docker Hub tag metadata](https://hub.docker.com/v2/repositories/pgvector/pgvector/tags/pg17-trixie)
+on 20 November 2026. The comparison uses the identical archive, SBOM, scanner
+and intake rules, and retains a separate artifact. It does not replace the
+current lab pin or approve a new image until its scan and functional checks
+have been reviewed.
+The synthetic container CI job also runs the existing private Unix socket
+Core-to-pgvector rehearsal against this exact Trixie digest. It checks startup,
+indexing, authorised and denied API search, source preview and live revocation.
+
+The [comparison CI evidence](https://github.com/AttractAcq/Advocate-AI/actions/runs/44644357821)
+shows that the Trixie candidate passes archive and SBOM checks but also returns
+`denied-findings`: 168 unresolved findings (149 HIGH, 2 CRITICAL, 17 UNKNOWN).
+The current Bookworm pin has 161 (140 HIGH, 4 CRITICAL, 17 UNKNOWN). The two
+reports share 126 package/advisory pairs; 29 Trixie findings and 28 Bookworm
+findings list a fixed version. The remaining advisories require a security
+triage or a differently built image. The Trixie candidate passed the synthetic
+Core private-socket integration check, but its vulnerability result does not
+justify replacing the current pin or issuing a release.
