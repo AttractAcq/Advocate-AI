@@ -21,6 +21,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
+from apps.api.auth import verify_history_format
 from infrastructure.deploy.container_runtime import RuntimeHandle, _docker, _image_id
 from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, _credentials, _volume, start_signed_knowledge,
@@ -118,13 +119,11 @@ def _history_copy(source: Path, target: Path) -> None:
         raise VesselRecoveryError("invalid vessel conversation database")
     try:
         with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as original:
-            if original.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
-                raise VesselRecoveryError("conversation database integrity failed")
+            verify_history_format(original)
             with closing(sqlite3.connect(target)) as copy:
                 original.backup(copy)
-                if copy.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
-                    raise VesselRecoveryError("conversation snapshot integrity failed")
-    except sqlite3.DatabaseError as exc:
+                verify_history_format(copy)
+    except (sqlite3.DatabaseError, ValueError) as exc:
         raise VesselRecoveryError("conversation database snapshot failed") from exc
     target.chmod(0o600)
 

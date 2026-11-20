@@ -12,10 +12,13 @@ COPY services/policy ./services/policy
 COPY services/intelligence ./services/intelligence
 COPY services/connectors ./services/connectors
 COPY fixtures ./fixtures
+ARG SOVEREIGN_KNOWLEDGE_SCHEMA=1
+ARG SOVEREIGN_CORE_STATE_SCHEMA=1
+RUN python -c "import os; from apps.api.auth import CORE_STATE_SCHEMA_VERSION; from services.knowledge.postgres_index import KNOWLEDGE_SCHEMA_VERSION; assert int(os.environ['SOVEREIGN_KNOWLEDGE_SCHEMA']) == KNOWLEDGE_SCHEMA_VERSION; assert int(os.environ['SOVEREIGN_CORE_STATE_SCHEMA']) == CORE_STATE_SCHEMA_VERSION"
 RUN python fixtures/generate.py && adduser -D -u 10001 sovereign
 USER 10001:10001
 ARG SOVEREIGN_SYNTHETIC_RELEASE=baseline
 LABEL sovereign.synthetic.release="${SOVEREIGN_SYNTHETIC_RELEASE}"
-LABEL sovereign.compat.knowledge-schema="1" sovereign.compat.core-state-schema="1"
+LABEL sovereign.compat.knowledge-schema="${SOVEREIGN_KNOWLEDGE_SCHEMA}" sovereign.compat.core-state-schema="${SOVEREIGN_CORE_STATE_SCHEMA}"
 EXPOSE 18100
 CMD ["python", "-m", "uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "18100", "--no-server-header"]
