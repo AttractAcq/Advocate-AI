@@ -848,6 +848,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         set(verified.get("images", {})) != set(ROLES)):
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
+                result["core_image_compatibility"] = "matched-signed-contract"
                 update_payload = root / "update-payload"
                 shutil.copytree(payload, update_payload, copy_function=os.link)
                 for name in ("images/core.tar", "evidence/core-scan.json",

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tarfile
 import tempfile
 
 CRANE_VERSION = "0.22.1"
@@ -63,6 +64,61 @@ def validate_image_archive(archive: Path, image_ref: str, crane: Path,
         raise UpstreamError("saved image manifest does not match scanned digest")
     return {"image_ref": image_ref, "archive_sha256": _sha256(archive),
             "manifest_digest": digest, "crane_version": CRANE_VERSION}
+
+
+def image_labels_from_archive(archive: Path, role: str) -> dict[str, str]:
+    """Read the hash-bound config labels from one validated Docker save."""
+    if archive.is_symlink() or not archive.is_file() or not re.fullmatch(r"[a-z-]+", role):
+        raise UpstreamError("invalid image archive or role")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise UpstreamError("duplicate image configuration key")
+            value[key] = item
+        return value
+
+    try:
+        with tarfile.open(archive, "r") as stream:
+            members: dict[str, list[tarfile.TarInfo]] = {}
+            for member in stream.getmembers():
+                members.setdefault(member.name, []).append(member)
+
+            def small_file(name: str) -> bytes:
+                matches = members.get(name, [])
+                if (len(matches) != 1 or not matches[0].isfile() or
+                        not 0 < matches[0].size <= 1024 * 1024):
+                    raise UpstreamError("invalid image configuration file")
+                source = stream.extractfile(matches[0])
+                if source is None:
+                    raise UpstreamError("missing image configuration file")
+                return source.read()
+
+            manifest = json.loads(small_file("manifest.json"), object_pairs_hook=unique_object)
+            if (not isinstance(manifest, list) or len(manifest) != 1 or
+                    not isinstance(manifest[0], dict) or
+                    manifest[0].get("RepoTags") != [f"sovereign-{role}:synthetic"]):
+                raise UpstreamError("archive has unexpected image tags")
+            config_path = manifest[0].get("Config")
+            if isinstance(config_path, str) and re.fullmatch(r"[0-9a-f]{64}\.json", config_path):
+                expected = config_path[:-5]
+            elif isinstance(config_path, str) and re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", config_path):
+                expected = config_path.rsplit("/", 1)[-1]
+            else:
+                raise UpstreamError("invalid image configuration path")
+            raw = small_file(config_path)
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise UpstreamError("image configuration digest mismatch")
+            configuration = json.loads(raw, object_pairs_hook=unique_object)
+            labels = configuration.get("config", {}).get("Labels") if isinstance(configuration, dict) else None
+            if (not isinstance(labels, dict) or
+                    any(not isinstance(key, str) or not isinstance(value, str)
+                        for key, value in labels.items())):
+                raise UpstreamError("image labels are unavailable")
+            return labels
+    except (OSError, tarfile.TarError, json.JSONDecodeError, AttributeError, TypeError) as exc:
+        raise UpstreamError("invalid image configuration archive") from exc
 
 
 def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
