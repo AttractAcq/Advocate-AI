@@ -21,6 +21,10 @@ normal startup or vessel installation. Stop Core and retain a tested encrypted
 backup before using it; an unknown shape or invalid row is rejected without
 changing the version.
 
+The [synthetic encrypted migration rehearsal](encrypted-legacy-history-migration.md)
+now creates that restic backup, verifies a clean restore and compares every
+conversation before it calls the helper. This remains a lab operation.
+
 This is a synthetic compatibility boundary. A production vessel migration
 still needs a signed release procedure, recoverable pre-update set, key
 custody, rollback rehearsal and independent review. The wider Core state also

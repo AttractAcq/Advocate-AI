@@ -536,7 +536,7 @@ jobs:
         run: |
           set -euo pipefail
           uv sync --locked
-          SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository -v
+          SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository tests.test_history_migration -v
       - name: Validate synthetic backup service and timer syntax
         shell: bash
         run: |
