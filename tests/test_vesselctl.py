@@ -37,14 +37,31 @@ class VesselCtlTests(unittest.TestCase):
             common = ["--root", "/tmp/vessel", "--trusted-key", "/tmp/key",
                       "--crane", "/tmp/crane"]
             main(["switch-stopped", *common, "--bundle", "/tmp/bundle",
-                  "--console-config", "/tmp/config"])
+                  "--console-config", "/tmp/config",
+                  "--recovery-receipt", "/tmp/receipt",
+                  "--receipt-key", "/tmp/receipt-key",
+                  "--password-file", "/tmp/backup-password",
+                  "--restic", "/tmp/restic", "--restic-sha256", "0" * 64,
+                  "--staging-parent", "/tmp/staging"])
             main(["rollback-stopped", *common])
         switch.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
                                        Path("/tmp/crane"), Path("/tmp/bundle"),
-                                       Path("/tmp/config"))
+                                       Path("/tmp/config"), Path("/tmp/receipt"),
+                                       Path("/tmp/receipt-key"),
+                                       Path("/tmp/backup-password"),
+                                       Path("/tmp/restic"), "0" * 64,
+                                       Path("/tmp/staging"))
         rollback.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
                                          Path("/tmp/crane"))
         self.assertIn('"result": "rolled-back"', output.getvalue())
+
+    def test_switch_cli_requires_preupdate_recovery_inputs(self) -> None:
+        with patch("scripts.vesselctl.switch_stopped_vessel_release") as switch, \
+             redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            main(["switch-stopped", "--root", "/tmp/vessel",
+                  "--trusted-key", "/tmp/key", "--crane", "/tmp/crane",
+                  "--bundle", "/tmp/bundle", "--console-config", "/tmp/config"])
+        switch.assert_not_called()
 
     def test_install_routes_explicit_paths_and_prints_bounded_result(self) -> None:
         output = StringIO()

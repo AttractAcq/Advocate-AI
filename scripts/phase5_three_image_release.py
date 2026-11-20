@@ -337,13 +337,23 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 final_count <= initial_count):
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         stop_vessel(install_root, trusted, crane)
+        pre_switch_receipt = recovery_root / "pre-switch-receipt.json"
+        pre_switch_capture = create_vessel_recovery_set(
+            install_root, trusted, crane, recovery_root / "repository", password,
+            restic, restic_sha256, staging, receipt_private,
+            pre_switch_receipt)
+        if (pre_switch_capture["release"] != activated["active"] or
+                pre_switch_capture["audit_count"] < final_count):
+            raise AssertionError("fresh pre-switch recovery set changed")
         staged_id = _release_id(update_bundle, config)
         partial_stage = install_root / "vessel-releases" / staged_id
         partial_stage.mkdir(mode=0o700)
         (partial_stage / "interrupted.tmp").write_text("synthetic partial stage\n")
         try:
             switch_stopped_vessel_release(
-                install_root, trusted, crane, update_bundle, config)
+                install_root, trusted, crane, update_bundle, config,
+                pre_switch_receipt, receipt_public, password, restic, restic_sha256,
+                staging)
         except VesselInstallError as exc:
             if "invalid staged vessel release" not in str(exc):
                 raise
@@ -355,7 +365,9 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                           "release": staged_id} or partial_stage.exists()):
             raise AssertionError("partial vessel stage was not safely discarded")
         switched = switch_stopped_vessel_release(
-            install_root, trusted, crane, update_bundle, config)
+            install_root, trusted, crane, update_bundle, config,
+            pre_switch_receipt, receipt_public, password, restic, restic_sha256,
+            staging)
         switched_status = status_vessel(install_root, trusted, crane)
         switched_record = json.loads((install_root / "vessel-state.json").read_text())
         switched_core_image = _run(

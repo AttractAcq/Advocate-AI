@@ -11,10 +11,12 @@ from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _read_state, _stage, _state_payload, _write_state,
 )
 from infrastructure.deploy.vessel_release_switch import (
+    _verify_preupdate_recovery,
     discard_stopped_vessel_stage, rollback_stopped_vessel_release,
     switch_stopped_vessel_release,
 )
 from infrastructure.release.bundle import BundleError, SUPPORTED_VESSEL_COMPATIBILITY
+from infrastructure.restic_repository import MANIFEST
 
 
 class VesselReleaseSwitchTests(unittest.TestCase):
@@ -35,6 +37,16 @@ class VesselReleaseSwitchTests(unittest.TestCase):
             self.parent / "password", self.services, self.knowledge)
         _write_state(self.root, self.current)
         self.key, self.crane = self.parent / "key", self.parent / "crane"
+        recovery = self.parent / "recovery"
+        recovery.mkdir(mode=0o700)
+        self.receipt_args = (recovery / "receipt", recovery / "receipt-key",
+                             self.parent / "backup-password", self.parent / "restic",
+                             "0" * 64, self.parent / "staging")
+
+    def switch(self, bundle: Path, config: Path) -> dict[str, object]:
+        return switch_stopped_vessel_release(
+            self.root, self.key, self.crane, bundle, config,
+            *self.receipt_args)
 
     def test_staging_second_release_accepts_existing_private_directory(self) -> None:
         bundle = self.parent / "bundle"
@@ -87,11 +99,102 @@ class VesselReleaseSwitchTests(unittest.TestCase):
                    side_effect=VesselInstallError("runtime still present")), \
              patch("infrastructure.deploy.vessel_release_switch._stage") as stage:
             with self.assertRaisesRegex(VesselInstallError, "runtime still present"):
-                switch_stopped_vessel_release(
-                    self.root, self.key, self.crane,
-                    self.parent / "bundle", self.parent / "config")
+                self.switch(self.parent / "bundle", self.parent / "config")
             stage.assert_not_called()
         self.assertEqual(_read_state(self.root), self.current)
+
+    def test_switch_requires_matching_recovery_before_stage(self) -> None:
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   side_effect=VesselInstallError("live Core differs")), \
+             patch("infrastructure.deploy.vessel_release_switch._stage") as stage:
+            with self.assertRaisesRegex(VesselInstallError, "live Core differs"):
+                self.switch(self.parent / "bundle", self.parent / "config")
+            stage.assert_not_called()
+        self.assertEqual(_read_state(self.root), self.current)
+
+    def test_preupdate_receipt_must_name_active_installation(self) -> None:
+        payload = {"installation_id": self.current["installation_id"],
+                   "release": "2" * 24,
+                   "data_volume": self.current["runtime"]["data_volume"]}
+        with patch("infrastructure.deploy.vessel_release_switch.verify_vessel_recovery_receipt",
+                   return_value=payload), \
+             patch("infrastructure.deploy.vessel_release_switch.restore_vessel_recovery_files") as restore:
+            with self.assertRaisesRegex(VesselInstallError, "another installation"):
+                _verify_preupdate_recovery(
+                    self.current, self.receipt_args[0], self.receipt_args[1],
+                    self.receipt_args[2], self.receipt_args[3],
+                    self.receipt_args[4], self.receipt_args[5], self.root)
+            restore.assert_not_called()
+
+    def test_changed_live_core_file_refuses_verified_recovery(self) -> None:
+        staging = self.parent / "staging"
+        staging.mkdir(mode=0o700)
+        payload = {"installation_id": self.current["installation_id"],
+                   "release": self.current["active"],
+                   "data_volume": self.current["runtime"]["data_volume"],
+                   "repository": str(self.parent / "repository"),
+                   "sources": 1, "audit_count": 1,
+                   "audit_tail_hash": "a" * 64,
+                   "manifest_sha256": "b" * 64}
+
+        def restored(receipt, key, password, restic, digest, destination):
+            destination.mkdir()
+            (destination / "roles.json").write_text("old policy")
+
+        def live(state, destination):
+            destination.mkdir()
+            (destination / "roles.json").write_text("changed policy")
+            return 1, (1, "a" * 64), "b" * 64
+
+        with patch("infrastructure.deploy.vessel_release_switch.verify_vessel_recovery_receipt",
+                   return_value=payload), \
+             patch("infrastructure.deploy.vessel_release_switch.restore_vessel_recovery_files",
+                   side_effect=restored), \
+             patch("infrastructure.deploy.vessel_release_switch._stage_core",
+                   side_effect=live), \
+             patch("infrastructure.deploy.vessel_release_switch.policy_directory_lock"):
+            with self.assertRaisesRegex(VesselInstallError, "live Core differs"):
+                _verify_preupdate_recovery(
+                    self.current, self.receipt_args[0], self.receipt_args[1],
+                    self.receipt_args[2], self.receipt_args[3],
+                    self.receipt_args[4], staging, self.root)
+
+    def test_matching_live_core_accepts_restic_metadata_exclusion(self) -> None:
+        staging = self.parent / "staging"
+        staging.mkdir(mode=0o700)
+        payload = {"installation_id": self.current["installation_id"],
+                   "release": self.current["active"],
+                   "data_volume": self.current["runtime"]["data_volume"],
+                   "repository": str(self.parent / "repository"),
+                   "sources": 1, "audit_count": 1,
+                   "audit_tail_hash": "a" * 64,
+                   "manifest_sha256": "b" * 64}
+
+        def restored(receipt, key, password, restic, digest, destination):
+            destination.mkdir()
+            (destination / "roles.json").write_text("same policy")
+            (destination / "postgres.dump").write_text("database")
+            (destination / MANIFEST).write_text("restic metadata")
+
+        def live(state, destination):
+            destination.mkdir()
+            (destination / "roles.json").write_text("same policy")
+            return 1, (1, "a" * 64), "b" * 64
+
+        with patch("infrastructure.deploy.vessel_release_switch.verify_vessel_recovery_receipt",
+                   return_value=payload), \
+             patch("infrastructure.deploy.vessel_release_switch.restore_vessel_recovery_files",
+                   side_effect=restored), \
+             patch("infrastructure.deploy.vessel_release_switch._stage_core",
+                   side_effect=live), \
+             patch("infrastructure.deploy.vessel_release_switch.policy_directory_lock"):
+            self.assertEqual(_verify_preupdate_recovery(
+                self.current, self.receipt_args[0], self.receipt_args[1],
+                self.receipt_args[2], self.receipt_args[3],
+                self.receipt_args[4], staging, self.root), payload)
 
     def test_future_signed_contract_denies_switch_before_candidate_stage(self) -> None:
         with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
@@ -99,6 +202,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
              patch("infrastructure.deploy.vessel_release_switch._release_id",
                    return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   return_value={"sources": 1, "passages": 1}), \
              patch("infrastructure.deploy.vessel_installer.verify_bundle",
                    return_value={"schema": 6, "target": "vessel",
                                  "compatibility": {"knowledge_schema": 2,
@@ -106,9 +211,7 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
              patch("infrastructure.deploy.vessel_release_switch.start_signed_knowledge") as start:
             with self.assertRaisesRegex(BundleError, "unsupported vessel compatibility"):
-                switch_stopped_vessel_release(
-                    self.root, self.key, self.crane,
-                    self.parent / "bundle", self.parent / "config")
+                self.switch(self.parent / "bundle", self.parent / "config")
             start.assert_not_called()
         self.assertFalse((self.root / "vessel-releases" / ("2" * 24)).exists())
         self.assertEqual(_read_state(self.root), self.current)
@@ -193,6 +296,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
              patch("infrastructure.deploy.vessel_release_switch._release_id",
                    return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   return_value={"sources": 1, "passages": 1}), \
              patch("infrastructure.deploy.vessel_release_switch._stage",
                    return_value=("2" * 24, stage)), \
              patch("infrastructure.deploy.vessel_release_switch.policy_directory_lock"), \
@@ -205,12 +310,39 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_release_switch._cleanup_failed_install",
                    return_value=True) as cleanup:
             with self.assertRaisesRegex(ValueError, "index mismatch"):
-                switch_stopped_vessel_release(
-                    self.root, self.key, self.crane,
-                    self.parent / "bundle", self.parent / "config")
+                self.switch(self.parent / "bundle", self.parent / "config")
             start.assert_not_called()
             self.assertTrue(cleanup.call_args.kwargs["retain_data"])
             self.assertEqual(cleanup.call_args.args[3], self.knowledge.data_volume)
+        self.assertEqual(_read_state(self.root), self.current)
+
+    def test_knowledge_inventory_change_refuses_candidate_start(self) -> None:
+        new_knowledge = KnowledgeVolumeHandle(
+            "4" * 64, "sovereign-knowledge-" + "5" * 12 + "-socket",
+            self.knowledge.data_volume, "sovereign-knowledge-" + "5" * 12,
+            "f" * 32)
+        stage = self.root / "vessel-releases" / ("2" * 24)
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   return_value={"sources": 1, "passages": 1}), \
+             patch("infrastructure.deploy.vessel_release_switch._release_id",
+                   return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_release_switch._stage",
+                   return_value=("2" * 24, stage)), \
+             patch("infrastructure.deploy.vessel_release_switch.policy_directory_lock"), \
+             patch("infrastructure.deploy.vessel_release_switch.start_signed_knowledge",
+                   return_value=new_knowledge), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_knowledge_schema"), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_database",
+                   return_value={"sources": 2, "passages": 1}), \
+             patch("infrastructure.deploy.vessel_release_switch.start_signed_vessel_services") as start, \
+             patch("infrastructure.deploy.vessel_release_switch._cleanup_failed_install",
+                   return_value=True):
+            with self.assertRaisesRegex(VesselInstallError, "Knowledge differs"):
+                self.switch(self.parent / "bundle", self.parent / "config")
+            start.assert_not_called()
         self.assertEqual(_read_state(self.root), self.current)
 
 
