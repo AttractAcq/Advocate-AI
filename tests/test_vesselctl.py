@@ -11,6 +11,22 @@ from scripts.vesselctl import main
 
 
 class VesselCtlTests(unittest.TestCase):
+    def test_partial_stage_discard_requires_explicit_flag(self) -> None:
+        args = ["discard-staged-candidate", "--root", "/tmp/vessel",
+                "--trusted-key", "/tmp/key", "--bundle", "/tmp/bundle",
+                "--console-config", "/tmp/config"]
+        with patch("scripts.vesselctl.discard_stopped_vessel_stage") as discard, \
+             redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            main(args)
+        discard.assert_not_called()
+        with patch("scripts.vesselctl.discard_stopped_vessel_stage",
+                   return_value={"result": "staged-candidate-discarded"}) as discard, \
+             redirect_stdout(StringIO()):
+            main(args + ["--discard-stage"])
+        discard.assert_called_once_with(
+            Path("/tmp/vessel"), Path("/tmp/key"), Path("/tmp/bundle"),
+            Path("/tmp/config"), discard_stage=True)
+
     def test_stopped_release_commands_route_explicit_paths(self) -> None:
         output = StringIO()
         with patch("scripts.vesselctl.switch_stopped_vessel_release",
