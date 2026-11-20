@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #178](https://github.com/AttractAcq/Advocate-AI/pull/178), including
+through [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -84,9 +84,9 @@ upgrade compatibility between real software or database versions.
 | Managed Core file aliases | [PR #174](https://github.com/AttractAcq/Advocate-AI/pull/174) and [recovery procedure](../phase-5/vessel-recovery-set.md) | Capture refuses hard-linked managed configuration, audit, history and source files; local tests cover each class. Target filesystem semantics and non-cooperating writers remain separate review questions. |
 | Signed model tree and staging capacity | [PR #175](https://github.com/AttractAcq/Advocate-AI/pull/175), [PR #176](https://github.com/AttractAcq/Advocate-AI/pull/176) and [model bundle procedure](../phase-5/model-artifact-bundle.md) | A signed inventory covers fictional model bytes and ID; altered files fail verification. Low stage space refuses before candidate creation. The [PR #175](https://github.com/AttractAcq/Advocate-AI/actions/runs/44828966126) and [PR #176](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831181328) final-head runs passed all 12 jobs. |
 | Signed model request route | [PR #177](https://github.com/AttractAcq/Advocate-AI/pull/177) and [PR #178](https://github.com/AttractAcq/Advocate-AI/pull/178) | Core is configured with the signed model ID and container-loopback endpoint. The actual-image rehearsal uses a temporary OpenAI-compatible responder to observe the request ID, wrong-name denial and 503 after responder shutdown. All 12 final-head jobs passed for [PR #177](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831684982) and [PR #178](https://github.com/AttractAcq/Advocate-AI/actions/runs/44833680520). |
-| Authenticated model advertisement | `apps/api/model.py`, `apps/api/main.py`, `tests/test_core_api.py` | AV/IT-only readiness checks the loopback `/v1/models` advertisement for the configured ID; absent, wrong, malformed or oversized responses fail with 503. This is a control-plane signal, not a model inference or GPU acceptance test. |
+| Authenticated model advertisement | [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), `apps/api/model.py`, `apps/api/main.py`, `tests/test_core_api.py` | AV/IT-only readiness checks the loopback `/v1/models` advertisement for the configured ID; absent, wrong, malformed or oversized responses fail with 503. The actual-image rehearsal checks role denial, matching ID and outage. This is a control-plane signal, not a model inference or GPU acceptance test. |
 
-At the PR #178 implementation head, `make check` passed 416 tests with 16
+At the PR #179 implementation head, `make check` passed 417 tests with 16
 expected skips. For an independent reproduction, record the commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
