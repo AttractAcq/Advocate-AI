@@ -180,6 +180,31 @@ def _write_state(root: Path, payload: dict[str, object]) -> None:
         Path(filename).unlink(missing_ok=True)
 
 
+def _cleanup_failed_install(installation_id: str, services: RuntimeHandle | None,
+                            knowledge: KnowledgeVolumeHandle | None,
+                            data_volume: str) -> bool:
+    """Discard a failed candidate only after its labelled resources are absent."""
+    try:
+        if services is not None:
+            stop_runtime(services)
+        if knowledge is not None:
+            stop_knowledge(knowledge)
+        scope = f"label=sovereign.synthetic.install={installation_id}"
+        containers = _docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
+        networks = _docker("network", "ls", "--no-trunc", "--filter", scope,
+                           "--quiet")
+        if containers or networks:
+            return False
+        volumes = _docker("volume", "ls", "--filter", scope, "--quiet").splitlines()
+        if any(volume != data_volume for volume in volumes):
+            return False
+        if volumes:
+            _docker("volume", "rm", data_volume)
+        return not _docker("volume", "ls", "--filter", scope, "--quiet")
+    except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError):
+        return False
+
+
 def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
                    console_config: Path, root: Path, core_state: Path,
                    lab_password_file: Path) -> dict[str, object]:
@@ -210,17 +235,24 @@ def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
         _write_state(root, payload)
         return {"result": "activated", "active": identifier,
                 "indexed": ingestion["indexed"], "unchanged": ingestion["unchanged"]}
-    except Exception:
-        if services is not None:
-            stop_runtime(services)
-        if knowledge is not None:
-            try:
-                stop_knowledge(knowledge)
-            except Exception:
-                pass
-        subprocess.run(["docker", "volume", "rm", data_volume],
-                       capture_output=True, text=True, timeout=30)
-        shutil.rmtree(root, ignore_errors=True)
+    except Exception as exc:
+        try:
+            (root / "vessel-state.json").unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            raise VesselInstallError(
+                "first installation failed; active record could not be cleared"
+            ) from cleanup_error
+        if not _cleanup_failed_install(installation_id, services, knowledge,
+                                       data_volume):
+            raise VesselInstallError(
+                "first installation failed; cleanup incomplete and private root retained"
+            ) from exc
+        try:
+            shutil.rmtree(root)
+        except OSError as cleanup_error:
+            raise VesselInstallError(
+                "first installation failed; private root cleanup incomplete"
+            ) from cleanup_error
         raise
 
 

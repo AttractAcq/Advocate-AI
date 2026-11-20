@@ -19,7 +19,10 @@ signature and compares the running images with the exact signed archives.
 The CI release rehearsal performs a clean synthetic installation from the
 temporary signed bundle, checks that the active release reports healthy, then
 removes the disposable services and data volume. A failed candidate has no
-active record and the installer attempts to remove its new lab resources.
+active record. The installer removes its private root only after scoped Docker
+inventory confirms that the candidate's containers, network and volumes are
+gone. If cleanup cannot be confirmed, it retains the private root and its
+database credentials and reports an incomplete cleanup for manual recovery.
 
 This only covers first activation. Release updates, rollback, stopped-runtime
 recovery, separate schema-migration authority, database encryption, coordinated
