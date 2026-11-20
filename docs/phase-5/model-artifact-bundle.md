@@ -20,6 +20,14 @@ an altered request name or endpoint. This binds Core's request configuration
 to the staged model ID; it does not start vLLM, verify that weights load, or
 make the synthetic vessel rehearsal answer with those weights.
 
+The actual-image CI rehearsal starts a temporary OpenAI-compatible responder
+on the running Core container's loopback interface. It sends one general chat
+request through Core and checks that the responder receives the signed model
+ID; a request naming another model is rejected by Core before it reaches the
+responder. The responder and its canned answer exist only during this
+synthetic probe. This confirms local request routing, not inference quality or
+the production model service lifecycle.
+
 The ID is an operator label, not proof of model publisher, licence, weights
 quality or serving compatibility. The connected preparation process must
 record source, revision, publisher authentication, redistribution terms and
