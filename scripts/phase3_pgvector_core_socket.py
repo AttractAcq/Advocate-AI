@@ -14,7 +14,9 @@ import time
 import uuid
 
 from scripts.synthetic_pg_fixture import fixture as _fixture, put as _put
-from infrastructure.deploy.container_runtime import _health as _product_health
+from infrastructure.deploy.container_runtime import (
+    RuntimeError as ProductRuntimeError, _health as _product_health,
+)
 
 _IMAGE = re.compile(r"(?:(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}"
                     r"|sovereign-knowledge:synthetic)\Z")
@@ -266,7 +268,7 @@ def _rehearse_verified_images(image: str, core_image: str,
                     if network:
                         _product_health(core)
                     break
-                except RuntimeError:
+                except (RuntimeError, ProductRuntimeError):
                     if attempt == 29:
                         raise
                     time.sleep(1)
