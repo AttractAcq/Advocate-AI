@@ -17,16 +17,15 @@ from scripts.synthetic_pg_fixture import fixture as _fixture, put as _put
 from infrastructure.deploy.container_runtime import (
     RuntimeError as ProductRuntimeError, _health as _product_health,
 )
+from infrastructure.deploy.postgres_socket import (
+    ready as _ready, secure_database as _secure_database, sql as _sql,
+)
 
 _IMAGE = re.compile(r"(?:(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}"
                     r"|sovereign-knowledge:synthetic)\Z")
 _CORE = re.compile(r"sovereign-core:[a-z0-9-]{1,40}\Z")
 _WRITER_DSN = "postgresql://sovereign_ingest@/postgres?host=/run/postgresql"
 _READER_DSN = "postgresql://sovereign_read@/postgres?host=/run/postgresql"
-_HBA = ("local all postgres peer\n"
-        "local all all scram-sha-256\n"
-        "host all all 0.0.0.0/0 reject\n"
-        "host all all ::/0 reject\n")
 _STAGING = Path(__file__).resolve().parents[1] / "infrastructure/lab/runtime"
 
 
@@ -36,34 +35,6 @@ def _docker(*args: str, timeout: int = 120) -> str:
                                 check=True, timeout=timeout)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"synthetic socket Docker operation failed: {args[0]}") from exc
-    return result.stdout.strip()
-
-
-def _ready(identifier: str) -> None:
-    for _ in range(40):
-        result = subprocess.run(["docker", "exec", "-u", "postgres", identifier,
-                                 "pg_isready", "-q", "-d", "postgres"],
-                                capture_output=True, timeout=10)
-        if result.returncode == 0:
-            return
-        time.sleep(1)
-    raise RuntimeError("synthetic socket PostgreSQL server did not become ready")
-
-
-def _sql(identifier: str, statement: str) -> str:
-    return _docker("exec", "-u", "postgres", identifier, "psql", "-X",
-                   "-v", "ON_ERROR_STOP=1", "-d", "postgres", "-Atqc", statement)
-
-
-def _pg_input(identifier: str, program: str, payload: str) -> str:
-    """Send generated secrets through stdin, never Docker's process arguments."""
-    try:
-        result = subprocess.run(["docker", "exec", "-i", "-u", "postgres",
-                                 identifier, "sh", "-c", program],
-                                input=payload, capture_output=True, text=True,
-                                check=True, timeout=30)
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("synthetic PostgreSQL configuration failed") from exc
     return result.stdout.strip()
 
 
@@ -79,28 +50,6 @@ def _credentials(root: Path) -> tuple[Path, Path, Path, str, str]:
     _put(reader, (f"/run/postgresql:5432:postgres:sovereign_read:{reader_secret}\n").encode())
     return admin, writer, reader, writer_secret, reader_secret
 
-
-def _secure_database(identifier: str, writer_secret: str, reader_secret: str) -> None:
-    """Create distinct roles and replace bootstrap trust with local SCRAM auth."""
-    if not all(re.fullmatch(r"[0-9a-f]{64}", value)
-               for value in (writer_secret, reader_secret)):
-        raise ValueError("invalid synthetic PostgreSQL role secret")
-    _sql(identifier, "CREATE EXTENSION vector")
-    _pg_input(identifier, "psql -X -v ON_ERROR_STOP=1 -d postgres",
-              "SET password_encryption='scram-sha-256';\n"
-              f"CREATE ROLE sovereign_ingest LOGIN PASSWORD '{writer_secret}';\n"
-              f"CREATE ROLE sovereign_read LOGIN PASSWORD '{reader_secret}';\n"
-              "REVOKE ALL ON SCHEMA public FROM PUBLIC;\n"
-              "GRANT USAGE, CREATE ON SCHEMA public TO sovereign_ingest;\n"
-              "GRANT USAGE ON SCHEMA public TO sovereign_read;\n")
-    _pg_input(identifier, "cat > /var/lib/postgresql/data/pg_hba.conf", _HBA)
-    if _sql(identifier, "SELECT pg_reload_conf()") != "t":
-        raise RuntimeError("synthetic PostgreSQL authentication reload failed")
-    if _sql(identifier, "SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL") != "0":
-        raise RuntimeError("synthetic PostgreSQL authentication rules are invalid")
-    if _docker("exec", "-u", "postgres", identifier, "cat",
-               "/var/lib/postgresql/data/pg_hba.conf") + "\n" != _HBA:
-        raise RuntimeError("synthetic PostgreSQL authentication rules changed")
 
 _BOOTSTRAP = """\
 import os
