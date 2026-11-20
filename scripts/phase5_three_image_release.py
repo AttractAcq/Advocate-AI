@@ -136,12 +136,19 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["bundle_manifest_sha256"] = _sha256(bundle / "release-manifest.json")
                 ids = {role: _image_id(bundle, role, verified["images"][role], crane)
                        for role in ROLES}
-                runtime = _rehearse_verified_images(ids["knowledge"], ids["core"])
-                if runtime.get("result") != "pass" or runtime.get("database_role") != "sovereign_read":
-                    raise AssertionError("signed Core and Knowledge socket runtime failed")
-                result["signed_core_knowledge_runtime"] = {
+                runtime = _rehearse_verified_images(ids["knowledge"], ids["core"],
+                                                     ids["console"])
+                if (runtime.get("result") != "pass" or
+                        runtime.get("database_role") != "sovereign_read" or
+                        runtime.get("console_runtime") != "healthy" or
+                        runtime.get("network_mode") != "internal" or
+                        runtime.get("knowledge_network_mode") != "none"):
+                    raise AssertionError("signed three-image socket runtime failed")
+                result["signed_three_image_runtime"] = {
                     "result": "pass", "transport": runtime["database_transport"],
                     "network_mode": runtime["network_mode"],
+                    "knowledge_network_mode": runtime["knowledge_network_mode"],
+                    "console_runtime": runtime["console_runtime"],
                     "database_role": runtime["database_role"],
                     "database_write": runtime["database_write"],
                     "writer_auth": runtime["writer_auth"],
