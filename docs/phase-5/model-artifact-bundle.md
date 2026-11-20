@@ -24,7 +24,8 @@ The actual-image CI rehearsal starts a temporary OpenAI-compatible responder
 on the running Core container's loopback interface. It sends one general chat
 request through Core and checks that the responder receives the signed model
 ID; a request naming another model is rejected by Core before it reaches the
-responder. The responder and its canned answer exist only during this
+responder. Once the responder stops, another chat request must fail with 503;
+Core has no fallback model route. The responder and its canned answer exist only during this
 synthetic probe. This confirms local request routing, not inference quality or
 the production model service lifecycle.
 

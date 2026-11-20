@@ -124,11 +124,15 @@ try:
   assert answer.json()['answer']=='Synthetic local model route confirmed',answer.text
   assert answer.json()['model']==model_id,answer.text
   assert seen==[model_id],seen
-  print(json.dumps({'result':'pass','route':'container-loopback','model':model_id}))
 finally:
  server.shutdown()
  server.server_close()
  thread.join(timeout=2)
+with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=10) as client:
+ outage=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':model_id})
+ assert outage.status_code==503,outage.text
+print(json.dumps({'result':'pass','route':'container-loopback','model':model_id,
+                  'outage':'failed-closed'}))
 """
 
 
@@ -305,7 +309,7 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
         runtime = record["runtime"]
         model_route = _probe_vessel_model_route(runtime["core_id"], model_id)
         if model_route != {"result": "pass", "route": "container-loopback",
-                           "model": model_id}:
+                           "model": model_id, "outage": "failed-closed"}:
             raise AssertionError("signed Core model request route failed")
         base_core_image = _run("docker", "inspect", runtime["core_id"],
                                "--format", "{{.Image}}")
@@ -493,6 +497,7 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 "release_rollback": "stopped-signed-and-healthy",
                 "core_image_change": "distinct-and-restored",
                 "model_request_route": "signed-name-over-container-loopback",
+                "model_outage": "failed-closed",
                 "document_permissions": "preserved-across-switch-and-rollback",
                 "partial_stage": "rejected-then-discarded",
                 "post_switch_recovery_set": "signed-and-bound-to-updated-release"}
