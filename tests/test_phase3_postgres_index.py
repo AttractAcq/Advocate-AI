@@ -20,7 +20,8 @@ from services.knowledge.ingestion import sync_manifest
 from services.knowledge.indexed_retrieval import approved_rows, preview_index, search_index
 from services.knowledge.embedding import build_vectors, vector_search
 from services.knowledge.postgres_index import (_connect, _schema_state, initialize_schema,
-                                               PostgresIndexUnavailable,
+                                               migrate_unversioned_schema,
+                                               PostgresIndexUnavailable, verify_schema_version,
                                                verify_knowledge_snapshot)
 
 
@@ -134,6 +135,28 @@ class PostgresKnowledgeTests(unittest.TestCase):
         (self.root / "sources/ENG-001.txt").write_text("changed source")
         self.assertEqual(search_index(self.root, self.manifest, self.dsn,
                                       "engineer", "generator inspection"), [])
+
+    def test_explicit_legacy_migration_checks_sources_and_table_shape(self) -> None:
+        with _connect(self.dsn) as db:
+            db.execute("DROP TABLE public.knowledge_schema_version")
+        with self.assertRaisesRegex(PostgresIndexUnavailable, "unversioned"):
+            verify_schema_version(self.dsn)
+        original = (self.root / "sources/ENG-001.txt").read_bytes()
+        (self.root / "sources/ENG-001.txt").write_text("altered source")
+        with self.assertRaises(ValueError):
+            migrate_unversioned_schema(self.root, self.manifest, self.dsn)
+        (self.root / "sources/ENG-001.txt").write_bytes(original)
+        with _connect(self.dsn) as db:
+            db.execute("ALTER TABLE public.knowledge_sources ADD COLUMN injected text")
+        with self.assertRaisesRegex(PostgresIndexUnavailable, "table shape"):
+            migrate_unversioned_schema(self.root, self.manifest, self.dsn)
+        with _connect(self.dsn) as db:
+            db.execute("ALTER TABLE public.knowledge_sources DROP COLUMN injected")
+        self.assertEqual(migrate_unversioned_schema(self.root, self.manifest, self.dsn),
+                         {"sources": 2, "passages": 2, "schema_version": 1})
+        self.assertEqual(verify_schema_version(self.dsn), 1)
+        with self.assertRaisesRegex(PostgresIndexUnavailable, "already versioned"):
+            migrate_unversioned_schema(self.root, self.manifest, self.dsn)
 
     def test_invalid_connection_never_falls_back_to_sqlite(self) -> None:
         with self.assertRaises(ValueError):

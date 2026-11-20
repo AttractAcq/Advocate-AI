@@ -125,6 +125,111 @@ def initialize_schema(dsn: str) -> None:
         raise PostgresIndexUnavailable("PostgreSQL schema unavailable") from exc
 
 
+def _verify_snapshot_data(base: Path, listed: list[dict[str, object]],
+                          db: psycopg.Connection, expected_model: str | None,
+                          parser) -> dict[str, int]:
+    sources = {row["document_id"]: row for row in db.execute("SELECT * FROM knowledge_sources")}
+    ids = {item["document_id"] for item in listed}
+    if set(sources) != ids or db.execute("SELECT 1 FROM knowledge_quarantine LIMIT 1").fetchone():
+        raise ValueError("knowledge index source set or quarantine mismatch")
+    total_passages = 0
+    for item in listed:
+        identifier = item["document_id"]
+        suffix, digest, source_bytes = _valid_source(base, item)
+        metadata = {key: str(item[key]) for key in
+                    ("relative_path", "collection", "classification", "owner", "version", "source_type")}
+        metadata["sha256"] = digest
+        source = sources[identifier]
+        if source["state"] != "ready" or any(source[key] != value for key, value in metadata.items()):
+            raise ValueError("knowledge source metadata mismatch")
+        expected = chunks(_parse_verified_bytes(source_bytes, suffix, parser))
+        actual = db.execute("""SELECT ordinal,text FROM knowledge_passages
+            WHERE document_id=%s ORDER BY ordinal""", (identifier,)).fetchall()
+        if [(row["ordinal"], row["text"]) for row in actual] != list(enumerate(expected)):
+            raise ValueError("knowledge passage mismatch")
+        total_passages += len(expected)
+    if expected_model is not None:
+        vectors = db.execute("""SELECT document_id,ordinal,model,
+            vector_dims(embedding) AS dimensions FROM knowledge_vectors""").fetchall()
+        if (len(vectors) != total_passages or any(
+                row["model"] != expected_model or not 1 <= row["dimensions"] <= 4096
+                for row in vectors)):
+            raise ValueError("knowledge vector set mismatch")
+    return {"sources": len(sources), "passages": total_passages}
+
+
+def migrate_unversioned_schema(root: Path, manifest: Path, dsn: str,
+                               parser=parse_local) -> dict[str, int]:
+    """Explicitly ledger the known pre-version schema after full source verification.
+
+    The caller must stop writers and retain a recoverable database/source backup
+    before invoking this operation. No normal startup path invokes it.
+    """
+    base = root.resolve(strict=True)
+    if not isinstance(load_policy(base / "roles.json"), dict):
+        raise ValueError("source policy unavailable")
+    payload = load_manifest(manifest)
+    if (not isinstance(payload, dict) or payload.get("schema") != 1
+            or not isinstance(payload.get("sources"), list)
+            or len(payload["sources"]) > 10000):
+        raise ValueError("invalid approved manifest")
+    listed = payload["sources"]
+    ids = [item.get("document_id") for item in listed if isinstance(item, dict)]
+    if (len(ids) != len(listed) or any(not isinstance(value, str) for value in ids)
+            or len(set(ids)) != len(ids)):
+        raise ValueError("duplicate or invalid approved source")
+    columns = {
+        "knowledge_sources": {name: "text" for name in (
+            "document_id", "relative_path", "collection", "classification",
+            "owner", "version", "sha256", "source_type", "state")},
+        "knowledge_passages": {"document_id": "text", "ordinal": "integer", "text": "text"},
+        "knowledge_quarantine": {"document_id": "text", "reason": "text"},
+        "knowledge_vectors": {"document_id": "text", "ordinal": "integer",
+                              "model": "text", "embedding": "USER-DEFINED:vector"},
+    }
+    constraints = {
+        "knowledge_sources": {("knowledge_sources_pkey", "p")},
+        "knowledge_passages": {("knowledge_passages_pkey", "p"),
+                                ("knowledge_passages_document_id_fkey", "f")},
+        "knowledge_quarantine": {("knowledge_quarantine_pkey", "p")},
+        "knowledge_vectors": {("knowledge_vectors_pkey", "p"),
+                              ("knowledge_vectors_document_id_ordinal_fkey", "f")},
+    }
+    try:
+        with _connect(dsn) as db:
+            db.execute("LOCK TABLE public.knowledge_sources, public.knowledge_passages, "
+                       "public.knowledge_quarantine, public.knowledge_vectors "
+                       "IN ACCESS EXCLUSIVE MODE")
+            if db.execute("SELECT to_regclass('public.knowledge_schema_version') IS NOT NULL "
+                          "AS present").fetchone()["present"]:
+                raise PostgresIndexUnavailable("Knowledge schema is already versioned")
+            for table in _KNOWLEDGE_TABLES:
+                actual_columns = db.execute("""SELECT column_name,data_type,is_nullable,udt_name
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name=%s""", (table,)).fetchall()
+                actual = {row["column_name"]: (row["data_type"] if row["data_type"] !=
+                          "USER-DEFINED" else f"USER-DEFINED:{row['udt_name']}")
+                          for row in actual_columns if row["is_nullable"] == "NO"}
+                if actual != columns[table] or len(actual_columns) != len(actual):
+                    raise PostgresIndexUnavailable("unknown legacy Knowledge table shape")
+                actual_constraints = db.execute("""SELECT conname,contype,convalidated
+                    FROM pg_constraint WHERE conrelid=%s::regclass""",
+                    (f"public.{table}",)).fetchall()
+                if (any(row["convalidated"] is not True for row in actual_constraints) or
+                        {(row["conname"], row["contype"]) for row in actual_constraints}
+                        != constraints[table]):
+                    raise PostgresIndexUnavailable("unknown legacy Knowledge constraints")
+            inventory = _verify_snapshot_data(base, listed, db, None, parser)
+            db.execute("""CREATE TABLE public.knowledge_schema_version (
+                singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+                version integer NOT NULL CHECK (version > 0))""")
+            db.execute("INSERT INTO public.knowledge_schema_version (version) VALUES (%s)",
+                       (KNOWLEDGE_SCHEMA_VERSION,))
+            return {**inventory, "schema_version": KNOWLEDGE_SCHEMA_VERSION}
+    except psycopg.Error as exc:
+        raise PostgresIndexUnavailable("legacy Knowledge migration unavailable") from exc
+
+
 def verify_knowledge_snapshot(root: Path, manifest: Path, dsn: str,
                               *, expected_model: str | None = None,
                               parser=parse_local) -> dict[str, int]:
@@ -151,33 +256,7 @@ def verify_knowledge_snapshot(root: Path, manifest: Path, dsn: str,
             db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             if _schema_state(db) != KNOWLEDGE_SCHEMA_VERSION:
                 raise ValueError("Knowledge snapshot has no schema version")
-            sources = {row["document_id"]: row for row in db.execute("SELECT * FROM knowledge_sources")}
-            if set(sources) != set(ids) or db.execute("SELECT 1 FROM knowledge_quarantine LIMIT 1").fetchone():
-                raise ValueError("knowledge index source set or quarantine mismatch")
-            total_passages = 0
-            for item in listed:
-                identifier = item["document_id"]
-                suffix, digest, source_bytes = _valid_source(base, item)
-                metadata = {key: str(item[key]) for key in
-                            ("relative_path", "collection", "classification", "owner", "version", "source_type")}
-                metadata["sha256"] = digest
-                source = sources[identifier]
-                if source["state"] != "ready" or any(source[key] != value for key, value in metadata.items()):
-                    raise ValueError("knowledge source metadata mismatch")
-                expected = chunks(_parse_verified_bytes(source_bytes, suffix, parser))
-                actual = db.execute("""SELECT ordinal,text FROM knowledge_passages
-                    WHERE document_id=%s ORDER BY ordinal""", (identifier,)).fetchall()
-                if [(row["ordinal"], row["text"]) for row in actual] != list(enumerate(expected)):
-                    raise ValueError("knowledge passage mismatch")
-                total_passages += len(expected)
-            if expected_model is not None:
-                vectors = db.execute("""SELECT document_id,ordinal,model,
-                    vector_dims(embedding) AS dimensions FROM knowledge_vectors""").fetchall()
-                if (len(vectors) != total_passages or any(
-                        row["model"] != expected_model or not 1 <= row["dimensions"] <= 4096
-                        for row in vectors)):
-                    raise ValueError("knowledge vector set mismatch")
-            return {"sources": len(sources), "passages": total_passages}
+            return _verify_snapshot_data(base, listed, db, expected_model, parser)
     except psycopg.Error as exc:
         raise PostgresIndexUnavailable("PostgreSQL snapshot verification unavailable") from exc
 
