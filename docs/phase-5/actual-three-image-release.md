@@ -28,7 +28,11 @@ evidence or signature errors fail the CI job.
 
 This proves actual image evidence can satisfy the three-image release
 contract and that the three signed image archives can run together in
-the synthetic socket topology. The current installer accepts only the two-image bundle. Database
-state, migration and runtime identities, credential custody, coordinated
-recovery, signed production keys, commercial distribution approval, target
-hardware and independent security review remain open.
+the synthetic socket topology. The [vessel first installer](signed-vessel-first-install.md)
+now accepts this signed three-image bundle and checks the persistent database,
+runtime identities and schema version before recording activation. The
+[stopped release switch](vessel-release-switch.md) and
+[encrypted recovery set](vessel-recovery-set.md) have separate synthetic
+rehearsals. Real software-version migrations and rollback compatibility,
+credential custody, signed production keys, commercial distribution approval,
+target hardware and independent security review remain open.

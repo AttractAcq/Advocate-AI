@@ -26,10 +26,13 @@ inventory confirms that the candidate's containers, network and volumes are
 gone. If cleanup cannot be confirmed, it retains the private root and its
 database credentials and reports an incomplete cleanup for manual recovery.
 
-The first-install path covers initial activation. Release updates, rollback,
-versioned schema migrations, database encryption, coordinated restic
-capture and clean restore, key custody, real vessel identity/model/NAS
-integration, target hardware checks and independent review remain open.
+This page describes first activation and its interruption handling. The
+[stopped release switch and rollback](vessel-release-switch.md) and
+[coordinated encrypted recovery set](vessel-recovery-set.md) are implemented
+as separate synthetic paths. Versioned schema migrations and rollback across
+real application versions, database-at-rest encryption, key custody, real
+vessel identity/model/NAS integration, target hardware checks and independent
+review remain open.
 
 ## Knowledge schema version boundary
 
@@ -55,8 +58,9 @@ uses them. Runtime inspection checks both environment bindings. The actual
 image rehearsal makes an audited API request and a document-mode conversation
 that needs no model, stops all three services, recovers from the same external
 state, and requires the conversation to remain readable and the audit trail
-to retain its prefix and grow. Coordinated encrypted backup and clean restore
-of these files with PostgreSQL remain open.
+to retain its prefix and grow. The [recovery set](vessel-recovery-set.md) now
+captures these files with PostgreSQL and checks them on a clean synthetic
+installation. Off-vessel media and key custody remain open.
 
 ## Clean stopped-runtime recovery candidate
 
@@ -73,9 +77,9 @@ cleanup or state reconciliation is uncertain, it retains the private root for
 investigation. The actual-image CI rehearsal stops and recovers the synthetic
 installation and rechecks signed image identity and health.
 
-Interrupted-process reconciliation, automated rollback, versioned schema migration,
-coordinated encrypted recovery, target hardware and independent review remain
-open.
+The separate [release switch runbook](vessel-release-switch.md) covers a
+stopped one-step rollback. Automatic in-place replacement after failed restore,
+versioned schema migration, target hardware and independent review remain open.
 
 ## Operator command
 
@@ -99,9 +103,9 @@ names, roles, network isolation and Knowledge volume mounts. Only after every
 resource passes does it remove the orphan containers, networks and disposable
 socket volumes. The persistent Knowledge data volume and credentials remain.
 The signed-image rehearsal creates a full orphan Core, Console and Knowledge
-runtime, reconciles it and recovers the same installation. An interruption
-during the initial installation and a crash after active-state replacement
-still require separate handling.
+runtime, reconciles it and recovers the same installation. First-install
+interruption and a stale intent after active-state replacement use the
+`reconcile-install` and `resume-install` paths below.
 
 `finish-stop` handles an interrupted or incomplete stop. It requires every
 remaining container, network and socket volume to be one of the recorded
@@ -141,8 +145,9 @@ If the active record was already committed but the intent remains, `resume-insta
 checks the complete running signed installation and requires the active release,
 installation ID, external paths and data volume to match the intent. It then
 clears only the stale intent and reports `already-activated`.
-Interrupted PostgreSQL bootstrap with an existing but not yet secured data
-volume still requires explicit operator investigation.
+An interrupted PostgreSQL bootstrap with an existing but not yet secured data
+volume uses the explicit `reset-bootstrap --discard-data` path below after
+operator inspection.
 
 `reset-bootstrap --discard-data` is an explicit synthetic recovery option when
 a first-install data volume cannot be safely resumed. It requires a signed
