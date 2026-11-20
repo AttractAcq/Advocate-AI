@@ -129,11 +129,26 @@ class VesselReleaseSwitchTests(unittest.TestCase):
                     self.receipt_args[4], self.receipt_args[5], self.root)
             restore.assert_not_called()
 
+    def test_legacy_receipt_cannot_authorize_release_switch(self) -> None:
+        payload = {"installation_id": self.current["installation_id"],
+                   "release": self.current["active"], "schema": 1,
+                   "data_volume": self.current["runtime"]["data_volume"]}
+        with patch("infrastructure.deploy.vessel_release_switch.verify_vessel_recovery_receipt",
+                   return_value=payload), \
+             patch("infrastructure.deploy.vessel_release_switch.restore_vessel_recovery_files") as restore:
+            with self.assertRaisesRegex(VesselInstallError, "lacks Knowledge row digest"):
+                _verify_preupdate_recovery(
+                    self.current, self.receipt_args[0], self.receipt_args[1],
+                    self.receipt_args[2], self.receipt_args[3],
+                    self.receipt_args[4], self.receipt_args[5], self.root)
+            restore.assert_not_called()
+
     def test_changed_live_core_file_refuses_verified_recovery(self) -> None:
         staging = self.parent / "staging"
         staging.mkdir(mode=0o700)
         payload = {"installation_id": self.current["installation_id"],
                    "release": self.current["active"],
+                   "schema": 2, "knowledge_sha256": "d" * 64,
                    "data_volume": self.current["runtime"]["data_volume"],
                    "repository": str(self.parent / "repository"),
                    "sources": 1, "audit_count": 1,
@@ -167,6 +182,7 @@ class VesselReleaseSwitchTests(unittest.TestCase):
         staging.mkdir(mode=0o700)
         payload = {"installation_id": self.current["installation_id"],
                    "release": self.current["active"],
+                   "schema": 2, "knowledge_sha256": "d" * 64,
                    "data_volume": self.current["runtime"]["data_volume"],
                    "repository": str(self.parent / "repository"),
                    "sources": 1, "audit_count": 1,
@@ -203,7 +219,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_release_switch._release_id",
                    return_value="2" * 24), \
              patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
-                   return_value={"sources": 1, "passages": 1}), \
+                   return_value={"sources": 1, "passages": 1,
+                                 "knowledge_sha256": "d" * 64}), \
              patch("infrastructure.deploy.vessel_installer.verify_bundle",
                    return_value={"schema": 6, "target": "vessel",
                                  "compatibility": {"knowledge_schema": 2,
@@ -297,7 +314,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_release_switch._release_id",
                    return_value="2" * 24), \
              patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
-                   return_value={"sources": 1, "passages": 1}), \
+                   return_value={"sources": 1, "passages": 1,
+                                 "knowledge_sha256": "d" * 64}), \
              patch("infrastructure.deploy.vessel_release_switch._stage",
                    return_value=("2" * 24, stage)), \
              patch("infrastructure.deploy.vessel_release_switch.policy_directory_lock"), \
@@ -326,7 +344,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_release_switch._state_options"), \
              patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
              patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
-                   return_value={"sources": 1, "passages": 1}), \
+                   return_value={"sources": 1, "passages": 1,
+                                 "knowledge_sha256": "d" * 64}), \
              patch("infrastructure.deploy.vessel_release_switch._release_id",
                    return_value="2" * 24), \
              patch("infrastructure.deploy.vessel_release_switch._stage",
@@ -336,7 +355,39 @@ class VesselReleaseSwitchTests(unittest.TestCase):
                    return_value=new_knowledge), \
              patch("infrastructure.deploy.vessel_release_switch._verify_knowledge_schema"), \
              patch("infrastructure.deploy.vessel_release_switch._verify_database",
-                   return_value={"sources": 2, "passages": 1}), \
+                   return_value={"sources": 2, "passages": 1,
+                                 "knowledge_sha256": "d" * 64}), \
+             patch("infrastructure.deploy.vessel_release_switch.start_signed_vessel_services") as start, \
+             patch("infrastructure.deploy.vessel_release_switch._cleanup_failed_install",
+                   return_value=True):
+            with self.assertRaisesRegex(VesselInstallError, "Knowledge differs"):
+                self.switch(self.parent / "bundle", self.parent / "config")
+            start.assert_not_called()
+        self.assertEqual(_read_state(self.root), self.current)
+
+    def test_same_count_knowledge_row_change_refuses_candidate_start(self) -> None:
+        new_knowledge = KnowledgeVolumeHandle(
+            "4" * 64, "sovereign-knowledge-" + "5" * 12 + "-socket",
+            self.knowledge.data_volume, "sovereign-knowledge-" + "5" * 12,
+            "f" * 32)
+        stage = self.root / "vessel-releases" / ("2" * 24)
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   return_value={"sources": 1, "passages": 1,
+                                 "knowledge_sha256": "d" * 64}), \
+             patch("infrastructure.deploy.vessel_release_switch._release_id",
+                   return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_release_switch._stage",
+                   return_value=("2" * 24, stage)), \
+             patch("infrastructure.deploy.vessel_release_switch.policy_directory_lock"), \
+             patch("infrastructure.deploy.vessel_release_switch.start_signed_knowledge",
+                   return_value=new_knowledge), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_knowledge_schema"), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_database",
+                   return_value={"sources": 1, "passages": 1,
+                                 "knowledge_sha256": "e" * 64}), \
              patch("infrastructure.deploy.vessel_release_switch.start_signed_vessel_services") as start, \
              patch("infrastructure.deploy.vessel_release_switch._cleanup_failed_install",
                    return_value=True):

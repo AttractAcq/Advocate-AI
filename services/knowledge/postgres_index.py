@@ -7,6 +7,8 @@ bytes before a passage can be returned to Core or an embedding request.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from pathlib import Path
 import re
@@ -31,6 +33,43 @@ _KNOWLEDGE_TABLES = (
     "knowledge_sources", "knowledge_passages", "knowledge_quarantine",
     "knowledge_vectors",
 )
+_DIGEST_LIMIT = 256 * 1024 * 1024
+
+
+def _knowledge_row_digest(db: psycopg.Connection) -> str:
+    """Hash all schema-1 Knowledge rows in a stable, bounded table order."""
+    tables = (
+        ("knowledge_schema_version", "SELECT singleton,version FROM public.knowledge_schema_version ORDER BY singleton",
+         ("singleton", "version")),
+        ("knowledge_sources", """SELECT document_id,relative_path,collection,classification,
+            owner,version,sha256,source_type,state FROM public.knowledge_sources ORDER BY document_id""",
+         ("document_id", "relative_path", "collection", "classification", "owner",
+          "version", "sha256", "source_type", "state")),
+        ("knowledge_passages", """SELECT document_id,ordinal,text FROM public.knowledge_passages
+            ORDER BY document_id,ordinal""", ("document_id", "ordinal", "text")),
+        ("knowledge_quarantine", "SELECT document_id,reason FROM public.knowledge_quarantine ORDER BY document_id",
+         ("document_id", "reason")),
+        ("knowledge_vectors", """SELECT document_id,ordinal,model,embedding::text AS embedding
+            FROM public.knowledge_vectors ORDER BY document_id,ordinal""",
+         ("document_id", "ordinal", "model", "embedding")),
+    )
+    digest = hashlib.sha256(b"sovereign-knowledge-rows-v1\0")
+    total = 0
+    for table, query, columns in tables:
+        digest.update(table.encode() + b"\0")
+        count = 0
+        for row in db.execute(query):
+            encoded = json.dumps([row[name] for name in columns],
+                                 ensure_ascii=False, allow_nan=False,
+                                 separators=(",", ":")).encode("utf-8")
+            total += len(encoded)
+            count += 1
+            if total > _DIGEST_LIMIT:
+                raise PostgresIndexUnavailable("Knowledge digest exceeds recovery limit")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        digest.update(count.to_bytes(8, "big"))
+    return digest.hexdigest()
 
 
 def _connect(dsn: str) -> psycopg.Connection:
@@ -232,7 +271,8 @@ def migrate_unversioned_schema(root: Path, manifest: Path, dsn: str,
 
 def verify_knowledge_snapshot(root: Path, manifest: Path, dsn: str,
                               *, expected_model: str | None = None,
-                              parser=parse_local) -> dict[str, int]:
+                              parser=parse_local,
+                              include_digest: bool = False) -> dict[str, int | str]:
     """Check every indexed passage against the approved source bytes and policy.
 
     This is intended for a stopped or writer-locked recovery capture and a
@@ -256,7 +296,10 @@ def verify_knowledge_snapshot(root: Path, manifest: Path, dsn: str,
             db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             if _schema_state(db) != KNOWLEDGE_SCHEMA_VERSION:
                 raise ValueError("Knowledge snapshot has no schema version")
-            return _verify_snapshot_data(base, listed, db, expected_model, parser)
+            inventory = _verify_snapshot_data(base, listed, db, expected_model, parser)
+            if include_digest:
+                return {**inventory, "knowledge_sha256": _knowledge_row_digest(db)}
+            return inventory
     except psycopg.Error as exc:
         raise PostgresIndexUnavailable("PostgreSQL snapshot verification unavailable") from exc
 

@@ -99,6 +99,36 @@ class VesselRecoverySetTests(unittest.TestCase):
         with self.assertRaisesRegex(VesselRecoveryError, "verification failed"):
             verify_vessel_recovery_receipt(receipt, public)
 
+    def test_digest_receipt_requires_exact_row_hash(self) -> None:
+        key = Ed25519PrivateKey.generate()
+        private = self.root / "digest-private.pem"
+        public = self.root / "digest-public.pem"
+        put(private, key.private_bytes(serialization.Encoding.PEM,
+                                       serialization.PrivateFormat.PKCS8,
+                                       serialization.NoEncryption()))
+        put(public, key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo))
+        identifier = "a" * 32
+        payload = {
+            "schema": 2, "installation_id": identifier, "release": "b" * 24,
+            "data_volume": f"sovereign-{identifier}-knowledge-data",
+            "snapshot_id": "c" * 64, "repository": str(self.root / "repository"),
+            "created_utc": "2026-11-20T12:00:00+00:00", "schema_version": 1,
+            "audit_count": 1, "audit_tail_hash": "d" * 64,
+            "manifest_sha256": "e" * 64, "dump_sha256": "f" * 64,
+            "knowledge_sha256": "1" * 64,
+            "sources": 2, "passages": 2, "files": 7,
+        }
+        receipt = self.root / "digest-receipt.json"
+        _sign_receipt(receipt, payload, private)
+        self.assertEqual(verify_vessel_recovery_receipt(receipt, public), payload)
+        payload["knowledge_sha256"] = "invalid"
+        bad = self.root / "bad-digest-receipt.json"
+        _sign_receipt(bad, payload, private)
+        with self.assertRaisesRegex(VesselRecoveryError, "verification failed"):
+            verify_vessel_recovery_receipt(bad, public)
+
     def test_clean_activation_refuses_existing_data_volume(self) -> None:
         identifier = "a" * 32
         payload = {"schema": 1, "installation_id": identifier,

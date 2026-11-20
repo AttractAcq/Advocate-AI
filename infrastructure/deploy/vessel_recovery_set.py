@@ -179,7 +179,7 @@ def _stage_core(state: Path, frozen: Path) -> tuple[int, tuple[int, str], str]:
 
 def _verify_database(bundle: Path, trusted_key: Path, crane: Path,
                      knowledge: KnowledgeVolumeHandle, frozen: Path,
-                     secrets_root: Path) -> dict[str, int]:
+                     secrets_root: Path) -> dict[str, int | str]:
     manifest = verify_bundle(bundle, trusted_key)
     image = _image_id(bundle, "core", manifest["images"]["core"], crane)
     _, _, reader, _, _ = _credentials(secrets_root, initialize=False)
@@ -189,7 +189,8 @@ from pathlib import Path
 from services.knowledge.postgres_index import verify_knowledge_snapshot
 root=Path('/var/lib/sovereign')
 result=verify_knowledge_snapshot(root,root/'approved.json',
- 'postgresql://sovereign_read@/postgres?host=/run/postgresql')
+ 'postgresql://sovereign_read@/postgres?host=/run/postgresql',
+ include_digest=True)
 print(json.dumps(result))
 """
     try:
@@ -209,19 +210,25 @@ print(json.dumps(result))
     except (OSError, ValueError, subprocess.CalledProcessError,
             subprocess.TimeoutExpired) as exc:
         raise VesselRecoveryError("signed Knowledge snapshot verification failed") from exc
-    if (not isinstance(value, dict) or set(value) != {"sources", "passages"}
-            or any(type(number) is not int or number < 1 for number in value.values())):
+    if (not isinstance(value, dict) or set(value) !=
+            {"sources", "passages", "knowledge_sha256"} or
+            any(type(value[name]) is not int or value[name] < 1
+                for name in ("sources", "passages")) or
+            not isinstance(value["knowledge_sha256"], str) or
+            not _ID.fullmatch(value["knowledge_sha256"])):
         raise VesselRecoveryError("invalid signed Knowledge snapshot result")
     return value
 
 
 def _receipt_payload(value: object) -> dict[str, object]:
-    expected = {"schema", "installation_id", "release", "data_volume",
+    common = {"schema", "installation_id", "release", "data_volume",
                 "snapshot_id", "repository", "created_utc", "schema_version",
                 "audit_count", "audit_tail_hash", "manifest_sha256",
                 "dump_sha256", "sources", "passages", "files"}
-    if (not isinstance(value, dict) or set(value) != expected or
-            type(value["schema"]) is not int or value["schema"] != 1 or
+    if (not isinstance(value, dict) or type(value.get("schema")) is not int or
+            value["schema"] not in (1, 2) or
+            set(value) != (common if value["schema"] == 1 else
+                           common | {"knowledge_sha256"}) or
             not isinstance(value["installation_id"], str) or
             not _INSTALL.fullmatch(value["installation_id"]) or
             not isinstance(value["release"], str) or
@@ -231,6 +238,9 @@ def _receipt_payload(value: object) -> dict[str, object]:
             any(not isinstance(value[key], str) or not _ID.fullmatch(value[key])
                 for key in ("snapshot_id", "audit_tail_hash", "manifest_sha256",
                             "dump_sha256")) or
+            (value["schema"] == 2 and
+             (not isinstance(value["knowledge_sha256"], str) or
+              not _ID.fullmatch(value["knowledge_sha256"]))) or
             not isinstance(value["repository"], str) or
             not Path(value["repository"]).is_absolute() or
             type(value["schema_version"]) is not int or value["schema_version"] != 1 or
@@ -340,7 +350,7 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
                     raise VesselRecoveryError("Core state changed during recovery capture")
                 _recovery_inventory(installation_id, runtime)
                 payload = _receipt_payload({
-                    "schema": 1, "installation_id": installation_id,
+                    "schema": 2, "installation_id": installation_id,
                     "release": release, "data_volume": runtime["data_volume"],
                     "snapshot_id": snapshot["snapshot_id"],
                     "repository": str(repository.resolve()),
@@ -349,6 +359,7 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
                     "audit_tail_hash": checkpoint[1],
                     "manifest_sha256": manifest_digest,
                     "dump_sha256": _sha256(frozen / "postgres.dump"),
+                    "knowledge_sha256": database["knowledge_sha256"],
                     "sources": sources, "passages": database["passages"],
                     "files": snapshot["files"],
                 })
@@ -511,8 +522,10 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
             _verify_knowledge_schema(knowledge)
             database = _verify_database(stage / "bundle", trusted_key, crane,
                                         knowledge, core_state, root)
-            if database != {"sources": value["sources"],
-                            "passages": value["passages"]}:
+            if (database["sources"] != value["sources"] or
+                    database["passages"] != value["passages"] or
+                    (value["schema"] == 2 and
+                     database["knowledge_sha256"] != value["knowledge_sha256"])):
                 raise VesselRecoveryError("restored Knowledge differs from receipt")
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane, stage / "console-config.json",

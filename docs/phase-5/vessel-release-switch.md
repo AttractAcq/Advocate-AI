@@ -4,13 +4,14 @@ The `vesselctl` commands below switch a stopped synthetic three-image vessel
 installation to a second signed bundle and roll back to the prior signed
 bundle. They reuse the checked persistent Knowledge volume and Core state.
 
-1. Capture a coordinated encrypted recovery set using the existing
-   [recovery procedure](vessel-recovery-set.md). Retain its signed receipt,
-   verification key, password and repository. The switch now requires these
-   inputs and clean-restores the exact pre-update set before staging a release.
-2. Run `vesselctl stop --root ROOT --trusted-key KEY --crane CRANE` and confirm
+1. Run `vesselctl stop --root ROOT --trusted-key KEY --crane CRANE` and confirm
    the stopped result. If stop was interrupted, use `finish-stop` or `reconcile`
    as appropriate before proceeding.
+2. Capture a coordinated encrypted recovery set using the existing
+   [recovery procedure](vessel-recovery-set.md). Retain its signed receipt,
+   verification key, password and repository. The switch requires a schema-2
+   receipt with a Knowledge row digest and clean-restores the exact pre-update
+   set before staging a release.
 3. Run `vesselctl switch-stopped --root ROOT --trusted-key KEY --crane CRANE
    --bundle NEW_BUNDLE --console-config CONFIG --recovery-receipt RECEIPT
    --receipt-key RECEIPT_KEY --password-file BACKUP_PASSWORD --restic RESTIC
@@ -34,7 +35,9 @@ Knowledge data volume. It checks the encrypted repository, clean-restores the
 set into private temporary staging, then compares the restored Core files with
 a fresh stopped-state snapshot. A missing, mismatched or unrestorable set stops
 the switch before candidate staging. During activation, it checks live
-Knowledge source and passage counts against the recovery receipt. The switch
+Knowledge source and passage counts and a canonical digest of every schema-1
+Knowledge row against the recovery receipt. A same-count change to a source,
+passage, vector or schema row is rejected. The switch
 also checks the live Knowledge schema and full approved source index
 before starting Core and Console, and writes the active release record only
 after service health checks. A failed candidate retains the old active record
@@ -65,7 +68,6 @@ it. The clean restore rehearsal repeats that permission check against the
 restored database and policy files. This proves those synthetic role checks
 and image identity across the release switch; the Core application code and
 database schema are the same in both images. Compatibility across actual
-application versions and database migrations, exact Knowledge row equality
-after capture, production rollback timing,
+application versions and database migrations, production rollback timing,
 protected media, key custody, independent assessment, and target hardware
 remain open.
