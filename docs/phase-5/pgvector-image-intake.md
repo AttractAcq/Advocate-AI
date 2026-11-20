@@ -18,3 +18,12 @@ after the rehearsal. This step does not approve a vessel release or sign a
 three-image bundle. It gives the [schema 6 release contract](signed-knowledge-bundle.md)
 real Knowledge image evidence for later integration. Licence review, findings
 triage, installer activation and coordinated recovery remain open.
+
+The [first PR #132 CI run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44642494637)
+completed the Knowledge image intake step and retained the evidence artifact.
+Its pinned image has 161 unresolved findings: 140 HIGH, 4 CRITICAL and 17
+UNKNOWN. Trivy attributed 133 package findings to Debian 12.15 and 28 to the
+`gosu` Go binary. The intake result is `denied-findings`. Some advisories have
+no fixed version in this report; no finding has been accepted or waived.
+Release owners must choose and qualify a fixed image or review each exception
+before a signed Knowledge bundle can be a release candidate.
