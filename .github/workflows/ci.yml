@@ -449,6 +449,27 @@ jobs:
           path: ${{ runner.temp }}/alpine-knowledge-evidence
           if-no-files-found: ignore
           retention-days: 30
+      - name: Sign and verify exact three-image vessel bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_three_image_release \
+            --output "$RUNNER_TEMP/three-image-release-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain three-image bundle evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-three-image-bundle-evidence
+          path: ${{ runner.temp }}/three-image-release-evidence
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Bind actual Fleet image archives to release evidence
         shell: bash
         run: |
