@@ -78,6 +78,9 @@ def _stage(root: Path, bundle: Path, trusted_key: Path,
     releases.mkdir(mode=0o700, exist_ok=True)
     _owner_directory(releases)
     stage = releases / identifier
+    if stage.exists() or stage.is_symlink():
+        _verify_stage(stage, trusted_key, identifier)
+        return identifier, stage
     stage.mkdir(mode=0o700)
     shutil.copytree(bundle, stage / "bundle", symlinks=True)
     staged_config = stage / "console-config.json"

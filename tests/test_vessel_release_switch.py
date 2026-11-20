@@ -45,12 +45,36 @@ class VesselReleaseSwitchTests(unittest.TestCase):
                    return_value={"schema": 6, "target": "vessel"}), \
              patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
              patch("infrastructure.deploy.vessel_installer._release_id",
-                   side_effect=["1" * 24, "2" * 24]), \
+                   side_effect=["1" * 24, "2" * 24, "2" * 24]), \
              patch("infrastructure.deploy.vessel_installer._verify_stage"):
             first, _ = _stage(self.root, bundle, self.key, config)
-            second, _ = _stage(self.root, bundle, self.key, config)
+            second, staged = _stage(self.root, bundle, self.key, config)
+            retry, reused = _stage(self.root, bundle, self.key, config)
         self.assertNotEqual(first, second)
+        self.assertEqual(retry, second)
+        self.assertEqual(reused, staged)
         self.assertTrue((self.root / "vessel-releases" / second / "bundle").is_dir())
+
+    def test_retry_rejects_unverified_existing_stage(self) -> None:
+        bundle = self.parent / "bundle"
+        bundle.mkdir()
+        (bundle / "release-manifest.json").write_text("{}")
+        config = self.parent / "config"
+        config.write_text("{}")
+        config.chmod(0o644)
+        candidate = self.root / "vessel-releases" / ("2" * 24)
+        candidate.mkdir(parents=True)
+        candidate.parent.chmod(0o700)
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel"}), \
+             patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
+             patch("infrastructure.deploy.vessel_installer._release_id",
+                   return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_installer._verify_stage",
+                   side_effect=VesselInstallError("invalid staged vessel release")):
+            with self.assertRaisesRegex(VesselInstallError, "invalid staged"):
+                _stage(self.root, bundle, self.key, config)
+        self.assertEqual(list(candidate.iterdir()), [])
 
     def test_switch_requires_clean_stopped_inventory_before_stage(self) -> None:
         with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \

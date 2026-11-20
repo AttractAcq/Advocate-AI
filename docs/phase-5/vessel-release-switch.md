@@ -23,7 +23,10 @@ new signed bundle, checks the Knowledge schema and full approved source index
 before starting Core and Console, and writes the active release record only
 after service health checks. A failed candidate retains the old active record
 and data volume. If cleanup is interrupted, reconcile the labelled candidate
-and recover the old signed release. The state records one previous release, so
+and recover the old signed release. After complete cleanup, the same signed
+candidate can be retried; an existing stage is reused only if its signature
+and release identity still verify. A partial or altered stage is rejected and
+requires operator investigation. The state records one previous release, so
 rollback is one step; after rollback, the newer release becomes the previous
 release and can be selected again with the same procedure.
 
