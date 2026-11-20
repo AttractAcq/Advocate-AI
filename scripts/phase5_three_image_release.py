@@ -21,7 +21,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.container_runtime import RuntimeHandle, _image_id, stop_runtime
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeHandle, _volume, start_signed_knowledge, stop_knowledge,
+    KnowledgeVolumeError, KnowledgeVolumeHandle, _volume,
+    start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
@@ -376,15 +377,36 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
     release, _ = _stage(install, bundle, trusted, root / "console-config.json")
     if release != value["release"]:
         raise AssertionError("partial recovery signed stage changed")
+    restore_attempt = uuid.uuid4().hex
     _write_private_record(install, "vessel-restore-intent.json", {
-        "schema": 1, "snapshot_id": value["snapshot_id"],
-        "release": release, "installation_id": value["installation_id"]})
+        "schema": 2, "snapshot_id": value["snapshot_id"],
+        "release": release, "installation_id": value["installation_id"],
+        "restore_attempt": restore_attempt})
     _write_intent(install, release, value["installation_id"], state,
                   root / "lab-password")
     created = False
     try:
+        wrong_attempt = uuid.uuid4().hex
         _volume(value["data_volume"], value["installation_id"],
-                "knowledge-data", create=True)
+                "knowledge-data", create=True,
+                restore_attempt=wrong_attempt)
+        created = True
+        try:
+            abandon_incomplete_vessel_restore(
+                install, trusted, receipt, receipt_key, discard_partial_data=True)
+        except KnowledgeVolumeError as exc:
+            if "identity mismatch" not in str(exc):
+                raise
+        else:
+            raise AssertionError("wrong restore-attempt volume was removed")
+        _volume(value["data_volume"], value["installation_id"],
+                "knowledge-data", create=False,
+                restore_attempt=wrong_attempt)
+        _run("docker", "volume", "rm", value["data_volume"])
+        created = False
+        _volume(value["data_volume"], value["installation_id"],
+                "knowledge-data", create=True,
+                restore_attempt=restore_attempt)
         created = True
         try:
             resume_first_install(install, trusted, crane)
@@ -403,6 +425,7 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
                 not state.is_dir()):
             raise AssertionError("partial recovery evidence was not retained")
         return {"result": "pass", "volume": "checked-and-discarded",
+                "wrong_attempt": "denied",
                 "generic_resume": "denied", "evidence": "retained"}
     finally:
         if created:
