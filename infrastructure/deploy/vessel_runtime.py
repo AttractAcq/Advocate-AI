@@ -41,6 +41,12 @@ class VesselRuntimeError(ValueError):
 _READER_DSN = "postgresql://sovereign_read@/postgres?host=/run/postgresql"
 _INSTALL = re.compile(r"[0-9a-f]{32}\Z")
 _DOCKER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
+_MODEL_ENDPOINT = "http://127.0.0.1:11434/v1"
+
+
+def _signed_model_id(manifest: dict[str, object]) -> str | None:
+    return manifest["model"]["id"] if manifest["schema"] == 7 else None
 
 
 def _private_file(path: Path, *, maximum: int = 4096) -> None:
@@ -62,7 +68,10 @@ def _persistent_file(path: Path) -> None:
 
 def _state_options(state: Path, lab_password: Path,
                    knowledge_root: Path, *,
-                   allow_legacy_history: bool = False) -> tuple[list[str], Path]:
+                   allow_legacy_history: bool = False,
+                   model_id: str | None = None) -> tuple[list[str], Path]:
+    if model_id is not None and not _MODEL_ID.fullmatch(model_id):
+        raise VesselRuntimeError("invalid signed model request name")
     if (not state.is_absolute() or state.is_symlink() or not state.is_dir()
             or state.stat().st_uid != os.getuid()
             or stat.S_IMODE(state.stat().st_mode) & 0o077):
@@ -129,6 +138,9 @@ def _state_options(state: Path, lab_password: Path,
                "-e", "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                "-e", "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                "-e", "PGPASSFILE=/run/secrets/pgpass"]
+    if model_id is not None:
+        options += ["-e", f"SOVEREIGN_MODEL_NAME={model_id}",
+                    "-e", f"SOVEREIGN_MODEL_ENDPOINT={_MODEL_ENDPOINT}"]
     return options, reader
 
 
@@ -152,11 +164,13 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
         raise VesselRuntimeError("vessel installation identity mismatch")
     manifest = verify_bundle(bundle, trusted_key)
     require_supported_vessel_compatibility(manifest)
+    model_id = _signed_model_id(manifest)
     _validate_console_config(console_config)
     if not stat.S_IMODE(console_config.stat().st_mode) & 0o004:
         raise VesselRuntimeError("Console configuration is unreadable by the image user")
     probe_knowledge(knowledge)
-    options, reader = _state_options(state, lab_password, knowledge_root)
+    options, reader = _state_options(state, lab_password, knowledge_root,
+                                     model_id=model_id)
     reader_secret = _credentials(knowledge_root, initialize=False)[4]
     verify_login(knowledge.container_id, "sovereign_read", reader_secret)
     images = {role: _image_id(bundle, role, manifest["images"][role], crane)
@@ -189,7 +203,7 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
         for attempt in range(30):
             try:
                 probe_signed_vessel_services(handle, knowledge, state, lab_password,
-                                             reader)
+                                             reader, model_id=model_id)
                 return handle
             except (ContainerRuntimeError, VesselRuntimeError):
                 if attempt == 29:
@@ -204,7 +218,8 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
 def probe_signed_vessel_services(handle: RuntimeHandle,
                                  knowledge: KnowledgeVolumeHandle,
                                  state: Path, lab_password: Path,
-                                 reader_passfile: Path) -> None:
+                                 reader_passfile: Path,
+                                 *, model_id: str | None = None) -> None:
     """Check persisted image, network, mount and database role boundaries."""
     verify_runtime_identity(handle)
     probe_knowledge(knowledge)
@@ -243,10 +258,16 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
                     "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                     "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                     "PGPASSFILE=/run/secrets/pgpass"}
+    if model_id is not None:
+        if not _MODEL_ID.fullmatch(model_id):
+            raise VesselRuntimeError("invalid signed model request name")
+        expected_env.update({f"SOVEREIGN_MODEL_NAME={model_id}",
+                             f"SOVEREIGN_MODEL_ENDPOINT={_MODEL_ENDPOINT}"})
+    checked_names = {entry.split("=", 1)[0] for entry in expected_env}
+    checked_names.update({"SOVEREIGN_MODEL_NAME", "SOVEREIGN_MODEL_ENDPOINT"})
     selected = [item for item in environment if isinstance(item, str) and
-                item.split("=", 1)[0] in {entry.split("=", 1)[0]
-                                         for entry in expected_env}]
+                item.split("=", 1)[0] in checked_names]
     if len(selected) != len(expected_env) or set(selected) != expected_env:
-        raise VesselRuntimeError("Core runtime database environment changed")
+        raise VesselRuntimeError("Core runtime environment changed")
     _health(handle.core_id)
     _core_database_health(handle.core_id)

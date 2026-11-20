@@ -7,9 +7,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle, _credentials
 from infrastructure.deploy.vessel_runtime import (
-    VesselRuntimeError, _state_options, start_signed_vessel_services,
+    VesselRuntimeError, _state_options, probe_signed_vessel_services,
+    start_signed_vessel_services,
 )
 from infrastructure.release.bundle import BundleError
 from scripts.synthetic_pg_fixture import fixture, put
@@ -41,6 +43,64 @@ class VesselRuntimeTests(unittest.TestCase):
         self.assertIn("SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db", options)
         self.assertNotIn("SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db",
                          options)
+
+    def test_signed_model_name_is_bound_to_local_core_requests(self) -> None:
+        options, _ = _state_options(self.state, self.lab_password,
+                                    self.knowledge_root,
+                                    model_id="synthetic-lab-model")
+        self.assertIn("SOVEREIGN_MODEL_NAME=synthetic-lab-model", options)
+        self.assertIn("SOVEREIGN_MODEL_ENDPOINT=http://127.0.0.1:11434/v1", options)
+        with self.assertRaisesRegex(VesselRuntimeError, "model request name"):
+            _state_options(self.state, self.lab_password, self.knowledge_root,
+                           model_id="untrusted/model")
+
+    def test_status_probe_refuses_model_environment_mismatch(self) -> None:
+        reader = self.knowledge_root / "knowledge-secrets/reader.pgpass"
+        knowledge = KnowledgeVolumeHandle("d" * 64, "socket", "data", "run", "f" * 32)
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        mounts = [
+            {"Destination": "/var/lib/sovereign", "Type": "bind",
+             "Source": str(self.state.resolve()), "RW": True},
+            {"Destination": "/run/secrets/lab-password", "Type": "bind",
+             "Source": str(self.lab_password.resolve()), "RW": False},
+            {"Destination": "/run/secrets/pgpass", "Type": "bind",
+             "Source": str(reader.resolve()), "RW": False},
+            {"Destination": "/run/postgresql", "Type": "volume",
+             "Name": "socket", "RW": False},
+        ]
+        environment = [
+            "SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
+            "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
+            "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
+            "SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_read@/postgres?host=/run/postgresql",
+            "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
+            "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+            "PGPASSFILE=/run/secrets/pgpass",
+            "SOVEREIGN_MODEL_NAME=wrong-model",
+            "SOVEREIGN_MODEL_ENDPOINT=http://127.0.0.1:11434/v1",
+        ]
+
+        def docker(*args: str) -> str:
+            template = args[-1]
+            if template == "{{.State.Running}}":
+                return "true"
+            if template == "{{json .HostConfig.PortBindings}}":
+                return "null"
+            if template == "{{json .Mounts}}":
+                return json.dumps(mounts)
+            if template == "{{json .Config.Env}}":
+                return json.dumps(environment)
+            raise AssertionError(args)
+
+        with patch("infrastructure.deploy.vessel_runtime.verify_runtime_identity"), \
+             patch("infrastructure.deploy.vessel_runtime.probe_knowledge"), \
+             patch("infrastructure.deploy.vessel_runtime._docker", side_effect=docker), \
+             patch("infrastructure.deploy.vessel_runtime._health") as health:
+            with self.assertRaisesRegex(VesselRuntimeError, "environment changed"):
+                probe_signed_vessel_services(handle, knowledge, self.state,
+                                             self.lab_password, reader,
+                                             model_id="synthetic-lab-model")
+            health.assert_not_called()
 
     def test_state_and_credentials_cannot_overlap(self) -> None:
         with self.assertRaises(VesselRuntimeError):

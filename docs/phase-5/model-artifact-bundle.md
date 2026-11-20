@@ -13,6 +13,13 @@ Stopped release switching repeats that process before activation. The free
 space check is a local filesystem preflight; target quotas and actual peak
 usage still require a hardware rehearsal.
 
+For schema-7 installs, Core receives `SOVEREIGN_MODEL_NAME` from the verified
+model descriptor and a fixed HTTP loopback `/v1` endpoint. Vessel status
+checks those environment values against the active signed bundle and rejects
+an altered request name or endpoint. This binds Core's request configuration
+to the staged model ID; it does not start vLLM, verify that weights load, or
+make the synthetic vessel rehearsal answer with those weights.
+
 The ID is an operator label, not proof of model publisher, licence, weights
 quality or serving compatibility. The connected preparation process must
 record source, revision, publisher authentication, redistribution terms and
