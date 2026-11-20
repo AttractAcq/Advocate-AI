@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #167](https://github.com/AttractAcq/Advocate-AI/pull/167), including
+through [PR #172](https://github.com/AttractAcq/Advocate-AI/pull/172), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -32,13 +32,18 @@ the reviewer must identify the exact final tree tested. The main paths are:
    schema and complete approved source index before starting Core and Console.
    It records the new active release only after health and image checks. A
    failed candidate must leave the previous release and data recoverable.
-3. Rollback is one stopped-release step. Partial candidate discard must reject
-   active and prior stages, unsafe filesystem entries and a running runtime.
+3. Rollback is one stopped-release step. Before it starts the prior release,
+   it must verify a signed, clean-restorable recovery set of the currently
+   active release and compare Core state and the canonical Knowledge row digest.
+   Partial candidate discard must reject active and prior stages, unsafe
+   filesystem entries and a running runtime.
 4. Recovery capture stops writes, freezes private Core files, verifies the
    source index, and places those files with a bounded PostgreSQL custom dump
-   in one encrypted restic snapshot. Its Ed25519 receipt binds installation,
-   release, snapshot, dump and audit checkpoint. Receipt verification alone
-   must not imply that the encrypted bytes can be restored.
+   in one encrypted restic snapshot. Its schema-2 Ed25519 receipt binds
+   installation, release, snapshot, dump, audit checkpoint and a canonical
+   digest of all Knowledge rows. Capture must check that digest before and
+   after the dump. Receipt verification alone must not imply that the encrypted
+   bytes can be restored.
 5. Clean activation verifies the signed bundle, receipt, restored files and
    database contents before starting the signed images. It creates fresh
    restricted database credentials, preserves the recorded installation ID,
@@ -65,11 +70,12 @@ upgrade compatibility between real software or database versions.
 | Signed schema compatibility | [PR #164 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44808448854) | Current release declares Knowledge and Core state format 1; a signed future declaration is rejected before first-install resources or a stopped candidate stage; all 12 CI jobs passed |
 | Core image label binding | [PR #165 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44810754082) | Exact Core image configuration labels match the signed contract on signing and copied-bundle verification; all 12 CI jobs passed |
 | Pre-version Knowledge migration | [PR #166 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44811781751) | In a disposable pgvector database, altered source and unknown table shape are refused before the version ledger; the known prior shape migrates transactionally; all 12 CI jobs passed |
-| Core history format | [PR #167](https://github.com/AttractAcq/Advocate-AI/pull/167) and [format boundary](../phase-5/core-history-format.md) | Core and stopped recovery capture reject old, future or malformed SQLite history; image build asserts its version constant; actual-image CI pending |
+| Core history format and migration | [PR #167](https://github.com/AttractAcq/Advocate-AI/pull/167), [PR #169](https://github.com/AttractAcq/Advocate-AI/pull/169) and [migration procedure](../phase-5/stopped-vessel-history-migration.md) | Core and stopped recovery capture reject old, future or malformed SQLite history; the stopped migration signs release-bound evidence and separately clean-restores the old history. [All 12 migration CI jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44818648370) |
+| Pre-update and rollback recovery gates | [PR #170](https://github.com/AttractAcq/Advocate-AI/pull/170), [PR #172](https://github.com/AttractAcq/Advocate-AI/pull/172) and [switch procedure](../phase-5/vessel-release-switch.md) | Both directions require a signed recovery set of the active release, clean-restore it and compare current Core state before activation. The actual-image rehearsal captures one set on each side of the transition; [all 12 PR #172 CI jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44825084735), including the signed vessel rehearsal. |
+| Knowledge row equality | [PR #171](https://github.com/AttractAcq/Advocate-AI/pull/171), [schema-2 recovery set](../phase-5/vessel-recovery-set.md) and [all 12 final-head CI jobs](https://github.com/AttractAcq/Advocate-AI/actions/runs/44823012458) | A changed pgvector value with unchanged row counts alters the signed row digest. Restore and release activation compare the digest before starting Core. |
 
-At the PR #160 implementation head, `make check` passed 375 tests with 12
-expected skips; all 12 CI jobs passed after a targeted retry of an unrelated
-Fleet browser timeout. For an independent reproduction, record the commit and
+At the PR #172 implementation head, `make check` passed 409 tests with 16
+expected skips. For an independent reproduction, record the commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
 synthetic result artifact. Inspect the artifact and command logs, not only the
@@ -85,7 +91,8 @@ lab and retain the observed output, resource inventory and timing.
 | Declare a future schema in the signed contract or the Core image labels alone | Check that signer and verifier refuse mismatched declarations, and installer/recovery refuse unsupported but matched future formats |
 | Supply an altered legacy table or source before explicit migration | Confirm no version ledger is committed and no normal startup path silently migrates it |
 | Replace source bytes, source index, audit tail, history or PostgreSQL schema version | Check whether status, switch, capture and restore refuse it before Core sees altered data |
-| Substitute a wrong receipt key, restic password, snapshot ID, release ID or old receipt | Check signature, repository and release binding; record whether replay is possible within its intended scope |
+| Substitute a wrong receipt key, restic password, snapshot ID, release ID or old receipt | Check signature, repository and release binding in both switch and rollback; an old receipt from the prior active release must not authorise rollback from the updated release |
+| Change one Knowledge row or vector after capture while preserving source and passage counts | Confirm schema-2 digest mismatch prevents Core and Console startup on switch, rollback and clean restore |
 | Add a labelled container, network, extra volume or different restore-attempt label | Check that cleanup and abandonment do not remove ambiguous resources |
 | Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate |
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |
