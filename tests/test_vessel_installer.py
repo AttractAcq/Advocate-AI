@@ -15,7 +15,7 @@ from infrastructure.deploy.vessel_installer import (
     _scoped_list,
     _state_payload, _write_intent, _write_state, finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
-    resume_first_install,
+    reset_first_install, resume_first_install,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -144,6 +144,44 @@ class VesselInstallerTests(unittest.TestCase):
         self.assertEqual(result["result"], "reconciled")
         self.assertFalse(credentials.exists())
         self.assertEqual(_read_intent(self.root)["release"], "6" * 24)
+
+    def test_explicit_bootstrap_reset_keeps_intent_and_clears_data_credentials(self) -> None:
+        self.root.mkdir(mode=0o700)
+        installation_id = "f" * 32
+        data_volume = f"sovereign-{installation_id}-knowledge-data"
+        _write_intent(self.root, "6" * 24, installation_id,
+                      self.parent / "state", self.parent / "password")
+        credentials = self.root / "knowledge-secrets"
+        credentials.mkdir(mode=0o700)
+        secret = credentials / "admin-password"
+        secret.write_text("synthetic")
+        secret.chmod(0o600)
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer._scoped_list",
+                   side_effect=[[], [], [data_volume]]), \
+             patch("infrastructure.deploy.vessel_installer._volume"), \
+             patch("infrastructure.deploy.vessel_installer._docker") as docker, \
+             patch("infrastructure.deploy.vessel_installer._assert_missing"):
+            result = reset_first_install(self.root, self.parent / "key",
+                                         self.parent / "crane")
+        self.assertEqual(result, {"result": "bootstrap-reset", "data_volume": "removed"})
+        docker.assert_called_once_with("volume", "rm", data_volume)
+        self.assertFalse(credentials.exists())
+        self.assertEqual(_read_intent(self.root)["installation_id"], installation_id)
+
+    def test_bootstrap_reset_rejects_other_scoped_resources_before_deletion(self) -> None:
+        self.root.mkdir(mode=0o700)
+        _write_intent(self.root, "6" * 24, "f" * 32,
+                      self.parent / "state", self.parent / "password")
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer._scoped_list",
+                   side_effect=[["a" * 64], [],
+                                ["sovereign-" + "f" * 32 + "-knowledge-data"]]), \
+             patch("infrastructure.deploy.vessel_installer._docker") as docker:
+            with self.assertRaisesRegex(VesselInstallError, "only the data volume"):
+                reset_first_install(self.root, self.parent / "key",
+                                    self.parent / "crane")
+        docker.assert_not_called()
 
     def test_resume_clean_first_install_preserves_installation_id(self) -> None:
         self.root.mkdir(mode=0o700)

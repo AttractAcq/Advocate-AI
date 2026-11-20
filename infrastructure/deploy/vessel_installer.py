@@ -670,10 +670,10 @@ def _intent_stage(root: Path, trusted_key: Path,
     return stage
 
 
-def _clear_unbound_secrets(root: Path) -> None:
+def _validate_unbound_secrets(root: Path) -> Path | None:
     directory = root / "knowledge-secrets"
     if not directory.exists() and not directory.is_symlink():
-        return
+        return None
     _owner_directory(directory)
     if not {item.name for item in directory.iterdir()} <= {
             "admin-password", "writer.pgpass", "reader.pgpass"}:
@@ -683,7 +683,13 @@ def _clear_unbound_secrets(root: Path) -> None:
                 item.stat().st_uid != os.getuid() or
                 stat.S_IMODE(item.stat().st_mode) & 0o077):
             raise VesselInstallError("invalid first-install credential file")
-    shutil.rmtree(directory)
+    return directory
+
+
+def _clear_unbound_secrets(root: Path) -> None:
+    directory = _validate_unbound_secrets(root)
+    if directory is not None:
+        shutil.rmtree(directory)
 
 
 @_serialized
@@ -719,6 +725,35 @@ def reconcile_first_install(root: Path, trusted_key: Path,
             _docker("volume", "ls", "--filter", scope, "--quiet") != data_volume):
         raise VesselInstallError("first-install reconciliation is incomplete")
     return result
+
+
+@_serialized
+def reset_first_install(root: Path, trusted_key: Path,
+                        crane: Path) -> dict[str, str]:
+    """Explicitly discard one clean, labelled synthetic bootstrap data volume."""
+    intent = _read_intent(root)
+    _intent_stage(root, trusted_key, intent)
+    installation_id = intent["installation_id"]
+    data_volume = intent["data_volume"]
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope,
+                              "--quiet")
+    networks = _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                            "--quiet")
+    volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                           volume=True)
+    if containers or networks or volumes != [data_volume]:
+        raise VesselInstallError("bootstrap reset requires only the data volume")
+    _volume(data_volume, installation_id, "knowledge-data", create=False)
+    _validate_unbound_secrets(root)
+    if (_read_intent(root) != intent or
+            (root / "vessel-state.json").exists() or
+            (root / "vessel-state.json").is_symlink()):
+        raise VesselInstallError("first-install state changed before bootstrap reset")
+    _docker("volume", "rm", data_volume)
+    _assert_missing("volume", data_volume)
+    _clear_unbound_secrets(root)
+    return {"result": "bootstrap-reset", "data_volume": "removed"}
 
 
 @_serialized

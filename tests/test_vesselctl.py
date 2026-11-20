@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
 from pathlib import Path
@@ -70,6 +70,23 @@ class VesselCtlTests(unittest.TestCase):
         resume.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
                                        Path("/tmp/crane"))
         self.assertEqual(json.loads(output.getvalue())["result"], "activated")
+
+    def test_bootstrap_reset_requires_explicit_discard_flag(self) -> None:
+        args = ["reset-bootstrap", "--root", "/tmp/vessel",
+                "--trusted-key", "/tmp/key", "--crane", "/tmp/crane"]
+        with patch("scripts.vesselctl.reset_first_install") as reset, \
+             redirect_stderr(StringIO()), \
+             self.assertRaises(SystemExit):
+            main(args)
+        reset.assert_not_called()
+        output = StringIO()
+        with patch("scripts.vesselctl.reset_first_install",
+                   return_value={"result": "bootstrap-reset"}) as reset, \
+             redirect_stdout(output):
+            main(args + ["--discard-data"])
+        reset.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
+                                      Path("/tmp/crane"))
+        self.assertEqual(json.loads(output.getvalue())["result"], "bootstrap-reset")
 
 
 if __name__ == "__main__":

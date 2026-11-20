@@ -51,7 +51,8 @@ open.
 ## Operator command
 
 `python -m scripts.vesselctl` exposes `install`, `status`, `stop`,
-`finish-stop`, `reconcile`, `recover`, `reconcile-install` and `resume-install`
+`finish-stop`, `reconcile`, `recover`, `reconcile-install`, `resume-install`
+and `reset-bootstrap`
 for the synthetic candidate. Every command requires explicit absolute paths
 for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
 requires `--bundle`, `--console-config`, `--core-state` and
@@ -113,3 +114,13 @@ installation ID, external paths and data volume to match the intent. It then
 clears only the stale intent and reports `already-activated`.
 Interrupted PostgreSQL bootstrap with an existing but not yet secured data
 volume still requires explicit operator investigation.
+
+`reset-bootstrap --discard-data` is an explicit synthetic recovery option when
+a first-install data volume cannot be safely resumed. It requires a signed
+intent, no active record, no containers, no network, exactly one labelled data
+volume and valid private bootstrap credential files. Only then does it remove
+the volume and those credentials, retaining the signed stage and intent for
+`resume-install` to initialize afresh. The actual-image rehearsal creates a
+labelled incomplete bootstrap volume, resets it and verifies a fresh signed
+activation. This command discards any data in that volume; it never runs
+automatically during resume or reconciliation.
