@@ -31,6 +31,20 @@ versioned schema migrations, database encryption, coordinated restic
 capture and clean restore, key custody, real vessel identity/model/NAS
 integration, target hardware checks and independent review remain open.
 
+## Knowledge schema version boundary
+
+The migration role now creates a single-row `knowledge_schema_version` table
+with version `1` in the same transaction as the four Knowledge tables. A
+repeated setup accepts exactly that version and all four tables. It refuses an
+unversioned existing schema, a missing table, an empty or extra version row,
+and a future version. The Core reader can inspect the version but cannot
+change it. Vessel status and stopped-runtime recovery check the version before
+accepting the Knowledge runtime; a clean recovery snapshot checks it too.
+The signed-image rehearsal changes the synthetic version to `2`, verifies that
+status denies it, and restores `1` before continuing. This is a compatibility
+guard, not a migration from an older schema. A real upgrade path and rollback
+compatibility remain open.
+
 ## Clean stopped-runtime recovery candidate
 
 `stop_vessel` checks the healthy signed installation, removes the Core and

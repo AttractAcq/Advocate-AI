@@ -13,6 +13,7 @@ from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _cleanup_failed_install, _ingest, _read_intent, _read_state,
+    _verify_knowledge_schema,
     _scoped_list,
     _state_payload, _write_intent, _write_state, finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
@@ -68,6 +69,14 @@ class VesselInstallerTests(unittest.TestCase):
         self.assertIn(f"type=bind,source={writer.resolve()},target=/run/secrets/pgpass,readonly", ingest)
         self.assertFalse(any("target=/var/lib/sovereign" in argument for argument in schema))
         self.assertTrue(any("target=/var/lib/sovereign" in argument for argument in ingest))
+
+    def test_unknown_knowledge_schema_denies_runtime(self) -> None:
+        knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
+        with patch("infrastructure.deploy.vessel_installer.postgres_sql",
+                   return_value="1:2") as query:
+            with self.assertRaisesRegex(VesselInstallError, "schema version"):
+                _verify_knowledge_schema(knowledge)
+            self.assertEqual(query.call_args.args[0], knowledge.container_id)
 
     def test_failed_activation_has_no_active_record(self) -> None:
         knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
@@ -341,6 +350,7 @@ class VesselInstallerTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_installer._recovery_inventory") as inventory, \
              patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
                    return_value=new_knowledge) as start_knowledge, \
+             patch("infrastructure.deploy.vessel_installer._verify_knowledge_schema") as schema, \
              patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
                    return_value=new_services):
             result = recover_vessel(self.root, self.parent / "key", self.parent / "crane")
@@ -349,6 +359,7 @@ class VesselInstallerTests(unittest.TestCase):
                                        self.parent / "key", "6" * 24)
         inventory.assert_called_once_with(installation_id, initial["runtime"])
         self.assertFalse(start_knowledge.call_args.kwargs["initialize"])
+        schema.assert_called_once_with(new_knowledge)
         self.assertEqual(_read_state(self.root)["runtime"]["data_volume"],
                          old_knowledge.data_volume)
         self.assertEqual(_read_state(self.root)["runtime"]["knowledge_id"],
@@ -401,6 +412,7 @@ class VesselInstallerTests(unittest.TestCase):
              patch("infrastructure.deploy.vessel_installer._recovery_inventory"), \
              patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
                    return_value=new_knowledge), \
+             patch("infrastructure.deploy.vessel_installer._verify_knowledge_schema"), \
              patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
                    return_value=new_services), \
              patch("infrastructure.deploy.vessel_installer._write_state",
