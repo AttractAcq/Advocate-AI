@@ -176,6 +176,43 @@ class VesselInstallerTests(unittest.TestCase):
         start.assert_not_called()
         self.assertEqual(_read_state(self.root), initial)
 
+    def test_recovery_write_failure_preserves_old_record_and_data(self) -> None:
+        self.root.mkdir(mode=0o700)
+        installation_id = "f" * 32
+        old_services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        old_knowledge = KnowledgeVolumeHandle("d" * 64,
+                                              "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                              f"sovereign-{installation_id}-knowledge-data",
+                                              "sovereign-knowledge-" + "e" * 12,
+                                              installation_id)
+        new_services = RuntimeHandle("1" * 64, "2" * 64, "3" * 64)
+        new_knowledge = KnowledgeVolumeHandle("4" * 64,
+                                              "sovereign-knowledge-" + "5" * 12 + "-socket",
+                                              old_knowledge.data_volume,
+                                              "sovereign-knowledge-" + "5" * 12,
+                                              installation_id)
+        initial = _state_payload("6" * 24, installation_id,
+                                 self.parent / "state", self.parent / "password",
+                                 old_services, old_knowledge)
+        _write_state(self.root, initial)
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
+                   return_value=new_knowledge), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
+                   return_value=new_services), \
+             patch("infrastructure.deploy.vessel_installer._write_state",
+                   side_effect=OSError("disk unavailable")), \
+             patch("infrastructure.deploy.vessel_installer._cleanup_failed_install",
+                   return_value=True) as cleanup:
+            with self.assertRaises(OSError):
+                recover_vessel(self.root, self.parent / "key", self.parent / "crane")
+        cleanup.assert_called_once_with(installation_id, new_services,
+                                        new_knowledge, old_knowledge.data_volume,
+                                        retain_data=True)
+        self.assertEqual(_read_state(self.root), initial)
+
 
 if __name__ == "__main__":
     unittest.main()
