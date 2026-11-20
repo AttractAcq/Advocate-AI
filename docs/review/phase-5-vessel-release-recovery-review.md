@@ -20,7 +20,7 @@ the reviewer must identify the exact final tree tested. The main paths are:
 | Core state and runtime | `infrastructure/deploy/vessel_runtime.py`, `services/policy/audit.py` | Private mounts, audit chain, conversation history and service health |
 | Encrypted recovery | `infrastructure/deploy/vessel_recovery_set.py` | Frozen snapshot, signed receipt, restic verification, clean activation, interrupted restore abandonment and retry |
 | Operator entry points | `scripts/vesselctl.py`, [switch runbook](../phase-5/vessel-release-switch.md), [recovery runbook](../phase-5/vessel-recovery-set.md) | Required inputs, refusal paths and operator-visible state |
-| Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks |
+| Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks; review the engineer/deckhand API probe added after PR #160 |
 
 ## Claims to verify
 
