@@ -206,8 +206,11 @@ def switch_stopped_vessel_release(root: Path, trusted_key: Path, crane: Path,
 
 
 def rollback_stopped_vessel_release(root: Path, trusted_key: Path,
-                                    crane: Path) -> dict[str, object]:
-    """Re-activate the previous signed release without changing Knowledge data."""
+                                    crane: Path, receipt: Path,
+                                    receipt_key: Path, password_file: Path,
+                                    restic: Path, restic_sha256: str,
+                                    staging_parent: Path) -> dict[str, object]:
+    """Re-activate the previous signed release after proving current recovery."""
     with _operation_lock(root):
         current = _read_state(root)
         previous = current.get("previous")
@@ -220,5 +223,9 @@ def rollback_stopped_vessel_release(root: Path, trusted_key: Path,
         state, password = Path(current["core_state"]), Path(current["lab_password_file"])
         _state_options(state, password, root)
         _recovery_inventory(current["installation_id"], current["runtime"])
+        recovery = _verify_preupdate_recovery(
+            current, receipt, receipt_key, password_file, restic,
+            restic_sha256, staging_parent, root)
+        _recovery_inventory(current["installation_id"], current["runtime"])
         return _activate_stopped(root, trusted_key, crane, current, previous,
-                                 stage, "rolled-back")
+                                 stage, "rolled-back", recovery)

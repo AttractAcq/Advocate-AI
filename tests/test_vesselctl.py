@@ -36,14 +36,14 @@ class VesselCtlTests(unittest.TestCase):
              redirect_stdout(output):
             common = ["--root", "/tmp/vessel", "--trusted-key", "/tmp/key",
                       "--crane", "/tmp/crane"]
+            recovery = ["--recovery-receipt", "/tmp/receipt",
+                        "--receipt-key", "/tmp/receipt-key",
+                        "--password-file", "/tmp/backup-password",
+                        "--restic", "/tmp/restic", "--restic-sha256", "0" * 64,
+                        "--staging-parent", "/tmp/staging"]
             main(["switch-stopped", *common, "--bundle", "/tmp/bundle",
-                  "--console-config", "/tmp/config",
-                  "--recovery-receipt", "/tmp/receipt",
-                  "--receipt-key", "/tmp/receipt-key",
-                  "--password-file", "/tmp/backup-password",
-                  "--restic", "/tmp/restic", "--restic-sha256", "0" * 64,
-                  "--staging-parent", "/tmp/staging"])
-            main(["rollback-stopped", *common])
+                  "--console-config", "/tmp/config", *recovery])
+            main(["rollback-stopped", *common, *recovery])
         switch.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
                                        Path("/tmp/crane"), Path("/tmp/bundle"),
                                        Path("/tmp/config"), Path("/tmp/receipt"),
@@ -52,7 +52,11 @@ class VesselCtlTests(unittest.TestCase):
                                        Path("/tmp/restic"), "0" * 64,
                                        Path("/tmp/staging"))
         rollback.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
-                                         Path("/tmp/crane"))
+                                         Path("/tmp/crane"), Path("/tmp/receipt"),
+                                         Path("/tmp/receipt-key"),
+                                         Path("/tmp/backup-password"),
+                                         Path("/tmp/restic"), "0" * 64,
+                                         Path("/tmp/staging"))
         self.assertIn('"result": "rolled-back"', output.getvalue())
 
     def test_switch_cli_requires_preupdate_recovery_inputs(self) -> None:
@@ -62,6 +66,13 @@ class VesselCtlTests(unittest.TestCase):
                   "--trusted-key", "/tmp/key", "--crane", "/tmp/crane",
                   "--bundle", "/tmp/bundle", "--console-config", "/tmp/config"])
         switch.assert_not_called()
+
+    def test_rollback_cli_requires_current_recovery_inputs(self) -> None:
+        with patch("scripts.vesselctl.rollback_stopped_vessel_release") as rollback, \
+             redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            main(["rollback-stopped", "--root", "/tmp/vessel",
+                  "--trusted-key", "/tmp/key", "--crane", "/tmp/crane"])
+        rollback.assert_not_called()
 
     def test_install_routes_explicit_paths_and_prints_bounded_result(self) -> None:
         output = StringIO()
