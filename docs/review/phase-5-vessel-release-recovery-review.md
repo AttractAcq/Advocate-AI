@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), including
+through [PR #180](https://github.com/AttractAcq/Advocate-AI/pull/180), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -72,7 +72,8 @@ finding; they do not prove the signed vessel install, switch, model route or
 recovery paths on those heads. The latest confirmed successful signed vessel
 result must be identified from its retained artifact before a reviewer treats
 any older CI badge as actual-image evidence. The [build queue](../blockers-and-build-queue.md)
-tracks the Knowledge image fix and a CI exit gate for skipped rehearsals.
+tracks the [Knowledge image fix and CI exit gate](https://github.com/AttractAcq/Advocate-AI/pull/180)
+for skipped rehearsals.
 
 ## Reproducible evidence
 
