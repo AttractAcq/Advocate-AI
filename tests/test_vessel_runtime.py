@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -43,6 +44,19 @@ class VesselRuntimeTests(unittest.TestCase):
             _state_options(self.state, self.state / "roles.json", self.knowledge_root)
         with self.assertRaises(VesselRuntimeError):
             _state_options(self.state, self.lab_password, self.state)
+
+    def test_exposed_source_directory_and_boolean_manifest_schema_fail(self) -> None:
+        sources = self.state / "sources"
+        sources.chmod(0o755)
+        with self.assertRaises(VesselRuntimeError):
+            _state_options(self.state, self.lab_password, self.knowledge_root)
+        sources.chmod(0o700)
+        manifest = self.state / "approved.json"
+        payload = json.loads(manifest.read_text())
+        payload["schema"] = True
+        manifest.write_text(json.dumps(payload))
+        with self.assertRaises(VesselRuntimeError):
+            _state_options(self.state, self.lab_password, self.knowledge_root)
 
     def test_non_vessel_bundle_never_loads_images(self) -> None:
         knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)

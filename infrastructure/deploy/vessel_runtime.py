@@ -60,16 +60,21 @@ def _state_options(state: Path, lab_password: Path,
     if not isinstance(load_policy(policy), dict):
         raise VesselRuntimeError("Core policy unavailable")
     parsed = load_manifest(manifest)
-    if (not isinstance(parsed, dict) or parsed.get("schema") != 1
-            or not isinstance(parsed.get("sources"), list)):
+    if (not isinstance(parsed, dict) or type(parsed.get("schema")) is not int
+            or parsed["schema"] != 1 or not isinstance(parsed.get("sources"), list)
+            or len(parsed["sources"]) > 10000):
         raise VesselRuntimeError("invalid approved Knowledge manifest")
     sources = state / "sources"
-    if sources.is_symlink() or not sources.is_dir():
+    if (sources.is_symlink() or not sources.is_dir()
+            or sources.stat().st_uid != os.getuid()
+            or stat.S_IMODE(sources.stat().st_mode) & 0o077):
         raise VesselRuntimeError("invalid Core source directory")
     _private_file(lab_password)
     if lab_password.resolve().is_relative_to(state.resolve()):
         raise VesselRuntimeError("lab credential must be outside Core state")
-    if not 16 <= len(lab_password.read_text(encoding="utf-8").rstrip("\n")) <= 200:
+    password = lab_password.read_text(encoding="utf-8")
+    if (not 16 <= len(password.rstrip("\n")) <= 200 or
+            "\r" in password or "\n" in password.rstrip("\n")):
         raise VesselRuntimeError("invalid lab credential length")
     _, _, reader, _, reader_secret = _credentials(knowledge_root, initialize=False)
     options = ["--user", f"{os.getuid()}:{os.getgid()}",
