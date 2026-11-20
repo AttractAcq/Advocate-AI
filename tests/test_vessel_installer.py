@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,7 +12,7 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _cleanup_failed_install, _read_intent, _read_state,
+    VesselInstallError, _cleanup_failed_install, _ingest, _read_intent, _read_state,
     _scoped_list,
     _state_payload, _write_intent, _write_state, finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
@@ -38,6 +39,33 @@ class VesselInstallerTests(unittest.TestCase):
                                self.parent / "state", self.parent / "password")
             self.assertFalse(self.root.exists())
             start.assert_not_called()
+
+    def test_signed_schema_task_precedes_restricted_ingestion(self) -> None:
+        knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
+        writer = self.parent / "writer.pgpass"
+        migrate = self.parent / "migrate.pgpass"
+        completed = [subprocess.CompletedProcess([], 0, stdout=""),
+                     subprocess.CompletedProcess([], 0,
+                                                 stdout='{"indexed":1,"unchanged":0}')]
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"images": {"core": "archive"}}), \
+             patch("infrastructure.deploy.vessel_installer._image_id",
+                   return_value="signed-core"), \
+             patch("infrastructure.deploy.vessel_installer._credentials",
+                   return_value=(self.parent, writer, self.parent, "w", "r")), \
+             patch("infrastructure.deploy.vessel_installer._migration_credential",
+                   return_value=(migrate, "m")), \
+             patch("infrastructure.deploy.vessel_installer.subprocess.run",
+                   side_effect=completed) as run:
+            result = _ingest(self.parent, self.parent / "key", self.parent / "crane",
+                             self.parent / "state", self.parent, knowledge)
+        self.assertEqual(result, {"indexed": 1, "unchanged": 0})
+        self.assertEqual(run.call_count, 2)
+        schema, ingest = (call.args[0] for call in run.call_args_list)
+        self.assertIn("SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_migrate@/postgres?host=/run/postgresql", schema)
+        self.assertIn("SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_ingest@/postgres?host=/run/postgresql", ingest)
+        self.assertIn(f"type=bind,source={migrate.resolve()},target=/run/secrets/pgpass,readonly", schema)
+        self.assertIn(f"type=bind,source={writer.resolve()},target=/run/secrets/pgpass,readonly", ingest)
 
     def test_failed_activation_has_no_active_record(self) -> None:
         knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)

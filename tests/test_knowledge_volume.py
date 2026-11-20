@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeError, KnowledgeVolumeHandle, _credentials, _volume,
+    KnowledgeVolumeError, KnowledgeVolumeHandle, _credentials, _migration_credential, _volume,
     start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import (
@@ -29,9 +29,19 @@ class KnowledgeVolumeTests(unittest.TestCase):
         second = _credentials(self.root, initialize=False)
         self.assertEqual(first, second)
         self.assertNotEqual(first[3], first[4])
+        migration, migration_secret = _migration_credential(self.root)
+        self.assertEqual(migration.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(migration_secret, (first[3], first[4]))
         for path in first[:3]:
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         first[2].chmod(0o644)
+        with self.assertRaises(KnowledgeVolumeError):
+            _credentials(self.root, initialize=False)
+
+    def test_migration_credential_must_be_private_and_bound_to_role(self) -> None:
+        _credentials(self.root, initialize=True)
+        path, secret = _migration_credential(self.root)
+        path.write_text(f"/run/postgresql:5432:postgres:sovereign_ingest:{secret}\n")
         with self.assertRaises(KnowledgeVolumeError):
             _credentials(self.root, initialize=False)
 
@@ -59,6 +69,26 @@ class KnowledgeVolumeTests(unittest.TestCase):
                 return "0"
             if "rolname ||" in statement:
                 return "sovereign_ingest:0:0:0:0:0\nsovereign_read:1:0:0:0:0"
+            return "f"
+
+        with patch("infrastructure.deploy.postgres_socket.sql", side_effect=sql), \
+             patch("infrastructure.deploy.postgres_socket.docker",
+                   return_value=HBA.rstrip("\n")):
+            with self.assertRaises(PostgresSocketError):
+                verify_security("a" * 64)
+
+    def test_writer_schema_creation_is_rejected(self) -> None:
+        def sql(_identifier: str, statement: str) -> str:
+            if "pg_hba_file_rules" in statement:
+                return "0"
+            if "rolname ||" in statement:
+                return ("sovereign_ingest:0:0:0:0:0\n"
+                        "sovereign_migrate:0:0:0:0:0\n"
+                        "sovereign_read:0:0:0:0:0")
+            if "sovereign_migrate','public','CREATE" in statement:
+                return "t"
+            if "sovereign_ingest','public','CREATE" in statement:
+                return "t"
             return "f"
 
         with patch("infrastructure.deploy.postgres_socket.sql", side_effect=sql), \

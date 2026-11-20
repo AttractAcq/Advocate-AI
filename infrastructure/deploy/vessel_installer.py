@@ -24,10 +24,9 @@ from infrastructure.deploy.container_runtime import (
     RuntimeHandle, _docker, _image_id, _validate_console_config, stop_runtime,
 )
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeHandle, _credentials, _volume, probe_knowledge,
+    KnowledgeVolumeHandle, _credentials, _migration_credential, _volume, probe_knowledge,
     start_signed_knowledge, stop_knowledge,
 )
-from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import (
     _state_options, probe_signed_vessel_services, start_signed_vessel_services,
 )
@@ -105,21 +104,28 @@ def _ingest(bundle: Path, trusted_key: Path, crane: Path,
     manifest = verify_bundle(bundle, trusted_key)
     image = _image_id(bundle, "core", manifest["images"]["core"], crane)
     _, writer, _, _, _ = _credentials(knowledge_root, initialize=False)
+    migrate, _ = _migration_credential(knowledge_root)
+    schema_program = """\
+from services.knowledge.postgres_index import _connect, initialize_schema
+dsn='postgresql://sovereign_migrate@/postgres?host=/run/postgresql'
+initialize_schema(dsn)
+with _connect(dsn) as db:
+ db.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_ingest')
+ db.execute('GRANT SELECT ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_read')
+"""
     program = """\
 import json
 from pathlib import Path
-from services.knowledge.postgres_index import initialize_schema
 from services.knowledge.ingestion import sync_manifest
 root=Path('/var/lib/sovereign')
 dsn='postgresql://sovereign_ingest@/postgres?host=/run/postgresql'
-initialize_schema(dsn)
 result=sync_manifest(root,root/'approved.json',dsn)
 if result['quarantined']:
  raise RuntimeError('approved source was quarantined')
 print(json.dumps({'indexed':len(result['indexed']),'unchanged':len(result['unchanged'])}))
 """
-    try:
-        completed = subprocess.run(
+    def run_task(role: str, credential: Path, code: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
             ["docker", "run", "--rm", "--pull", "never", "--network", "none",
              "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
              "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
@@ -127,11 +133,14 @@ print(json.dumps({'indexed':len(result['indexed']),'unchanged':len(result['uncha
              "--mount", (f"type=volume,source={knowledge.socket_volume},"
                          "target=/run/postgresql,readonly"),
              "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign,readonly",
-             "--mount", (f"type=bind,source={writer.resolve()},"
+             "--mount", (f"type=bind,source={credential.resolve()},"
                          "target=/run/secrets/pgpass,readonly"),
-             "-e", "SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_ingest@/postgres?host=/run/postgresql",
-             "-e", "PGPASSFILE=/run/secrets/pgpass", image, "python", "-c", program],
+             "-e", f"SOVEREIGN_KNOWLEDGE_DB=postgresql://{role}@/postgres?host=/run/postgresql",
+             "-e", "PGPASSFILE=/run/secrets/pgpass", image, "python", "-c", code],
             capture_output=True, text=True, check=True, timeout=180)
+    try:
+        run_task("sovereign_migrate", migrate, schema_program)
+        completed = run_task("sovereign_ingest", writer, program)
         result = json.loads(completed.stdout, object_pairs_hook=_unique)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired,
             ValueError) as exc:
@@ -140,9 +149,6 @@ print(json.dumps({'indexed':len(result['indexed']),'unchanged':len(result['uncha
             or any(type(value) is not int or value < 0 for value in result.values())
             or result["indexed"] + result["unchanged"] < 1):
         raise VesselInstallError("signed Knowledge ingestion returned invalid inventory")
-    postgres_sql(knowledge.container_id,
-                 "GRANT SELECT ON knowledge_sources, knowledge_passages, "
-                 "knowledge_quarantine, knowledge_vectors TO sovereign_read")
     return result
 
 
@@ -676,7 +682,7 @@ def _validate_unbound_secrets(root: Path) -> Path | None:
         return None
     _owner_directory(directory)
     if not {item.name for item in directory.iterdir()} <= {
-            "admin-password", "writer.pgpass", "reader.pgpass"}:
+            "admin-password", "writer.pgpass", "reader.pgpass", "migrate.pgpass"}:
         raise VesselInstallError("unexpected first-install credential file")
     for item in directory.iterdir():
         if (item.is_symlink() or not item.is_file() or

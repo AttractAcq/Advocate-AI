@@ -31,17 +31,14 @@ from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
-from scripts.phase3_pgvector_core_socket import (
-    _BOOTSTRAP, _rehearse_verified_images,
-)
+from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
 from scripts.synthetic_pg_fixture import fixture as synthetic_fixture, put as private_put
 
 ROLES = ("core", "console", "knowledge")
 
 
 def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
-                                   crane: Path, root: Path,
-                                   core_image: str) -> dict[str, str]:
+                                   crane: Path, root: Path) -> dict[str, str]:
     """Restart signed Knowledge and attach signed Core and Console to it."""
     installation_id = uuid.uuid4().hex
     install_root = root / "knowledge-install"
@@ -60,23 +57,7 @@ def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
         config = root / "console-config.json"
         config.write_text('{"schema":1,"oidc_issuer":null}\n')
         config.chmod(0o644)
-        writer = install_root / "knowledge-secrets/writer.pgpass"
-        _run("docker", "run", "--rm", "--pull", "never",
-             "--network", "none", "--read-only",
-             "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
-             "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
-             "--user", f"{state.stat().st_uid}:{state.stat().st_gid}",
-             "--mount", (f"type=volume,source={active.socket_volume},"
-                         "target=/run/postgresql,readonly"),
-             "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign,readonly",
-             "--mount", (f"type=bind,source={writer.resolve()},"
-                         "target=/run/secrets/pgpass,readonly"),
-             "-e", "SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_ingest@/postgres?host=/run/postgresql",
-             "-e", "PGPASSFILE=/run/secrets/pgpass", core_image,
-             "python", "-c", _BOOTSTRAP)
-        postgres_sql(active.container_id,
-                     "GRANT SELECT ON knowledge_sources, knowledge_passages, "
-                     "knowledge_quarantine, knowledge_vectors TO sovereign_read")
+        _ingest(bundle, trusted, crane, state, install_root, active)
         postgres_sql(active.container_id,
                      "CREATE TABLE synthetic_persistence_probe (id integer PRIMARY KEY)")
         postgres_sql(active.container_id,
@@ -127,6 +108,13 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
             raise AssertionError("signed first installation did not become healthy")
         record = json.loads((install_root / "vessel-state.json").read_text())
         runtime = record["runtime"]
+        schema_rights = postgres_sql(
+            runtime["knowledge_id"],
+            "SELECT has_schema_privilege('sovereign_migrate','public','CREATE')::int || ':' || "
+            "has_schema_privilege('sovereign_ingest','public','CREATE')::int || ':' || "
+            "has_schema_privilege('sovereign_read','public','CREATE')::int")
+        if schema_rights != "1:0:0":
+            raise AssertionError("Knowledge migration and application roles are not separated")
         stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
                                    runtime["console_id"]))
         stopped = finish_vessel_stop(install_root, trusted, crane)
@@ -149,6 +137,7 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 recovered.get("active") != activated.get("active")):
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         return {"result": "pass", "activation": "signed-and-healthy",
+                "schema_authority": "migration-role-only",
                 "state": "recorded-after-health", "recovery": "stopped-and-recovered",
                 "interrupted_recovery": "orphan-runtime-reconciled",
                 "interrupted_stop": "knowledge-stop-completed"}
@@ -423,8 +412,7 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     "revocation": runtime["revocation"],
                 }
                 result["persistent_knowledge_restart"] = \
-                    _rehearse_persistent_knowledge(bundle, trusted, crane, root,
-                                                  ids["core"])
+                    _rehearse_persistent_knowledge(bundle, trusted, crane, root)
                 result["signed_vessel_first_install"] = \
                     _rehearse_first_install(bundle, trusted, crane, root)
                 result["interrupted_first_install"] = \

@@ -7,10 +7,12 @@ installation root beneath a private parent. It copies and re-verifies the
 complete signed bundle and Console configuration into a release directory.
 
 Installation creates a labelled persistent PostgreSQL volume and private
-administrator, ingestion and reader credentials outside the signed images.
-A disposable signed Core container uses the ingestion role to reconcile the
-approved manifest. Quarantined sources deny activation. The installer grants
-the Core reader role SELECT on the knowledge tables, starts the signed Core
+administrator, migration, ingestion and reader credentials outside the signed images.
+A disposable signed Core container uses the migration role to create the
+Knowledge tables and grant table-level DML to ingestion and SELECT to the
+reader. A separate container uses the ingestion role to reconcile the approved
+manifest. The ingestion and reader roles cannot create schema objects.
+Quarantined sources deny activation. The installer starts the signed Core
 and Console images against the running Knowledge container, and checks their
 network, mount, role, image and health boundaries. It writes `vessel-state.json`
 atomically only after those checks pass. `status_vessel` verifies the staged
@@ -25,7 +27,7 @@ gone. If cleanup cannot be confirmed, it retains the private root and its
 database credentials and reports an incomplete cleanup for manual recovery.
 
 The first-install path covers initial activation. Release updates, rollback,
-separate schema-migration authority, database encryption, coordinated restic
+versioned schema migrations, database encryption, coordinated restic
 capture and clean restore, key custody, real vessel identity/model/NAS
 integration, target hardware checks and independent review remain open.
 
@@ -44,7 +46,7 @@ cleanup or state reconciliation is uncertain, it retains the private root for
 investigation. The actual-image CI rehearsal stops and recovers the synthetic
 installation and rechecks signed image identity and health.
 
-Interrupted-process reconciliation, automated rollback, schema migration,
+Interrupted-process reconciliation, automated rollback, versioned schema migration,
 coordinated encrypted recovery, target hardware and independent review remain
 open.
 

@@ -104,7 +104,22 @@ def _credentials(root: Path, *, initialize: bool) -> tuple[Path, Path, Path, str
             or _secret(reader) !=
             f"/run/postgresql:5432:postgres:sovereign_read:{reader_secret}\n"):
         raise KnowledgeVolumeError("invalid Knowledge role credentials")
+    _migration_credential(root, initialize=initialize)
     return admin, writer, reader, writer_secret, reader_secret
+
+
+def _migration_credential(root: Path, *, initialize: bool = False) -> tuple[Path, str]:
+    directory = root / "knowledge-secrets"
+    _private_root(directory)
+    path = directory / "migrate.pgpass"
+    if initialize:
+        _secret(path, f"/run/postgresql:5432:postgres:sovereign_migrate:{secrets.token_hex(32)}\n")
+    raw = _secret(path)
+    match = re.fullmatch(
+        r"/run/postgresql:5432:postgres:sovereign_migrate:([0-9a-f]{64})\n", raw)
+    if match is None:
+        raise KnowledgeVolumeError("invalid Knowledge migration credential")
+    return path, match.group(1)
 
 
 def _volume(name: str, installation_id: str, role: str, *, create: bool,
@@ -156,6 +171,7 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
     try:
         admin, _, _, writer_secret, reader_secret = _credentials(
             root, initialize=initialize)
+        _, migration_secret = _migration_credential(root)
         _volume(data_name, installation_id, "knowledge-data", create=initialize)
         created_data = initialize
         _volume(socket_name, installation_id, "knowledge-socket", create=True,
@@ -180,9 +196,10 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
             raise KnowledgeVolumeError("Knowledge container has a network route")
         ready(container)
         if initialize:
-            secure_database(container, writer_secret, reader_secret)
+            secure_database(container, migration_secret, writer_secret, reader_secret)
         else:
             verify_security(container)
+        verify_login(container, "sovereign_migrate", migration_secret)
         verify_login(container, "sovereign_ingest", writer_secret)
         verify_login(container, "sovereign_read", reader_secret)
         handle = KnowledgeVolumeHandle(container, socket_name, data_name, run_name,
