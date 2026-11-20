@@ -37,12 +37,21 @@ python -m scripts.vesselctl migrate-history-stopped \
 python -m scripts.vesselctl verify-history-migration-receipt \
   --receipt /private/lab/evidence/history-migration-receipt.json \
   --receipt-key /private/lab/keys/recovery-signing.pub
+
+python -m scripts.vesselctl verify-history-migration-backup \
+  --receipt /private/lab/evidence/history-migration-receipt.json \
+  --receipt-key /private/lab/keys/recovery-signing.pub \
+  --password-file /private/lab/keys/restic-password \
+  --restic /private/lab/tools/restic \
+  --restic-sha256 APPROVED_RESTIC_SHA256 \
+  --staging-parent /private/lab/staging
 ```
 
-Verify the signed receipt and capture a complete vessel recovery set before
-switching software releases. The signed migration receipt attests the
-completed history transformation; it does not itself restore the restic
-snapshot or attest the other Core files and Knowledge database. If the command
+Verify the signed receipt and its encrypted clean restore, then capture a
+complete vessel recovery set before switching software releases. The signed
+migration receipt attests the completed history transformation; the separate
+backup verifier checks that its pre-migration snapshot remains recoverable.
+Neither attests the other Core files or Knowledge database. If the command
 fails after the backup or database change, inspect the private evidence and
 live database version before any retry. Preserve the recorded snapshot and
 restore into a separate clean directory for investigation. There is no

@@ -19,12 +19,12 @@ from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_history_migration import (
     VesselHistoryMigrationError, migrate_stopped_vessel_history,
+    verify_vessel_history_migration_backup,
     verify_vessel_history_migration_receipt,
 )
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _state_payload, _write_state,
 )
-from infrastructure.restic_repository import restore_snapshot
 
 
 class StoppedVesselHistoryMigrationTests(unittest.TestCase):
@@ -166,12 +166,11 @@ class StoppedVesselHistoryMigrationTests(unittest.TestCase):
                          "migration-complete")
         with closing(sqlite3.connect(history)) as database:
             self.assertEqual(database.execute("PRAGMA user_version").fetchone(), (1,))
-        destination = self.parent / "clean-restore"
-        restore_snapshot(result["snapshot_id"], self.parent / "repository",
-                         self.backup_password, self.restic, self.restic_hash,
-                         destination)
-        with closing(sqlite3.connect(destination / "history.db")) as database:
-            self.assertEqual(database.execute("PRAGMA user_version").fetchone(), (0,))
+        backup = verify_vessel_history_migration_backup(
+            self.receipt, self.trust, self.backup_password, self.restic,
+            self.restic_hash, self.staging)
+        self.assertEqual(backup["status"], "pre-migration-backup-restored")
+        self.assertEqual(backup["snapshot_id"], result["snapshot_id"])
 
 
 if __name__ == "__main__":

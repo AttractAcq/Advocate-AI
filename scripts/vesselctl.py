@@ -22,7 +22,8 @@ from infrastructure.deploy.vessel_release_switch import (
     switch_stopped_vessel_release,
 )
 from infrastructure.deploy.vessel_history_migration import (
-    migrate_stopped_vessel_history, verify_vessel_history_migration_receipt,
+    migrate_stopped_vessel_history, verify_vessel_history_migration_backup,
+    verify_vessel_history_migration_receipt,
 )
 
 
@@ -73,6 +74,13 @@ def main(argv: list[str] | None = None) -> None:
     verify_history = commands.add_parser("verify-history-migration-receipt")
     verify_history.add_argument("--receipt", type=Path, required=True)
     verify_history.add_argument("--receipt-key", type=Path, required=True)
+    verify_history_backup = commands.add_parser("verify-history-migration-backup")
+    verify_history_backup.add_argument("--receipt", type=Path, required=True)
+    verify_history_backup.add_argument("--receipt-key", type=Path, required=True)
+    verify_history_backup.add_argument("--password-file", type=Path, required=True)
+    verify_history_backup.add_argument("--restic", type=Path, required=True)
+    verify_history_backup.add_argument("--restic-sha256", required=True)
+    verify_history_backup.add_argument("--staging-parent", type=Path, required=True)
     verify = commands.add_parser("verify-recovery-receipt")
     verify.add_argument("--receipt", type=Path, required=True)
     verify.add_argument("--receipt-key", type=Path, required=True)
@@ -162,6 +170,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "verify-history-migration-receipt":
         result = verify_vessel_history_migration_receipt(args.receipt,
                                                         args.receipt_key)
+    elif args.command == "verify-history-migration-backup":
+        result = verify_vessel_history_migration_backup(
+            args.receipt, args.receipt_key, args.password_file, args.restic,
+            args.restic_sha256, args.staging_parent)
     elif args.command == "verify-recovery-receipt":
         result = verify_vessel_recovery_receipt(args.receipt, args.receipt_key)
     elif args.command == "restore-recovery-files":

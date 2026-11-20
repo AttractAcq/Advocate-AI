@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import tempfile
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -16,7 +17,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from infrastructure.deploy.container_runtime import _image_id
-from infrastructure.deploy.history_migration import migrate_history_with_backup
+from infrastructure.deploy.history_migration import (
+    _fingerprint, migrate_history_with_backup,
+)
 from infrastructure.deploy.vessel_installer import (
     _operation_lock, _owner_directory, _read_state, _recovery_inventory,
     _verify_stage,
@@ -26,6 +29,7 @@ from infrastructure.deploy.vessel_recovery_set import (
 )
 from infrastructure.deploy.vessel_runtime import _state_options
 from infrastructure.release.bundle import verify_bundle
+from infrastructure.restic_repository import restore_snapshot
 from services.policy.policy_file import policy_directory_lock
 
 
@@ -148,3 +152,32 @@ def verify_vessel_history_migration_receipt(receipt: Path,
             InvalidSignature) as exc:
         raise VesselHistoryMigrationError(
             "vessel history migration receipt verification failed") from exc
+
+
+def verify_vessel_history_migration_backup(receipt: Path, trusted_key: Path,
+                                           password_file: Path, restic: Path,
+                                           restic_sha256: str,
+                                           staging_parent: Path) -> dict[str, object]:
+    """Prove the signed pre-migration snapshot still restores its old content."""
+    payload = verify_vessel_history_migration_receipt(receipt, trusted_key)
+    _owner_directory(staging_parent)
+    repository = Path(payload["repository"])
+    if (staging_parent.resolve().is_relative_to(repository.resolve()) or
+            repository.resolve().is_relative_to(staging_parent.resolve()) or
+            staging_parent.resolve().is_relative_to(receipt.parent.resolve())):
+        raise VesselHistoryMigrationError("history verification staging overlaps evidence")
+    with tempfile.TemporaryDirectory(prefix=".vessel-history-check-",
+                                     dir=staging_parent) as temporary:
+        restored = Path(temporary) / "restored"
+        result = restore_snapshot(payload["snapshot_id"], repository,
+                                  password_file, restic, restic_sha256, restored)
+        if (result.get("status") != "restored" or
+                result.get("snapshot_id") != payload["snapshot_id"] or
+                result.get("files") != 1 or
+                _fingerprint(restored / "history.db", 0) !=
+                (payload["history_sha256"], payload["conversations"])):
+            raise VesselHistoryMigrationError("signed history backup differs from receipt")
+    return {"status": "pre-migration-backup-restored",
+            "snapshot_id": payload["snapshot_id"],
+            "installation_id": payload["installation_id"],
+            "release": payload["release"]}
