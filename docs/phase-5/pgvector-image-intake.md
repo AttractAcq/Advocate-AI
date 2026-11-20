@@ -35,3 +35,6 @@ on 20 November 2026. The comparison uses the identical archive, SBOM, scanner
 and intake rules, and retains a separate artifact. It does not replace the
 current lab pin or approve a new image until its scan and functional checks
 have been reviewed.
+The synthetic container CI job also runs the existing private Unix socket
+Core-to-pgvector rehearsal against this exact Trixie digest. It checks startup,
+indexing, authorised and denied API search, source preview and live revocation.

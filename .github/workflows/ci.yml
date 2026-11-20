@@ -30,6 +30,13 @@ jobs:
           docker pull "$image"
           python3 -m scripts.phase3_pgvector_core_socket \
             --pgvector-image "$image" --core-image sovereign-core:synthetic
+      - name: Exercise Core against pinned Trixie pgvector candidate
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d"
+          docker pull "$image"
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image "$image" --core-image sovereign-core:synthetic
       - name: Build and exercise separate Fleet images
         run: |
           docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
