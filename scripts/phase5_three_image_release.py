@@ -752,8 +752,13 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     (update_payload / name).unlink()
                 update_output = output / "updated-core"
                 update_output.mkdir()
+                # The signed vessel runtime accepts only this canonical archive tag.
+                # Retagging changes neither the built image ID nor its configuration.
+                _run("docker", "tag", update_core_image,
+                     "sovereign-core:synthetic")
                 update_entry, update_descriptor = _qualify_image(
-                    update_core_image, "core", update_payload, update_output,
+                    "sovereign-core:synthetic", "core", update_payload,
+                    update_output,
                     crane, crane_sha256, syft, syft_sha256, trivy,
                     trivy_sha256, trivy_cache)
                 if (update_entry["intake"] != "preflight-pass" or
