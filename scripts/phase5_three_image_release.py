@@ -121,6 +121,7 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
         status = status_vessel(install_root, trusted, crane)
         if (activated.get("result") != "activated" or
                 status.get("result") != "healthy" or
+                (install_root / "vessel-intent.json").exists() or
                 activated.get("active") != status.get("active")):
             raise AssertionError("signed first installation did not become healthy")
         record = json.loads((install_root / "vessel-state.json").read_text())

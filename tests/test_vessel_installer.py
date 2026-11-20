@@ -11,8 +11,9 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _cleanup_failed_install, _read_state, _scoped_list,
-    _state_payload, _write_state, finish_vessel_stop, install_vessel,
+    VesselInstallError, _cleanup_failed_install, _read_intent, _read_state,
+    _scoped_list,
+    _state_payload, _write_intent, _write_state, finish_vessel_stop, install_vessel,
     reconcile_vessel, recover_vessel,
 )
 from infrastructure.release.bundle import BundleError
@@ -82,8 +83,47 @@ class VesselInstallerTests(unittest.TestCase):
                                self.parent / "state", self.parent / "password")
             self.assertTrue(self.root.is_dir())
             self.assertFalse((self.root / "vessel-state.json").exists())
+            self.assertEqual(_read_intent(self.root)["release"], "c" * 24)
             self.assertFalse(any(call.args[:2] == ("volume", "rm")
                                  for call in docker.call_args_list))
+
+    def test_successful_first_install_clears_private_intent(self) -> None:
+        installation_id = "f" * 32
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                          f"sovereign-{installation_id}-knowledge-data",
+                                          "sovereign-knowledge-" + "e" * 12,
+                                          installation_id)
+        with patch("infrastructure.deploy.vessel_installer.secrets.token_hex",
+                   return_value=installation_id), \
+             patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel"}), \
+             patch("infrastructure.deploy.vessel_installer._stage",
+                   return_value=("6" * 24, self.parent)), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
+                   return_value=knowledge), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._ingest",
+                   return_value={"indexed": 1, "unchanged": 0}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
+                   return_value=services):
+            result = install_vessel(self.parent, self.parent / "key",
+                                    self.parent / "crane", self.parent / "config",
+                                    self.root, self.parent / "state",
+                                    self.parent / "password")
+        self.assertEqual(result["result"], "activated")
+        self.assertFalse((self.root / "vessel-intent.json").exists())
+        self.assertEqual(_read_state(self.root)["installation_id"], installation_id)
+
+    def test_install_intent_rejects_duplicate_fields(self) -> None:
+        self.root.mkdir(mode=0o700)
+        _write_intent(self.root, "6" * 24, "f" * 32,
+                      self.parent / "state", self.parent / "password")
+        path = self.root / "vessel-intent.json"
+        path.write_text(path.read_text().replace('"schema":1', '"schema":1,"schema":1'))
+        with self.assertRaises(VesselInstallError):
+            _read_intent(self.root)
 
     def test_cleanup_requires_empty_scoped_inventory_after_volume_removal(self) -> None:
         installation_id = "b" * 32

@@ -164,15 +164,16 @@ def _state_payload(identifier: str, installation_id: str,
     }
 
 
-def _write_state(root: Path, payload: dict[str, object]) -> None:
-    descriptor, filename = tempfile.mkstemp(prefix=".vessel-state-", dir=root)
+def _write_private_record(root: Path, name: str,
+                          payload: dict[str, object]) -> None:
+    descriptor, filename = tempfile.mkstemp(prefix=".vessel-record-", dir=root)
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(json.dumps(payload, sort_keys=True,
                                     separators=(",", ":")).encode())
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(filename, root / "vessel-state.json")
+        os.replace(filename, root / name)
         directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
@@ -180,6 +181,50 @@ def _write_state(root: Path, payload: dict[str, object]) -> None:
             os.close(directory)
     finally:
         Path(filename).unlink(missing_ok=True)
+
+
+def _write_state(root: Path, payload: dict[str, object]) -> None:
+    _write_private_record(root, "vessel-state.json", payload)
+
+
+def _write_intent(root: Path, identifier: str, installation_id: str,
+                  core_state: Path, lab_password_file: Path) -> None:
+    _write_private_record(root, "vessel-intent.json", {
+        "schema": 1, "release": identifier, "installation_id": installation_id,
+        "core_state": str(core_state.resolve()),
+        "lab_password_file": str(lab_password_file.resolve()),
+        "data_volume": f"sovereign-{installation_id}-knowledge-data",
+    })
+
+
+def _read_intent(root: Path) -> dict[str, object]:
+    _owner_directory(root)
+    path = root / "vessel-intent.json"
+    if (path.is_symlink() or not path.is_file() or
+            path.stat().st_uid != os.getuid() or
+            stat.S_IMODE(path.stat().st_mode) & 0o077 or
+            path.stat().st_size > 4096):
+        raise VesselInstallError("invalid vessel install intent")
+    try:
+        value = json.loads(path.read_bytes(), object_pairs_hook=_unique)
+    except (ValueError, UnicodeError) as exc:
+        raise VesselInstallError("invalid vessel install intent JSON") from exc
+    if (not isinstance(value, dict) or
+            set(value) != {"schema", "release", "installation_id", "core_state",
+                           "lab_password_file", "data_volume"} or
+            type(value["schema"]) is not int or value["schema"] != 1 or
+            not isinstance(value["release"], str) or
+            not _IDENTIFIER.fullmatch(value["release"]) or
+            not isinstance(value["installation_id"], str) or
+            not _INSTALL.fullmatch(value["installation_id"]) or
+            value["data_volume"] !=
+            f"sovereign-{value['installation_id']}-knowledge-data" or
+            not isinstance(value["core_state"], str) or
+            not Path(value["core_state"]).is_absolute() or
+            not isinstance(value["lab_password_file"], str) or
+            not Path(value["lab_password_file"]).is_absolute()):
+        raise VesselInstallError("invalid vessel install intent fields")
+    return value
 
 
 def _cleanup_failed_install(installation_id: str, services: RuntimeHandle | None,
@@ -229,6 +274,8 @@ def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
     data_volume = f"sovereign-{installation_id}-knowledge-data"
     try:
         identifier, stage = _stage(root, bundle, trusted_key, console_config)
+        _write_intent(root, identifier, installation_id, core_state,
+                      lab_password_file)
         knowledge = start_signed_knowledge(stage / "bundle", trusted_key, crane,
                                            root, installation_id, initialize=True)
         _state_options(core_state, lab_password_file, root)
@@ -240,6 +287,10 @@ def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
         payload = _state_payload(identifier, installation_id, core_state,
                                  lab_password_file, services, knowledge)
         _write_state(root, payload)
+        try:
+            (root / "vessel-intent.json").unlink(missing_ok=True)
+        except OSError:
+            pass
         return {"result": "activated", "active": identifier,
                 "indexed": ingestion["indexed"], "unchanged": ingestion["unchanged"]}
     except Exception as exc:
