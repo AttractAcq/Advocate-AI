@@ -28,6 +28,7 @@ from infrastructure.deploy.vessel_installer import (
     _assert_missing, _cleanup_failed_install, _operation_lock, _owner_directory, _read_state,
     _recovery_inventory, _release_id, _stage, _state_payload, _verify_knowledge_schema,
     _verify_stage, _write_intent, _write_state,
+    _write_private_record,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql, verify_security
 from infrastructure.deploy.container_runtime import RuntimeHandle
@@ -496,6 +497,9 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
             shutil.copytree(restored / "sources", core_state / "sources")
             for name in ("roles.json", "approved.json", "audit.jsonl", "history.db"):
                 shutil.copy2(restored / name, core_state / name, follow_symlinks=False)
+            _write_private_record(root, "vessel-restore-intent.json", {
+                "schema": 1, "snapshot_id": value["snapshot_id"],
+                "release": release, "installation_id": installation_id})
             _write_intent(root, release, installation_id, core_state, lab_password)
             knowledge = start_signed_knowledge(stage / "bundle", trusted_key,
                                                crane, root, installation_id,
@@ -515,6 +519,7 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
             _write_state(root, _state_payload(release, installation_id,
                                                core_state, lab_password,
                                                services, knowledge))
+            (root / "vessel-restore-intent.json").unlink()
             (root / "vessel-intent.json").unlink(missing_ok=True)
             return {"result": "restored-and-activated", "active": release,
                     "installation_id": installation_id,

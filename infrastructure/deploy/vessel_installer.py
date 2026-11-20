@@ -720,10 +720,18 @@ def _clear_unbound_secrets(root: Path) -> None:
         shutil.rmtree(directory)
 
 
+def _reject_restore_intent(root: Path) -> None:
+    marker = root / "vessel-restore-intent.json"
+    if marker.exists() or marker.is_symlink():
+        raise VesselInstallError(
+            "restore candidate requires explicit recovery reconciliation")
+
+
 @_serialized
 def reconcile_first_install(root: Path, trusted_key: Path,
                             crane: Path) -> dict[str, int | str]:
     """Remove a checked orphan runtime or reset bootstrap before first activation."""
+    _reject_restore_intent(root)
     intent = _read_intent(root)
     _intent_stage(root, trusted_key, intent)
     installation_id = intent["installation_id"]
@@ -759,6 +767,7 @@ def reconcile_first_install(root: Path, trusted_key: Path,
 def reset_first_install(root: Path, trusted_key: Path,
                         crane: Path) -> dict[str, str]:
     """Explicitly discard one clean, labelled synthetic bootstrap data volume."""
+    _reject_restore_intent(root)
     intent = _read_intent(root)
     _intent_stage(root, trusted_key, intent)
     installation_id = intent["installation_id"]
@@ -788,6 +797,7 @@ def reset_first_install(root: Path, trusted_key: Path,
 def resume_first_install(root: Path, trusted_key: Path,
                          crane: Path) -> dict[str, int | str]:
     """Resume a clean signed first install identified by its durable intent."""
+    _reject_restore_intent(root)
     intent = _read_intent(root)
     active_path = root / "vessel-state.json"
     if active_path.exists() or active_path.is_symlink():
