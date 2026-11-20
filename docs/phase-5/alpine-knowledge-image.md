@@ -9,7 +9,10 @@ base. Compiler tools and source files stay out of the runtime image. The
 runtime stage uses Alpine's pinned `su-exec` package under the entrypoint's
 `gosu` command name, replacing the base image's Go binary while preserving its
 user-switch call. The actual PostgreSQL start and role rehearsal tests that
-replacement. The official [PostgreSQL Alpine image](https://hub.docker.com/_/postgres) requires
+replacement. A final stage copies the assembled filesystem into a new layer
+and explicitly sets PostgreSQL's entrypoint, data volume and shutdown signal.
+This keeps the removed Go binary out of the distributed archive, which the
+offline scanner must inspect again. The official [PostgreSQL Alpine image](https://hub.docker.com/_/postgres) requires
 custom compilation for extensions, and [pgvector](https://github.com/pgvector/pgvector)
 documents source builds for PostgreSQL 13 and newer.
 
@@ -35,3 +38,6 @@ found 28 unresolved HIGH, CRITICAL or UNKNOWN advisories, all in the inherited
 `gosu` Go binary; Alpine OS packages had none at those severities. That intake
 correctly returned `denied-findings`. The `su-exec` replacement requires a
 fresh build, functional rehearsal and scan before its result can be used.
+The second scan still reported those 28 Go findings from `gosu` in an
+inherited layer, despite the working `su-exec` replacement. The final
+filesystem stage is the next candidate; its scan has not yet passed.
