@@ -29,6 +29,7 @@ from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_recovery_set import (
     abandon_incomplete_vessel_restore, activate_vessel_recovery_set,
     create_vessel_recovery_set, restore_vessel_recovery_files,
+    retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import (
@@ -364,7 +365,9 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
 
 
 def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
-                                          crane: Path, root: Path) -> dict[str, str]:
+                                          crane: Path, root: Path,
+                                          restic: Path,
+                                          restic_sha256: str) -> dict[str, str]:
     """Discard only a signed partial candidate volume, retaining evidence."""
     recovery = root / "vessel-recovery"
     receipt = recovery / "receipt.json"
@@ -385,6 +388,8 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
     _write_intent(install, release, value["installation_id"], state,
                   root / "lab-password")
     created = False
+    retry_root = root / "retried-recovery-install"
+    retry_state = root / "retried-recovery-state"
     try:
         wrong_attempt = uuid.uuid4().hex
         _volume(value["data_volume"], value["installation_id"],
@@ -424,10 +429,42 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
                 not (install / "vessel-restore-abandoned.json").is_file() or
                 not state.is_dir()):
             raise AssertionError("partial recovery evidence was not retained")
+        retried = retry_abandoned_vessel_restore(
+            install, bundle, trusted, crane, root / "console-config.json",
+            receipt, receipt_key, recovery / "restic-password",
+            restic, restic_sha256,
+            retry_root, retry_state, root / "lab-password",
+            recovery / "staging")
+        retry_status = status_vessel(retry_root, trusted, crane)
+        retry_record = json.loads((retry_root / "vessel-state.json").read_text())
+        with closing(sqlite3.connect(retry_state / "history.db")) as database:
+            history_ids = database.execute("SELECT id FROM conversations").fetchall()
+        if (retried["result"] != "restored-and-activated" or
+                retried["retry_of_attempt"] != restore_attempt or
+                retry_status["result"] != "healthy" or
+                retry_record["installation_id"] != value["installation_id"] or
+                len(history_ids) != 1 or
+                _probe_vessel_history(retry_record["runtime"]["core_id"],
+                                      history_ids[0][0])["turns"] != 1 or
+                (retry_state / "postgres.dump").exists()):
+            raise AssertionError("receipt-verified retry did not restore healthy vessel")
         return {"result": "pass", "volume": "checked-and-discarded",
                 "wrong_attempt": "denied",
-                "generic_resume": "denied", "evidence": "retained"}
+                "generic_resume": "denied", "evidence": "retained",
+                "retry": "signed-and-healthy"}
     finally:
+        retry_record = retry_root / "vessel-state.json"
+        if retry_record.exists():
+            record = json.loads(retry_record.read_text())
+            runtime = record["runtime"]
+            stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                       runtime["console_id"]))
+            stop_knowledge(KnowledgeVolumeHandle(
+                runtime["knowledge_id"], runtime["socket_volume"],
+                runtime["data_volume"], runtime["knowledge_run"],
+                record["installation_id"]))
+            subprocess.run(["docker", "volume", "rm", runtime["data_volume"]],
+                           capture_output=True, text=True, timeout=30)
         if created:
             subprocess.run(["docker", "volume", "rm", value["data_volume"]],
                            capture_output=True, text=True, timeout=30)
@@ -687,7 +724,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
                                                     restic, restic_sha256)
                 result["interrupted_restore_abandon"] = \
-                    _rehearse_interrupted_restore_abandon(bundle, trusted, crane, root)
+                    _rehearse_interrupted_restore_abandon(
+                        bundle, trusted, crane, root, restic, restic_sha256)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
                 result["bootstrap_reset"] = \

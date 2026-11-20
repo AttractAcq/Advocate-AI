@@ -16,7 +16,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from infrastructure.deploy.vessel_recovery_set import (
     VesselRecoveryError, _grant_restored_knowledge, _stage_core, _sign_receipt,
     abandon_incomplete_vessel_restore,
-    activate_vessel_recovery_set, verify_vessel_recovery_receipt,
+    activate_vessel_recovery_set, retry_abandoned_vessel_restore,
+    verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import _write_intent, _write_private_record
 from scripts.synthetic_pg_fixture import fixture, put
@@ -200,6 +201,30 @@ class VesselRecoverySetTests(unittest.TestCase):
                     install, self.root / "key", self.root / "receipt",
                     self.root / "receipt-key", discard_partial_data=True)
         docker.assert_not_called()
+        args = (install, self.root / "bundle", self.root / "key",
+                self.root / "crane", self.root / "config", self.root / "receipt",
+                self.root / "receipt-key", self.root / "password",
+                self.root / "restic", "e" * 64, self.root / "new-install",
+                self.root / "new-state", self.root / "lab-password",
+                self.root / "staging")
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_stage"), \
+             patch("infrastructure.deploy.vessel_recovery_set.activate_vessel_recovery_set",
+                   return_value={"result": "restored-and-activated"}) as activate:
+            retried = retry_abandoned_vessel_restore(*args)
+        self.assertEqual(retried["retry_of_attempt"], restore_attempt)
+        activate.assert_called_once()
+        abandoned = install / "vessel-restore-abandoned.json"
+        changed = json.loads(abandoned.read_text())
+        changed["snapshot_id"] = "f" * 64
+        abandoned.write_text(json.dumps(changed))
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set.activate_vessel_recovery_set") as activate:
+            with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+                retry_abandoned_vessel_restore(*args)
+        activate.assert_not_called()
 
 
 if __name__ == "__main__":

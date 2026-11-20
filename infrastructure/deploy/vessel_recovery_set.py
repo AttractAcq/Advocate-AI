@@ -631,3 +631,71 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
             "discarded_utc": datetime.now(timezone.utc).isoformat()})
         return {"result": "abandoned", "data_volume": "removed",
                 "snapshot_id": value["snapshot_id"]}
+
+
+def _read_abandoned_restore(root: Path) -> dict[str, object]:
+    try:
+        value = json.loads(_private_bytes(root / "vessel-restore-abandoned.json",
+                                          4096), object_pairs_hook=_unique)
+    except (ValueError, UnicodeError) as exc:
+        raise VesselRecoveryError("invalid abandoned restore record") from exc
+    if (not isinstance(value, dict) or
+            set(value) != {"schema", "snapshot_id", "installation_id",
+                           "restore_attempt", "discarded_utc"} or
+            type(value["schema"]) is not int or value["schema"] != 1 or
+            any(not isinstance(value[key], str) or not pattern.fullmatch(value[key])
+                for key, pattern in (("snapshot_id", _ID),
+                                     ("installation_id", _INSTALL),
+                                     ("restore_attempt", _INSTALL)))):
+        raise VesselRecoveryError("invalid abandoned restore fields")
+    try:
+        discarded = datetime.fromisoformat(value["discarded_utc"])
+    except (TypeError, ValueError) as exc:
+        raise VesselRecoveryError("invalid abandoned restore timestamp") from exc
+    if discarded.tzinfo is None or discarded > datetime.now(timezone.utc):
+        raise VesselRecoveryError("abandoned restore timestamp is ahead of local clock")
+    return value
+
+
+def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
+                                   trusted_key: Path, crane: Path,
+                                   console_config: Path, receipt: Path,
+                                   receipt_key: Path, password_file: Path,
+                                   restic: Path, restic_sha256: str,
+                                   root: Path, core_state: Path,
+                                   lab_password: Path,
+                                   staging_parent: Path) -> dict[str, object]:
+    """Retry a terminal abandoned attempt into entirely new private paths."""
+    with _operation_lock(abandoned_root):
+        marker = _read_restore_intent(abandoned_root)
+        abandoned = _read_abandoned_restore(abandoned_root)
+        intent = _read_intent(abandoned_root)
+        value = verify_vessel_recovery_receipt(receipt, receipt_key)
+        if (marker["snapshot_id"] != abandoned["snapshot_id"] or
+                marker["snapshot_id"] != value["snapshot_id"] or
+                marker["installation_id"] != abandoned["installation_id"] or
+                marker["installation_id"] != value["installation_id"] or
+                marker["restore_attempt"] != abandoned["restore_attempt"] or
+                marker["release"] != value["release"] or
+                intent["release"] != value["release"] or
+                intent["installation_id"] != value["installation_id"] or
+                intent["data_volume"] != value["data_volume"]):
+            raise VesselRecoveryError("abandoned attempt differs from signed receipt")
+        _verify_stage(abandoned_root / "vessel-releases" / value["release"],
+                      trusted_key, value["release"])
+        active = abandoned_root / "vessel-state.json"
+        if active.exists() or active.is_symlink():
+            raise VesselRecoveryError("abandoned root became active")
+        old_state = Path(intent["core_state"])
+        _owner_directory(old_state)
+        for candidate in (root, core_state):
+            if (candidate.resolve().is_relative_to(abandoned_root.resolve()) or
+                    abandoned_root.resolve().is_relative_to(candidate.resolve()) or
+                    candidate.resolve().is_relative_to(old_state.resolve()) or
+                    old_state.resolve().is_relative_to(candidate.resolve())):
+                raise VesselRecoveryError("retry paths overlap abandoned evidence")
+        result = activate_vessel_recovery_set(
+            bundle, trusted_key, crane, console_config, receipt, receipt_key,
+            password_file, restic, restic_sha256, root, core_state,
+            lab_password, staging_parent)
+        return {**result, "retry_of_attempt": marker["restore_attempt"]}
