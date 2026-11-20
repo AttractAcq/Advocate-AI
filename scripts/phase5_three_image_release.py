@@ -10,11 +10,16 @@ import re
 import shutil
 import subprocess
 import tempfile
+import uuid
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.container_runtime import _image_id
+from infrastructure.deploy.knowledge_volume import (
+    start_signed_knowledge, stop_knowledge,
+)
+from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
@@ -22,6 +27,41 @@ from infrastructure.release.upstream import generate_resolved_sbom, validate_ima
 from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
 
 ROLES = ("core", "console", "knowledge")
+
+
+def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
+                                   crane: Path, root: Path) -> dict[str, str]:
+    """Restart the signed database on the same data volume and a fresh socket."""
+    installation_id = uuid.uuid4().hex
+    install_root = root / "knowledge-install"
+    install_root.mkdir(mode=0o700)
+    data_volume = f"sovereign-{installation_id}-knowledge-data"
+    active = None
+    try:
+        active = start_signed_knowledge(bundle, trusted, crane, install_root,
+                                        installation_id, initialize=True)
+        postgres_sql(active.container_id,
+                     "CREATE TABLE synthetic_persistence_probe (id integer PRIMARY KEY)")
+        postgres_sql(active.container_id,
+                     "INSERT INTO synthetic_persistence_probe VALUES (1)")
+        first_socket = active.socket_volume
+        stop_knowledge(active)
+        active = None
+        active = start_signed_knowledge(bundle, trusted, crane, install_root,
+                                        installation_id, initialize=False)
+        if (active.socket_volume == first_socket or
+                postgres_sql(active.container_id,
+                             "SELECT count(*) FROM synthetic_persistence_probe") != "1" or
+                not postgres_sql(active.container_id,
+                                 "SELECT extversion FROM pg_extension WHERE extname='vector'")):
+            raise AssertionError("signed Knowledge database did not survive restart")
+        return {"result": "pass", "database_state": "persisted",
+                "socket": "recreated", "network_mode": "none"}
+    finally:
+        if active is not None:
+            stop_knowledge(active)
+        subprocess.run(["docker", "volume", "rm", data_volume],
+                       capture_output=True, text=True, timeout=30)
 
 
 def _run(*argv: str) -> str:
@@ -154,6 +194,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     "writer_auth": runtime["writer_auth"],
                     "revocation": runtime["revocation"],
                 }
+                result["persistent_knowledge_restart"] = \
+                    _rehearse_persistent_knowledge(bundle, trusted, crane, root)
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:
