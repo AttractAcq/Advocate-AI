@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -15,31 +16,62 @@ import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from infrastructure.deploy.container_runtime import _image_id
+from infrastructure.deploy.container_runtime import _image_id, stop_runtime
 from infrastructure.deploy.knowledge_volume import (
     start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
+from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
-from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
+from scripts.phase3_pgvector_core_socket import (
+    _BOOTSTRAP, _rehearse_verified_images,
+)
+from scripts.synthetic_pg_fixture import fixture as synthetic_fixture, put as private_put
 
 ROLES = ("core", "console", "knowledge")
 
 
 def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
-                                   crane: Path, root: Path) -> dict[str, str]:
-    """Restart the signed database on the same data volume and a fresh socket."""
+                                   crane: Path, root: Path,
+                                   core_image: str) -> dict[str, str]:
+    """Restart signed Knowledge and attach signed Core and Console to it."""
     installation_id = uuid.uuid4().hex
     install_root = root / "knowledge-install"
     install_root.mkdir(mode=0o700)
     data_volume = f"sovereign-{installation_id}-knowledge-data"
     active = None
+    services = None
     try:
         active = start_signed_knowledge(bundle, trusted, crane, install_root,
                                         installation_id, initialize=True)
+        state = root / "vessel-state"
+        state.mkdir(mode=0o700)
+        synthetic_fixture(state)
+        lab_password = root / "lab-password"
+        private_put(lab_password, (secrets.token_urlsafe(24) + "\n").encode())
+        config = root / "console-config.json"
+        config.write_text('{"schema":1,"oidc_issuer":null}\n')
+        config.chmod(0o644)
+        writer = install_root / "knowledge-secrets/writer.pgpass"
+        _run("docker", "run", "--rm", "--pull", "never",
+             "--network", "none", "--read-only",
+             "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+             "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+             "--user", f"{state.stat().st_uid}:{state.stat().st_gid}",
+             "--mount", (f"type=volume,source={active.socket_volume},"
+                         "target=/run/postgresql,readonly"),
+             "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign,readonly",
+             "--mount", (f"type=bind,source={writer.resolve()},"
+                         "target=/run/secrets/pgpass,readonly"),
+             "-e", "SOVEREIGN_KNOWLEDGE_DB=postgresql://sovereign_ingest@/postgres?host=/run/postgresql",
+             "-e", "PGPASSFILE=/run/secrets/pgpass", core_image,
+             "python", "-c", _BOOTSTRAP)
+        postgres_sql(active.container_id,
+                     "GRANT SELECT ON knowledge_sources, knowledge_passages, "
+                     "knowledge_quarantine, knowledge_vectors TO sovereign_read")
         postgres_sql(active.container_id,
                      "CREATE TABLE synthetic_persistence_probe (id integer PRIMARY KEY)")
         postgres_sql(active.container_id,
@@ -55,9 +87,15 @@ def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
                 not postgres_sql(active.container_id,
                                  "SELECT extversion FROM pg_extension WHERE extname='vector'")):
             raise AssertionError("signed Knowledge database did not survive restart")
+        services = start_signed_vessel_services(bundle, trusted, crane, config,
+                                                state, lab_password, install_root,
+                                                active, installation_id)
         return {"result": "pass", "database_state": "persisted",
-                "socket": "recreated", "network_mode": "none"}
+                "socket": "recreated", "network_mode": "none",
+                "signed_core_console": "healthy", "core_database_role": "sovereign_read"}
     finally:
+        if services is not None:
+            stop_runtime(services)
         if active is not None:
             stop_knowledge(active)
         subprocess.run(["docker", "volume", "rm", data_volume],
@@ -195,7 +233,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     "revocation": runtime["revocation"],
                 }
                 result["persistent_knowledge_restart"] = \
-                    _rehearse_persistent_knowledge(bundle, trusted, crane, root)
+                    _rehearse_persistent_knowledge(bundle, trusted, crane, root,
+                                                  ids["core"])
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:
