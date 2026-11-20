@@ -30,8 +30,12 @@ requires operator investigation. The state records one previous release, so
 rollback is one step; after rollback, the newer release becomes the previous
 release and can be selected again with the same procedure.
 
-The Linux actual-image rehearsal uses two distinct signed manifests over the
-same three image archives to exercise identity, state continuity, signed
-activation, and rollback. It does not prove compatibility across different
-image versions or database migrations. Production rollback timing, protected
-media, key custody, independent assessment, and target hardware remain open.
+The Linux actual-image rehearsal builds a second Core image with a different
+synthetic release label. It scans and inventories that exact second archive,
+signs it into the update bundle, then checks the running Core image changes
+on switch and returns to the original image on rollback. Console and Knowledge
+images stay the same. This proves image identity and state continuity across
+the release switch; the Core application code and database schema are the same
+in both images. Compatibility across actual application versions and database
+migrations, production rollback timing, protected media, key custody,
+independent assessment, and target hardware remain open.

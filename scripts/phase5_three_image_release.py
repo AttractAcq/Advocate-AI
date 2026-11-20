@@ -204,6 +204,8 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
             raise AssertionError("signed first installation did not become healthy")
         record = json.loads((install_root / "vessel-state.json").read_text())
         runtime = record["runtime"]
+        base_core_image = _run("docker", "inspect", runtime["core_id"],
+                               "--format", "{{.Image}}")
         schema_rights = postgres_sql(
             runtime["knowledge_id"],
             "SELECT has_schema_privilege('sovereign_migrate','public','CREATE')::int || ':' || "
@@ -293,11 +295,15 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
             install_root, trusted, crane, update_bundle, config)
         switched_status = status_vessel(install_root, trusted, crane)
         switched_record = json.loads((install_root / "vessel-state.json").read_text())
+        switched_core_image = _run(
+            "docker", "inspect", switched_record["runtime"]["core_id"],
+            "--format", "{{.Image}}")
         switched_history = _probe_vessel_history(
             switched_record["runtime"]["core_id"], first_history["conversation_id"])
         if (switched["result"] != "upgraded" or
                 switched["previous"] != activated["active"] or
                 switched["active"] == activated["active"] or
+                switched_core_image == base_core_image or
                 switched_status["active"] != switched["active"] or
                 switched_history != first_history or
                 not audit_path.read_bytes().startswith(final_audit)):
@@ -306,11 +312,15 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
         rolled = rollback_stopped_vessel_release(install_root, trusted, crane)
         rolled_status = status_vessel(install_root, trusted, crane)
         rolled_record = json.loads((install_root / "vessel-state.json").read_text())
+        rolled_core_image = _run(
+            "docker", "inspect", rolled_record["runtime"]["core_id"],
+            "--format", "{{.Image}}")
         rolled_history = _probe_vessel_history(
             rolled_record["runtime"]["core_id"], first_history["conversation_id"])
         if (rolled["result"] != "rolled-back" or
                 rolled["active"] != activated["active"] or
                 rolled["previous"] != switched["active"] or
+                rolled_core_image != base_core_image or
                 rolled_status["active"] != activated["active"] or
                 rolled_history != first_history):
             raise AssertionError("stopped signed vessel rollback failed")
@@ -323,7 +333,8 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 "interrupted_recovery": "orphan-runtime-reconciled",
                 "interrupted_stop": "knowledge-stop-completed",
                 "release_switch": "stopped-signed-and-healthy",
-                "release_rollback": "stopped-signed-and-healthy"}
+                "release_rollback": "stopped-signed-and-healthy",
+                "core_image_change": "distinct-and-restored"}
     finally:
         if orphan_services is not None:
             stop_runtime(orphan_services)
@@ -632,9 +643,64 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _qualify_image(tag: str, role: str, payload: Path, output: Path,
+                   crane: Path, crane_sha256: str, syft: Path,
+                   syft_sha256: str, trivy: Path, trivy_sha256: str,
+                   trivy_cache: Path) -> tuple[dict[str, object], dict[str, str]]:
+    image_id = _run("docker", "image", "inspect", tag, "--format", "{{.Id}}")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        raise ValueError("invalid built product image ID")
+    archive = payload / "images" / f"{role}.tar"
+    _run("docker", "save", "-o", str(archive), tag)
+    digest = _run(str(crane), "digest", "--tarball", str(archive))
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise ValueError("invalid product archive manifest digest")
+    image_ref = f"registry.example.invalid/sovereign/{role}@{digest}"
+    identity = validate_image_archive(archive, image_ref, crane, crane_sha256)
+    scan = payload / "evidence" / f"{role}-scan.json"
+    sbom = payload / "evidence" / f"{role}-sbom.json"
+    inventory = generate_resolved_sbom(archive, image_ref, sbom, crane,
+                                       crane_sha256, syft, syft_sha256)
+    generated = generate_archive_scan(archive, image_ref, scan, crane,
+                                      crane_sha256, trivy, trivy_sha256,
+                                      trivy_cache)
+    shutil.copyfile(scan, output / scan.name)
+    shutil.copyfile(sbom, output / sbom.name)
+    findings = [item for section in json.loads(scan.read_text())["Results"]
+                for item in section.get("Vulnerabilities", [])
+                if item.get("Severity") in {"HIGH", "CRITICAL", "UNKNOWN"}]
+    entry = {"image_id": image_id, "image_ref": image_ref,
+             "archive_sha256": identity["archive_sha256"],
+             "scan_sha256": generated["scan_sha256"],
+             "sbom_sha256": inventory["sbom_sha256"],
+             "components": inventory["components"],
+             "unresolved_findings": len(findings)}
+    try:
+        verify_intake(scan, sbom, image_ref, generated["scan_sha256"],
+                      inventory["sbom_sha256"])
+    except IntakeError as exc:
+        if not findings or "unresolved high, critical or unknown findings" not in str(exc):
+            raise
+        entry["intake"] = "denied-findings"
+    else:
+        entry["intake"] = "preflight-pass"
+    descriptor = {
+        "image_ref": image_ref,
+        "archive_path": f"images/{role}.tar",
+        "archive_sha256": identity["archive_sha256"],
+        "crane_sha256": crane_sha256,
+        "scan_path": f"evidence/{role}-scan.json",
+        "scan_sha256": generated["scan_sha256"],
+        "sbom_path": f"evidence/{role}-sbom.json",
+        "sbom_sha256": inventory["sbom_sha256"],
+    }
+    return entry, descriptor
+
+
 def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
              syft_sha256: str, trivy: Path, trivy_sha256: str,
-             trivy_cache: Path, restic: Path, restic_sha256: str) -> dict[str, object]:
+             trivy_cache: Path, restic: Path, restic_sha256: str,
+             update_core_image: str) -> dict[str, object]:
     if output.exists() or output.is_symlink():
         raise ValueError("three-image evidence output must be new")
     output.mkdir(parents=True)
@@ -649,59 +715,11 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
             descriptors: dict[str, dict[str, str]] = {}
             for role in ROLES:
                 tag = f"sovereign-{role}:synthetic"
-                image_id = _run("docker", "image", "inspect", tag,
-                                "--format", "{{.Id}}")
-                if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
-                    raise ValueError("invalid built product image ID")
-                archive = payload / "images" / f"{role}.tar"
-                _run("docker", "save", "-o", str(archive), tag)
-                digest = _run(str(crane), "digest", "--tarball", str(archive))
-                if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
-                    raise ValueError("invalid product archive manifest digest")
-                image_ref = f"registry.example.invalid/sovereign/{role}@{digest}"
-                identity = validate_image_archive(archive, image_ref,
-                                                  crane, crane_sha256)
-                scan = payload / "evidence" / f"{role}-scan.json"
-                sbom = payload / "evidence" / f"{role}-sbom.json"
-                inventory = generate_resolved_sbom(archive, image_ref, sbom,
-                                                   crane, crane_sha256,
-                                                   syft, syft_sha256)
-                generated = generate_archive_scan(archive, image_ref, scan,
-                                                  crane, crane_sha256,
-                                                  trivy, trivy_sha256,
-                                                  trivy_cache)
-                shutil.copyfile(scan, output / scan.name)
-                shutil.copyfile(sbom, output / sbom.name)
-                findings = [item for section in json.loads(scan.read_text())["Results"]
-                            for item in section.get("Vulnerabilities", [])
-                            if item.get("Severity") in {"HIGH", "CRITICAL", "UNKNOWN"}]
-                entry = {"image_id": image_id, "image_ref": image_ref,
-                         "archive_sha256": identity["archive_sha256"],
-                         "scan_sha256": generated["scan_sha256"],
-                         "sbom_sha256": inventory["sbom_sha256"],
-                         "components": inventory["components"],
-                         "unresolved_findings": len(findings)}
-                try:
-                    verify_intake(scan, sbom, image_ref,
-                                  generated["scan_sha256"],
-                                  inventory["sbom_sha256"])
-                except IntakeError as exc:
-                    if not findings or "unresolved high, critical or unknown findings" not in str(exc):
-                        raise
-                    entry["intake"] = "denied-findings"
-                else:
-                    entry["intake"] = "preflight-pass"
+                entry, descriptor = _qualify_image(
+                    tag, role, payload, output, crane, crane_sha256, syft,
+                    syft_sha256, trivy, trivy_sha256, trivy_cache)
                 result["images"][role] = entry
-                descriptors[role] = {
-                    "image_ref": image_ref,
-                    "archive_path": f"images/{role}.tar",
-                    "archive_sha256": identity["archive_sha256"],
-                    "crane_sha256": crane_sha256,
-                    "scan_path": f"evidence/{role}-scan.json",
-                    "scan_sha256": generated["scan_sha256"],
-                    "sbom_path": f"evidence/{role}-sbom.json",
-                    "sbom_sha256": inventory["sbom_sha256"],
-                }
+                descriptors[role] = descriptor
             if any(result["images"][role]["intake"] != "preflight-pass"
                    for role in ROLES):
                 result["three_image_bundle"] = "denied-findings"
@@ -727,15 +745,40 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         set(verified.get("images", {})) != set(ROLES)):
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
+                update_payload = root / "update-payload"
+                shutil.copytree(payload, update_payload, copy_function=os.link)
+                for name in ("images/core.tar", "evidence/core-scan.json",
+                             "evidence/core-sbom.json"):
+                    (update_payload / name).unlink()
+                update_output = output / "updated-core"
+                update_output.mkdir()
+                # The signed vessel runtime accepts only this canonical archive tag.
+                # Retagging changes neither the built image ID nor its configuration.
+                _run("docker", "tag", update_core_image,
+                     "sovereign-core:synthetic")
+                update_entry, update_descriptor = _qualify_image(
+                    "sovereign-core:synthetic", "core", update_payload,
+                    update_output,
+                    crane, crane_sha256, syft, syft_sha256, trivy,
+                    trivy_sha256, trivy_cache)
+                if (update_entry["intake"] != "preflight-pass" or
+                        update_entry["image_id"] == result["images"]["core"]["image_id"] or
+                        update_entry["image_ref"] == result["images"]["core"]["image_ref"]):
+                    raise AssertionError("second Core image is not a distinct qualified release")
+                result["updated_core_image"] = update_entry
+                update_descriptors = {**descriptors, "core": update_descriptor}
                 update_bundle = root / "signed-three-image-trial-v2"
-                create_knowledge_bundle(payload, update_bundle, private,
+                create_knowledge_bundle(update_payload, update_bundle, private,
                                         "synthetic-three-image-trial-v2",
-                                        descriptors, crane=crane)
+                                        update_descriptors, crane=crane)
                 update_verified = verify_bundle(update_bundle, trusted)
                 if (update_verified.get("schema") != 6 or
                         update_verified.get("target") != "vessel" or
                         set(update_verified.get("images", {})) != set(ROLES)):
                     raise AssertionError("second signed vessel bundle verification failed")
+                if (_image_id(update_bundle, "core", update_verified["images"]["core"], crane)
+                        == _image_id(bundle, "core", verified["images"]["core"], crane)):
+                    raise AssertionError("signed Core image identity did not change")
                 result["bundle_manifest_sha256"] = _sha256(bundle / "release-manifest.json")
                 ids = {role: _image_id(bundle, role, verified["images"][role], crane)
                        for role in ROLES}
@@ -792,11 +835,13 @@ def main() -> None:
     parser.add_argument("--trivy-cache", required=True, type=Path)
     parser.add_argument("--restic", required=True, type=Path)
     parser.add_argument("--restic-sha256", required=True)
+    parser.add_argument("--update-core-image", required=True)
     args = parser.parse_args()
     print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
                              args.syft, args.syft_sha256, args.trivy,
                              args.trivy_sha256, args.trivy_cache,
-                             args.restic, args.restic_sha256), sort_keys=True))
+                             args.restic, args.restic_sha256,
+                             args.update_core_image), sort_keys=True))
 
 
 if __name__ == "__main__":
