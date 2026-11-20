@@ -20,6 +20,11 @@ class FakeModel:
         self.calls: list[dict[str, object]] = []
         self.fail = False
         self.timeout = False
+        self.ready = True
+
+    async def check_ready(self) -> None:
+        if not self.ready:
+            raise ModelUnavailable("local model route unavailable")
 
     async def complete(self, question: str, context: list[dict[str, object]], *, general: bool = False) -> str:
         if self.timeout:
@@ -269,6 +274,11 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
         engineer = await self.login("lab-chief_engineer-1")
         self.assertEqual((await self.client.get("/api/admin/status", headers=avit)).status_code, 200)
         self.assertEqual((await self.client.get("/api/admin/status", headers=engineer)).status_code, 403)
+        self.assertEqual((await self.client.get("/api/admin/model-readiness", headers=engineer)).status_code, 403)
+        self.assertEqual((await self.client.get("/api/admin/model-readiness", headers=avit)).json()["route"],
+                         "advertised")
+        self.model.ready = False
+        self.assertEqual((await self.client.get("/api/admin/model-readiness", headers=avit)).status_code, 503)
         reply = await self.client.post("/api/chat", headers=engineer,
                                        json={"message": "generator inspection", "workspace": "deck"})
         self.assertEqual(reply.json()["citations"], [])
@@ -286,6 +296,32 @@ class ModelBoundaryTests(unittest.TestCase):
 
 
 class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_readiness_requires_matching_advertised_model(self) -> None:
+        observed: list[str] = []
+
+        def response(request: httpx.Request) -> httpx.Response:
+            observed.append(str(request.url))
+            return httpx.Response(200, json={"data": [{"id": "signed-model"}]})
+
+        model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                           transport=httpx.MockTransport(response))
+        await model.check_ready()
+        self.assertEqual(observed, ["http://127.0.0.1:11434/v1/models"])
+        for payload in ({"data": [{"id": "other-model"}]}, {"data": "signed-model"}, {}):
+            model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                               transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)))
+            with self.assertRaises(ModelUnavailable):
+                await model.check_ready()
+        model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                           transport=httpx.MockTransport(lambda _: httpx.Response(503)))
+        with self.assertRaises(ModelUnavailable):
+            await model.check_ready()
+        model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                           transport=httpx.MockTransport(lambda _: httpx.Response(
+                               200, content=b" " * (64 * 1024 + 1))))
+        with self.assertRaises(ModelUnavailable):
+            await model.check_ready()
+
     async def test_incident_prompt_is_bounded_and_has_no_tools(self) -> None:
         requests: list[httpx.Request] = []
 

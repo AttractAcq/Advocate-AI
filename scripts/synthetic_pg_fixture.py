@@ -29,8 +29,10 @@ def fixture(root: Path) -> Path:
                      "owner": "lab", "version": "1", "sha256": hashlib.sha256(payload).hexdigest(),
                      "source_type": "synthetic-local"})
     policy = {"users": [{"id": "engineer", "role": "chief_engineer", "status": "active"},
-                        {"id": "deckhand", "role": "deckhand", "status": "active"}],
-              "allow": {"chief_engineer": ["engineering", "deck"], "deckhand": ["deck"]},
+                        {"id": "deckhand", "role": "deckhand", "status": "active"},
+                        {"id": "avit", "role": "avit_admin", "status": "active"}],
+              "allow": {"chief_engineer": ["engineering", "deck"], "deckhand": ["deck"],
+                        "avit_admin": []},
               "document_rules": {}}
     put(root / "roles.json", json.dumps(policy).encode())
     manifest = root / "approved.json"

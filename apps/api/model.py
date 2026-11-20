@@ -40,6 +40,22 @@ class LocalModel:
         self.timeout = timeout
         self.transport = transport
 
+    async def check_ready(self) -> None:
+        """Check that the local service advertises this configured model ID."""
+        try:
+            async with httpx.AsyncClient(timeout=3, trust_env=False, transport=self.transport) as client:
+                response = await client.get(f"{self.endpoint}/models")
+                response.raise_for_status()
+                if len(response.content) > 64 * 1024:
+                    raise ModelUnavailable("local model advertisement is too large")
+                models = response.json()["data"]
+        except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
+            raise ModelUnavailable("local model route unavailable") from exc
+        if (not isinstance(models, list) or
+                not any(isinstance(item, dict) and item.get("id") == self.model_name
+                        for item in models)):
+            raise ModelUnavailable("configured model is not served locally")
+
     async def complete(self, question: str, context: Sequence[dict[str, object]],
                        *, general: bool = False, system_instruction: str | None = None,
                        max_tokens: int = 320) -> str:
