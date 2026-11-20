@@ -26,7 +26,14 @@ and data volume. If cleanup is interrupted, reconcile the labelled candidate
 and recover the old signed release. After complete cleanup, the same signed
 candidate can be retried; an existing stage is reused only if its signature
 and release identity still verify. A partial or altered stage is rejected and
-requires operator investigation. The state records one previous release, so
+requires operator investigation. For a known interrupted staging attempt,
+first confirm a clean stop and inspect the candidate directory. Then run
+`vesselctl discard-staged-candidate --root ROOT --trusted-key KEY --bundle
+NEW_BUNDLE --console-config CONFIG --discard-stage`. This accepts only the
+signed input bundle and exact console configuration that identify the staged
+candidate. It refuses the active and rollback releases, running resources,
+unsafe entries and linked paths. Repeat the switch command after a successful
+discard. The state records one previous release, so
 rollback is one step; after rollback, the newer release becomes the previous
 release and can be selected again with the same procedure.
 

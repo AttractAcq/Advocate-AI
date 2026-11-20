@@ -18,7 +18,8 @@ from infrastructure.deploy.vessel_recovery_set import (
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_release_switch import (
-    rollback_stopped_vessel_release, switch_stopped_vessel_release,
+    discard_stopped_vessel_stage, rollback_stopped_vessel_release,
+    switch_stopped_vessel_release,
 )
 
 
@@ -41,6 +42,12 @@ def main(argv: list[str] | None = None) -> None:
     switch.add_argument("--bundle", type=Path, required=True)
     switch.add_argument("--console-config", type=Path, required=True)
     commands.add_parser("rollback-stopped", parents=[shared])
+    discard_stage = commands.add_parser("discard-staged-candidate")
+    discard_stage.add_argument("--root", type=Path, required=True)
+    discard_stage.add_argument("--trusted-key", type=Path, required=True)
+    discard_stage.add_argument("--bundle", type=Path, required=True)
+    discard_stage.add_argument("--console-config", type=Path, required=True)
+    discard_stage.add_argument("--discard-stage", action="store_true", required=True)
     reset = commands.add_parser("reset-bootstrap", parents=[shared])
     reset.add_argument("--discard-data", action="store_true", required=True)
     capture = commands.add_parser("capture-recovery-set", parents=[shared])
@@ -122,6 +129,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "rollback-stopped":
         result = rollback_stopped_vessel_release(
             args.root, args.trusted_key, args.crane)
+    elif args.command == "discard-staged-candidate":
+        result = discard_stopped_vessel_stage(
+            args.root, args.trusted_key, args.bundle, args.console_config,
+            discard_stage=args.discard_stage)
     elif args.command == "capture-recovery-set":
         result = create_vessel_recovery_set(
             args.root, args.trusted_key, args.crane, args.repository,

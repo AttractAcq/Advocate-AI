@@ -33,14 +33,15 @@ from infrastructure.deploy.vessel_recovery_set import (
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _ingest, _stage, _write_intent, _write_private_record,
+    VesselInstallError, _ingest, _release_id, _stage, _write_intent, _write_private_record,
     finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
     reset_first_install, resume_first_install, status_vessel,
     stop_vessel,
 )
 from infrastructure.deploy.vessel_release_switch import (
-    rollback_stopped_vessel_release, switch_stopped_vessel_release,
+    discard_stopped_vessel_stage, rollback_stopped_vessel_release,
+    switch_stopped_vessel_release,
 )
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -291,6 +292,23 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 final_count <= initial_count):
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         stop_vessel(install_root, trusted, crane)
+        staged_id = _release_id(update_bundle, config)
+        partial_stage = install_root / "vessel-releases" / staged_id
+        partial_stage.mkdir(mode=0o700)
+        (partial_stage / "interrupted.tmp").write_text("synthetic partial stage\n")
+        try:
+            switch_stopped_vessel_release(
+                install_root, trusted, crane, update_bundle, config)
+        except VesselInstallError as exc:
+            if "invalid staged vessel release" not in str(exc):
+                raise
+        else:
+            raise AssertionError("partial staged vessel release was accepted")
+        discarded = discard_stopped_vessel_stage(
+            install_root, trusted, update_bundle, config, discard_stage=True)
+        if (discarded != {"result": "staged-candidate-discarded",
+                          "release": staged_id} or partial_stage.exists()):
+            raise AssertionError("partial vessel stage was not safely discarded")
         switched = switch_stopped_vessel_release(
             install_root, trusted, crane, update_bundle, config)
         switched_status = status_vessel(install_root, trusted, crane)
@@ -334,7 +352,8 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 "interrupted_stop": "knowledge-stop-completed",
                 "release_switch": "stopped-signed-and-healthy",
                 "release_rollback": "stopped-signed-and-healthy",
-                "core_image_change": "distinct-and-restored"}
+                "core_image_change": "distinct-and-restored",
+                "partial_stage": "rejected-then-discarded"}
     finally:
         if orphan_services is not None:
             stop_runtime(orphan_services)

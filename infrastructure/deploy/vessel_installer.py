@@ -65,15 +65,19 @@ def _release_id(bundle: Path, config: Path) -> str:
                           b"\0" + config.read_bytes()).hexdigest()[:24]
 
 
-def _stage(root: Path, bundle: Path, trusted_key: Path,
-           config: Path) -> tuple[str, Path]:
+def _candidate_release_id(bundle: Path, trusted_key: Path, config: Path) -> str:
     manifest = verify_bundle(bundle, trusted_key)
     if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
         raise BundleError("vessel installer requires a signed three-image bundle")
     _validate_console_config(config)
     if not stat.S_IMODE(config.stat().st_mode) & 0o004:
         raise VesselInstallError("Console configuration is unreadable by the image user")
-    identifier = _release_id(bundle, config)
+    return _release_id(bundle, config)
+
+
+def _stage(root: Path, bundle: Path, trusted_key: Path,
+           config: Path) -> tuple[str, Path]:
+    identifier = _candidate_release_id(bundle, trusted_key, config)
     releases = root / "vessel-releases"
     releases.mkdir(mode=0o700, exist_ok=True)
     _owner_directory(releases)

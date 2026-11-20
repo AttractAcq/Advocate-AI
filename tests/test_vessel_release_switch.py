@@ -11,7 +11,8 @@ from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _read_state, _stage, _state_payload, _write_state,
 )
 from infrastructure.deploy.vessel_release_switch import (
-    rollback_stopped_vessel_release, switch_stopped_vessel_release,
+    discard_stopped_vessel_stage, rollback_stopped_vessel_release,
+    switch_stopped_vessel_release,
 )
 
 
@@ -94,6 +95,69 @@ class VesselReleaseSwitchTests(unittest.TestCase):
             with self.assertRaisesRegex(VesselInstallError, "no previous"):
                 rollback_stopped_vessel_release(self.root, self.key, self.crane)
             verify.assert_not_called()
+
+    def test_partial_stage_discard_requires_signed_identity_and_clean_stop(self) -> None:
+        candidate = self.root / "vessel-releases" / ("2" * 24)
+        candidate.mkdir(parents=True, mode=0o700)
+        candidate.parent.chmod(0o700)
+        (candidate / "interrupted.tmp").write_text("partial")
+        arguments = (self.root, self.key, self.parent / "bundle",
+                     self.parent / "config")
+        with self.assertRaisesRegex(VesselInstallError, "explicit"):
+            discard_stopped_vessel_stage(*arguments)
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory",
+                   side_effect=VesselInstallError("runtime still present")), \
+             patch("infrastructure.deploy.vessel_release_switch._candidate_release_id") as identity:
+            with self.assertRaisesRegex(VesselInstallError, "runtime still present"):
+                discard_stopped_vessel_stage(*arguments, discard_stage=True)
+            identity.assert_not_called()
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._candidate_release_id",
+                   side_effect=VesselInstallError("unsigned candidate")):
+            with self.assertRaisesRegex(VesselInstallError, "unsigned candidate"):
+                discard_stopped_vessel_stage(*arguments, discard_stage=True)
+        self.assertTrue(candidate.exists())
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._candidate_release_id",
+                   return_value="2" * 24):
+            result = discard_stopped_vessel_stage(*arguments, discard_stage=True)
+        self.assertEqual(result["result"], "staged-candidate-discarded")
+        self.assertFalse(candidate.exists())
+        self.assertEqual(_read_state(self.root), self.current)
+
+    def test_discard_protects_rollback_stage_and_rejects_symlink(self) -> None:
+        self.current["previous"] = "2" * 24
+        _write_state(self.root, self.current)
+        candidate = self.root / "vessel-releases" / ("2" * 24)
+        candidate.mkdir(parents=True, mode=0o700)
+        candidate.parent.chmod(0o700)
+        arguments = (self.root, self.key, self.parent / "bundle",
+                     self.parent / "config")
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._candidate_release_id",
+                   return_value="2" * 24):
+            with self.assertRaisesRegex(VesselInstallError, "rollback"):
+                discard_stopped_vessel_stage(*arguments, discard_stage=True)
+        self.assertTrue(candidate.exists())
+        self.current.pop("previous")
+        _write_state(self.root, self.current)
+        (candidate / "linked").symlink_to(self.parent / "outside")
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._candidate_release_id",
+                   return_value="2" * 24):
+            with self.assertRaisesRegex(VesselInstallError, "unsafe entry"):
+                discard_stopped_vessel_stage(*arguments, discard_stage=True)
+        self.assertTrue(candidate.exists())
 
     def test_candidate_failure_keeps_prior_state_and_data(self) -> None:
         new_knowledge = KnowledgeVolumeHandle(

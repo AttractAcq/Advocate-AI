@@ -2,20 +2,61 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import shutil
+import stat
 
 from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, start_signed_knowledge,
 )
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _cleanup_failed_install, _operation_lock,
+    VesselInstallError, _candidate_release_id, _cleanup_failed_install,
+    _operation_lock, _owner_directory,
     _read_state, _recovery_inventory, _release_id, _stage, _state_payload,
     _verify_knowledge_schema, _verify_stage, _write_state,
 )
 from infrastructure.deploy.vessel_recovery_set import _verify_database
 from infrastructure.deploy.vessel_runtime import _state_options, start_signed_vessel_services
 from services.policy.policy_file import policy_directory_lock
+
+
+def _discardable_stage(stage: Path) -> None:
+    _owner_directory(stage)
+    device = stage.stat().st_dev
+    for item in stage.rglob("*"):
+        details = item.lstat()
+        if (details.st_uid != os.getuid() or details.st_dev != device or
+                not (stat.S_ISREG(details.st_mode) or
+                     stat.S_ISDIR(details.st_mode)) or
+                stat.S_IMODE(details.st_mode) & 0o022):
+            raise VesselInstallError("staged candidate contains unsafe entry")
+
+
+def discard_stopped_vessel_stage(root: Path, trusted_key: Path, bundle: Path,
+                                 console_config: Path,
+                                 *, discard_stage: bool = False) -> dict[str, str]:
+    """Remove one non-active stage after a clean stop and signed identity check."""
+    if not discard_stage:
+        raise VesselInstallError("explicit staged-candidate discard required")
+    with _operation_lock(root):
+        current = _read_state(root)
+        active = current["active"]
+        _verify_stage(root / "vessel-releases" / active, trusted_key, active)
+        state = Path(current["core_state"])
+        password = Path(current["lab_password_file"])
+        _state_options(state, password, root)
+        _recovery_inventory(current["installation_id"], current["runtime"])
+        identifier = _candidate_release_id(bundle, trusted_key, console_config)
+        if identifier in (active, current.get("previous")):
+            raise VesselInstallError("cannot discard active or rollback vessel release")
+        releases = root / "vessel-releases"
+        _owner_directory(releases)
+        stage = releases / identifier
+        _discardable_stage(stage)
+        shutil.rmtree(stage)
+        return {"result": "staged-candidate-discarded", "release": identifier}
 
 
 def _activate_stopped(root: Path, trusted_key: Path, crane: Path,
