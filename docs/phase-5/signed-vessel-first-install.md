@@ -81,3 +81,14 @@ database volume. A foreign or unrecorded resource causes a refusal before
 deletion. The actual-image rehearsal leaves Knowledge running after Core,
 Console and their network are removed, then uses `finish-stop` before
 reconciliation and recovery.
+
+## First-install intent
+
+Before creating the first Knowledge volume, the installer writes an owner-only,
+fsynced `vessel-intent.json` containing the installation ID, signed release ID,
+external Core state path and credential path. A failed install with incomplete
+Docker cleanup retains this record alongside the private credentials. A
+successful activation writes the active state and removes the intent; the
+actual-image rehearsal checks its absence. The intent is strictly parsed with
+duplicate-key and field checks. A separate resume or cleanup command is still
+needed for process termination before the active record is written.
