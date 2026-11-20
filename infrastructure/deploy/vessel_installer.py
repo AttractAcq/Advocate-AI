@@ -75,7 +75,8 @@ def _stage(root: Path, bundle: Path, trusted_key: Path,
         raise VesselInstallError("Console configuration is unreadable by the image user")
     identifier = _release_id(bundle, config)
     releases = root / "vessel-releases"
-    releases.mkdir(mode=0o700)
+    releases.mkdir(mode=0o700, exist_ok=True)
+    _owner_directory(releases)
     stage = releases / identifier
     stage.mkdir(mode=0o700)
     shutil.copytree(bundle, stage / "bundle", symlinks=True)

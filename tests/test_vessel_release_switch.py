@@ -8,7 +8,7 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _read_state, _state_payload, _write_state,
+    VesselInstallError, _read_state, _stage, _state_payload, _write_state,
 )
 from infrastructure.deploy.vessel_release_switch import (
     rollback_stopped_vessel_release, switch_stopped_vessel_release,
@@ -33,6 +33,24 @@ class VesselReleaseSwitchTests(unittest.TestCase):
             self.parent / "password", self.services, self.knowledge)
         _write_state(self.root, self.current)
         self.key, self.crane = self.parent / "key", self.parent / "crane"
+
+    def test_staging_second_release_accepts_existing_private_directory(self) -> None:
+        bundle = self.parent / "bundle"
+        bundle.mkdir()
+        (bundle / "release-manifest.json").write_text("{}")
+        config = self.parent / "config"
+        config.write_text("{}")
+        config.chmod(0o644)
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel"}), \
+             patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
+             patch("infrastructure.deploy.vessel_installer._release_id",
+                   side_effect=["1" * 24, "2" * 24]), \
+             patch("infrastructure.deploy.vessel_installer._verify_stage"):
+            first, _ = _stage(self.root, bundle, self.key, config)
+            second, _ = _stage(self.root, bundle, self.key, config)
+        self.assertNotEqual(first, second)
+        self.assertTrue((self.root / "vessel-releases" / second / "bundle").is_dir())
 
     def test_switch_requires_clean_stopped_inventory_before_stage(self) -> None:
         with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
