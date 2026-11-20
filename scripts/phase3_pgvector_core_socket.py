@@ -15,7 +15,8 @@ import uuid
 
 from scripts.synthetic_pg_fixture import fixture as _fixture, put as _put
 
-_IMAGE = re.compile(r"(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}\Z")
+_IMAGE = re.compile(r"(?:(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}"
+                    r"|sovereign-knowledge:synthetic)\Z")
 _CORE = re.compile(r"sovereign-core:[a-z0-9-]{1,40}\Z")
 _WRITER_DSN = "postgresql://sovereign_ingest@/postgres?host=/run/postgresql"
 _READER_DSN = "postgresql://sovereign_read@/postgres?host=/run/postgresql"
@@ -170,7 +171,7 @@ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) a
 
 def rehearse(image: str, core_image: str) -> dict[str, object]:
     if not _IMAGE.fullmatch(image) or not _CORE.fullmatch(core_image):
-        raise ValueError("socket rehearsal requires a pinned pgvector and named local Core image")
+        raise ValueError("socket rehearsal requires a pinned or built Knowledge and named Core image")
     name = f"sovereign-pg-socket-{uuid.uuid4().hex[:12]}"
     volume = ""
     created: list[str] = []
