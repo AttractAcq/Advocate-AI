@@ -461,7 +461,9 @@ jobs:
             --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
             --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
             --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
-            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache" \
+            --restic "$RUNNER_TEMP/upstream/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/upstream/restic" | cut -d' ' -f1)"
       - name: Retain three-image bundle evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

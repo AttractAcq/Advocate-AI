@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -22,6 +23,10 @@ from infrastructure.deploy.knowledge_volume import (
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
+from infrastructure.deploy.vessel_recovery_set import (
+    create_vessel_recovery_set, restore_vessel_recovery_files,
+    verify_vessel_recovery_receipt,
+)
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _ingest, _stage, _write_intent, finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
@@ -33,6 +38,8 @@ from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
 from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
 from scripts.synthetic_pg_fixture import fixture as synthetic_fixture, put as private_put
+from scripts.phase5_postgres_rehearsal import _restore as restore_postgres_dump
+from infrastructure.deploy.postgres_socket import ready as postgres_ready
 from services.policy.audit import verify as verify_audit
 
 ROLES = ("core", "console", "knowledge")
@@ -62,6 +69,56 @@ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) a
 def _probe_vessel_history(core_id: str, conversation_id: str | None = None) -> dict[str, object]:
     return json.loads(_run("docker", "exec", core_id, "python", "-c",
                            _VESSEL_HISTORY_PROBE, conversation_id or "-"))
+
+
+def _rehearse_restored_knowledge(bundle: Path, trusted: Path, crane: Path,
+                                 restored: Path, sources: int, passages: int) -> None:
+    """Verify the recovered dump against recovered files on isolated clean PG."""
+    manifest = verify_bundle(bundle, trusted)
+    knowledge_image = _image_id(bundle, "knowledge", manifest["images"]["knowledge"], crane)
+    core_image = _image_id(bundle, "core", manifest["images"]["core"], crane)
+    token = uuid.uuid4().hex[:12]
+    data_volume = f"sovereign-recovery-{token}-data"
+    socket_volume = f"sovereign-recovery-{token}-socket"
+    container = None
+    try:
+        _run("docker", "volume", "create", data_volume)
+        _run("docker", "volume", "create", socket_volume)
+        container = _run(
+            "docker", "run", "-d", "--pull", "never", "--network", "none",
+            "--name", f"sovereign-recovery-{token}",
+            "--mount", f"type=volume,source={data_volume},target=/var/lib/postgresql/data",
+            "--mount", f"type=volume,source={socket_volume},target=/run/postgresql",
+            "-e", "POSTGRES_HOST_AUTH_METHOD=trust", knowledge_image,
+            "postgres", "-c", "listen_addresses=", "-c",
+            "unix_socket_directories=/run/postgresql")
+        postgres_ready(container)
+        restore_postgres_dump(container, restored / "postgres.dump")
+        program = """\
+import json
+from pathlib import Path
+from services.knowledge.postgres_index import verify_knowledge_snapshot
+root=Path('/var/lib/sovereign')
+print(json.dumps(verify_knowledge_snapshot(root,root/'approved.json',
+ 'postgresql://postgres@/postgres?host=/run/postgresql')))
+"""
+        evidence = json.loads(_run(
+            "docker", "run", "--rm", "--pull", "never", "--network", "none",
+            "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+            "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+            "--user", f"{os.getuid()}:{os.getgid()}",
+            "--mount", f"type=volume,source={socket_volume},target=/run/postgresql,readonly",
+            "--mount", f"type=bind,source={restored.resolve()},target=/var/lib/sovereign,readonly",
+            core_image, "python", "-c", program))
+        if evidence != {"sources": sources, "passages": passages}:
+            raise AssertionError("clean Knowledge restore differs from signed receipt")
+    finally:
+        if container is not None:
+            subprocess.run(["docker", "rm", "-f", container], capture_output=True,
+                           text=True, timeout=30)
+        for volume in (socket_volume, data_volume):
+            subprocess.run(["docker", "volume", "rm", volume], capture_output=True,
+                           text=True, timeout=30)
 
 
 def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
@@ -116,7 +173,8 @@ def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
 
 
 def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
-                            root: Path) -> dict[str, str]:
+                            root: Path, restic: Path,
+                            restic_sha256: str) -> dict[str, str]:
     """Activate from signed media and check the recorded three-image state."""
     state = root / "vessel-state"
     lab_password = root / "lab-password"
@@ -165,6 +223,34 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
         stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
                                    runtime["console_id"]))
         stopped = finish_vessel_stop(install_root, trusted, crane)
+        recovery_root = root / "vessel-recovery"
+        recovery_root.mkdir(mode=0o700)
+        staging = recovery_root / "staging"
+        staging.mkdir(mode=0o700)
+        receipt = recovery_root / "receipt.json"
+        password = recovery_root / "restic-password"
+        private_put(password, (secrets.token_urlsafe(48) + "\n").encode())
+        receipt_key = Ed25519PrivateKey.generate()
+        receipt_private = recovery_root / "receipt-private.pem"
+        receipt_public = recovery_root / "receipt-public.pem"
+        private_put(receipt_private, receipt_key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption()))
+        private_put(receipt_public, receipt_key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+        captured = create_vessel_recovery_set(
+            install_root, trusted, crane, recovery_root / "repository", password,
+            restic, restic_sha256, staging, receipt_private, receipt)
+        if verify_vessel_recovery_receipt(receipt, receipt_public) != captured:
+            raise AssertionError("signed vessel recovery receipt changed")
+        restored = recovery_root / "restored"
+        restored_result = restore_vessel_recovery_files(
+            receipt, receipt_public, password, restic, restic_sha256, restored)
+        if (restored_result["audit_count"] != initial_count or
+                (restored / "audit.jsonl").read_bytes() != initial_audit):
+            raise AssertionError("restored vessel Core audit checkpoint changed")
+        _rehearse_restored_knowledge(
+            bundle, trusted, crane, restored, captured["sources"], captured["passages"])
         stage = install_root / "vessel-releases" / record["active"]
         orphan_knowledge = start_signed_knowledge(
             stage / "bundle", trusted, crane, install_root,
@@ -195,6 +281,7 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 "schema_authority": "migration-role-only",
                 "schema_version": 1, "unknown_schema": "denied",
                 "audit_history": "persisted-across-recovery",
+                "encrypted_recovery_set": "signed-restored-and-knowledge-verified",
                 "state": "recorded-after-health", "recovery": "stopped-and-recovered",
                 "interrupted_recovery": "orphan-runtime-reconciled",
                 "interrupted_stop": "knowledge-stop-completed"}
@@ -354,7 +441,7 @@ def _sha256(path: Path) -> str:
 
 def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
              syft_sha256: str, trivy: Path, trivy_sha256: str,
-             trivy_cache: Path) -> dict[str, object]:
+             trivy_cache: Path, restic: Path, restic_sha256: str) -> dict[str, object]:
     if output.exists() or output.is_symlink():
         raise ValueError("three-image evidence output must be new")
     output.mkdir(parents=True)
@@ -471,7 +558,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["persistent_knowledge_restart"] = \
                     _rehearse_persistent_knowledge(bundle, trusted, crane, root)
                 result["signed_vessel_first_install"] = \
-                    _rehearse_first_install(bundle, trusted, crane, root)
+                    _rehearse_first_install(bundle, trusted, crane, root, restic,
+                                            restic_sha256)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
                 result["bootstrap_reset"] = \
@@ -493,10 +581,13 @@ def main() -> None:
     parser.add_argument("--trivy", required=True, type=Path)
     parser.add_argument("--trivy-sha256", required=True)
     parser.add_argument("--trivy-cache", required=True, type=Path)
+    parser.add_argument("--restic", required=True, type=Path)
+    parser.add_argument("--restic-sha256", required=True)
     args = parser.parse_args()
     print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
                              args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache), sort_keys=True))
+                             args.trivy_sha256, args.trivy_cache,
+                             args.restic, args.restic_sha256), sort_keys=True))
 
 
 if __name__ == "__main__":
