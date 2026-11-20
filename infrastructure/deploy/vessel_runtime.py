@@ -25,6 +25,7 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import verify_login
 from infrastructure.release.bundle import BundleError, verify_bundle
 from services.knowledge.manifest_io import load_manifest
+from services.policy.audit import verify as verify_audit
 from services.policy.policy_file import load_policy
 
 
@@ -43,6 +44,15 @@ def _private_file(path: Path, *, maximum: int = 4096) -> None:
             or stat.S_IMODE(path.stat().st_mode) & 0o077
             or not 0 < path.stat().st_size <= maximum):
         raise VesselRuntimeError("invalid private vessel runtime file")
+
+
+def _persistent_file(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if (path.is_symlink() or not path.is_file() or
+            path.stat().st_uid != os.getuid() or
+            stat.S_IMODE(path.stat().st_mode) & 0o077):
+        raise VesselRuntimeError("invalid persistent vessel Core file")
 
 
 def _state_options(state: Path, lab_password: Path,
@@ -69,6 +79,14 @@ def _state_options(state: Path, lab_password: Path,
             or sources.stat().st_uid != os.getuid()
             or stat.S_IMODE(sources.stat().st_mode) & 0o077):
         raise VesselRuntimeError("invalid Core source directory")
+    audit_path = state / "audit.jsonl"
+    _persistent_file(audit_path)
+    for name in ("history.db", "history.db-wal", "history.db-shm"):
+        _persistent_file(state / name)
+    try:
+        verify_audit(audit_path, require_current_clock=True)
+    except (OSError, ValueError) as exc:
+        raise VesselRuntimeError("vessel audit trail is invalid") from exc
     _private_file(lab_password)
     if lab_password.resolve().is_relative_to(state.resolve()):
         raise VesselRuntimeError("lab credential must be outside Core state")
@@ -87,6 +105,8 @@ def _state_options(state: Path, lab_password: Path,
                "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                "-e", "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
                "-e", f"SOVEREIGN_KNOWLEDGE_DB={_READER_DSN}",
+               "-e", "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
+               "-e", "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                "-e", "PGPASSFILE=/run/secrets/pgpass"]
     return options, reader
 
@@ -200,6 +220,8 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
                     "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                     "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
                     f"SOVEREIGN_KNOWLEDGE_DB={_READER_DSN}",
+                    "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
+                    "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                     "PGPASSFILE=/run/secrets/pgpass"}
     selected = [item for item in environment if isinstance(item, str) and
                 item.split("=", 1)[0] in {entry.split("=", 1)[0]

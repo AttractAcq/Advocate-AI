@@ -36,6 +36,8 @@ class VesselRuntimeTests(unittest.TestCase):
         self.assertIn("PGPASSFILE=/run/secrets/pgpass", options)
         self.assertIn("SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
                       options)
+        self.assertIn("SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl", options)
+        self.assertIn("SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db", options)
         self.assertNotIn("SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db",
                          options)
 
@@ -56,6 +58,17 @@ class VesselRuntimeTests(unittest.TestCase):
         payload["schema"] = True
         manifest.write_text(json.dumps(payload))
         with self.assertRaises(VesselRuntimeError):
+            _state_options(self.state, self.lab_password, self.knowledge_root)
+
+    def test_invalid_persistent_state_denies_core_start(self) -> None:
+        audit = self.state / "audit.jsonl"
+        audit.write_text('{"sequence":1}\n')
+        audit.chmod(0o600)
+        with self.assertRaisesRegex(VesselRuntimeError, "audit trail"):
+            _state_options(self.state, self.lab_password, self.knowledge_root)
+        audit.unlink()
+        (self.state / "history.db").symlink_to(self.state / "roles.json")
+        with self.assertRaisesRegex(VesselRuntimeError, "persistent"):
             _state_options(self.state, self.lab_password, self.knowledge_root)
 
     def test_non_vessel_bundle_never_loads_images(self) -> None:
