@@ -328,7 +328,9 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
         runtime = record["runtime"]
         model_route = _probe_vessel_model_route(runtime["core_id"], model_id)
         if model_route != {"result": "pass", "route": "container-loopback",
-                           "model": model_id, "outage": "failed-closed"}:
+                           "model": model_id,
+                           "readiness": "advertised-then-unavailable",
+                           "outage": "failed-closed"}:
             raise AssertionError("signed Core model request route failed")
         base_core_image = _run("docker", "inspect", runtime["core_id"],
                                "--format", "{{.Image}}")
@@ -1075,11 +1077,14 @@ def main() -> None:
     parser.add_argument("--restic-sha256", required=True)
     parser.add_argument("--update-core-image", required=True)
     args = parser.parse_args()
-    print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
-                             args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache,
-                             args.restic, args.restic_sha256,
-                             args.update_core_image), sort_keys=True))
+    result = rehearse(args.output, args.crane, args.crane_sha256,
+                      args.syft, args.syft_sha256, args.trivy,
+                      args.trivy_sha256, args.trivy_cache,
+                      args.restic, args.restic_sha256,
+                      args.update_core_image)
+    print(json.dumps(result, sort_keys=True))
+    if result.get("three_image_bundle") != "signed-and-verified":
+        parser.exit(1, "three-image release: signed vessel rehearsal was not run\n")
 
 
 if __name__ == "__main__":
