@@ -26,7 +26,7 @@ CORE_STATE_SCHEMA_VERSION = 1
 
 
 def _history_shape(db: sqlite3.Connection) -> None:
-    if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+    if db.execute("PRAGMA quick_check").fetchone() != ("ok",):
         raise ValueError("conversation database integrity failed")
     columns = [(row[1], row[2].upper(), row[3], row[5])
                for row in db.execute("PRAGMA table_info(conversations)")]
