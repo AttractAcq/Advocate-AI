@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+import hashlib
 import json
+import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,6 +24,7 @@ from infrastructure.deploy.vessel_history_migration import (
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _state_payload, _write_state,
 )
+from infrastructure.restic_repository import restore_snapshot
 
 
 class StoppedVesselHistoryMigrationTests(unittest.TestCase):
@@ -60,11 +65,17 @@ class StoppedVesselHistoryMigrationTests(unittest.TestCase):
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
         self.receipt = self.out / "migration-receipt.json"
         self.evidence = self.out / "migration-evidence.json"
+        self.backup_password = self.parent / "backup-password"
+        self.backup_password.write_text(os.urandom(32).hex())
+        self.backup_password.chmod(0o600)
+        self.restic = Path(os.environ.get("SOVEREIGN_TEST_RESTIC", "/nonexistent/restic"))
+        self.restic_hash = (hashlib.sha256(self.restic.read_bytes()).hexdigest()
+                            if self.restic.is_file() else "0" * 64)
 
     def migrate(self) -> dict[str, object]:
         return migrate_stopped_vessel_history(
             self.root, self.trust, self.parent / "crane", self.parent / "repository",
-            self.parent / "backup-password", self.parent / "restic", "0" * 64,
+            self.backup_password, self.restic, self.restic_hash,
             self.staging, self.evidence, self.signing, self.receipt)
 
     def test_live_runtime_refused_before_backup_or_mutation(self) -> None:
@@ -128,6 +139,39 @@ class StoppedVesselHistoryMigrationTests(unittest.TestCase):
         self.receipt.chmod(0o600)
         with self.assertRaises(VesselHistoryMigrationError):
             verify_vessel_history_migration_receipt(self.receipt, self.trust)
+
+    @unittest.skipUnless(os.environ.get("SOVEREIGN_TEST_RESTIC"),
+                         "pinned restic integration binary not configured")
+    def test_encrypted_stopped_migration_and_signed_receipt(self) -> None:
+        history = self.state / "history.db"
+        with closing(sqlite3.connect(history)) as database:
+            with database:
+                database.execute("""CREATE TABLE conversations (
+                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, turns_json TEXT NOT NULL)""")
+                database.execute("CREATE INDEX conversations_owner ON conversations(owner)")
+                database.execute("INSERT INTO conversations VALUES (?,?,?)",
+                                 ("old", "engineer", '[{"message":"fictional"}]'))
+        history.chmod(0o600)
+        with patch("infrastructure.deploy.vessel_history_migration._verify_stage"), \
+             patch("infrastructure.deploy.vessel_history_migration.verify_bundle",
+                   return_value={"images": {"core": {}}}), \
+             patch("infrastructure.deploy.vessel_history_migration._image_id"), \
+             patch("infrastructure.deploy.vessel_history_migration._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_history_migration._state_options"), \
+             patch("infrastructure.deploy.vessel_history_migration.policy_directory_lock"):
+            result = self.migrate()
+        self.assertEqual(verify_vessel_history_migration_receipt(self.receipt,
+                                                                  self.trust), result)
+        self.assertEqual(json.loads(self.evidence.read_text())["status"],
+                         "migration-complete")
+        with closing(sqlite3.connect(history)) as database:
+            self.assertEqual(database.execute("PRAGMA user_version").fetchone(), (1,))
+        destination = self.parent / "clean-restore"
+        restore_snapshot(result["snapshot_id"], self.parent / "repository",
+                         self.backup_password, self.restic, self.restic_hash,
+                         destination)
+        with closing(sqlite3.connect(destination / "history.db")) as database:
+            self.assertEqual(database.execute("PRAGMA user_version").fetchone(), (0,))
 
 
 if __name__ == "__main__":
