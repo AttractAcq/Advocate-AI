@@ -38,3 +38,13 @@ have been reviewed.
 The synthetic container CI job also runs the existing private Unix socket
 Core-to-pgvector rehearsal against this exact Trixie digest. It checks startup,
 indexing, authorised and denied API search, source preview and live revocation.
+
+The [comparison CI evidence](https://github.com/AttractAcq/Advocate-AI/actions/runs/44644357821)
+shows that the Trixie candidate passes archive and SBOM checks but also returns
+`denied-findings`: 168 unresolved findings (149 HIGH, 2 CRITICAL, 17 UNKNOWN).
+The current Bookworm pin has 161 (140 HIGH, 4 CRITICAL, 17 UNKNOWN). The two
+reports share 126 package/advisory pairs; 29 Trixie findings and 28 Bookworm
+findings list a fixed version. The remaining advisories require a security
+triage or a differently built image. The Trixie candidate passed the synthetic
+Core private-socket integration check, but its vulnerability result does not
+justify replacing the current pin or issuing a release.
