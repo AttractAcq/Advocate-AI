@@ -49,6 +49,17 @@ class VesselCtlTests(unittest.TestCase):
                                           Path("/tmp/crane"))
         self.assertEqual(json.loads(output.getvalue())["containers"], 3)
 
+    def test_finish_stop_routes_to_existing_root(self) -> None:
+        output = StringIO()
+        with patch("scripts.vesselctl.finish_vessel_stop",
+                   return_value={"result": "stopped", "active": "a" * 24}) as finish, \
+             redirect_stdout(output):
+            main(["finish-stop", "--root", "/tmp/vessel",
+                  "--trusted-key", "/tmp/key", "--crane", "/tmp/crane"])
+        finish.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
+                                       Path("/tmp/crane"))
+        self.assertEqual(json.loads(output.getvalue())["result"], "stopped")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,8 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_installer import (
-    install_vessel, reconcile_vessel, recover_vessel, status_vessel, stop_vessel,
+    finish_vessel_stop, install_vessel, reconcile_vessel, recover_vessel,
+    status_vessel,
 )
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -122,8 +123,11 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 status.get("result") != "healthy" or
                 activated.get("active") != status.get("active")):
             raise AssertionError("signed first installation did not become healthy")
-        stopped = stop_vessel(install_root, trusted, crane)
         record = json.loads((install_root / "vessel-state.json").read_text())
+        runtime = record["runtime"]
+        stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                   runtime["console_id"]))
+        stopped = finish_vessel_stop(install_root, trusted, crane)
         stage = install_root / "vessel-releases" / record["active"]
         orphan_knowledge = start_signed_knowledge(
             stage / "bundle", trusted, crane, install_root,
@@ -144,7 +148,8 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         return {"result": "pass", "activation": "signed-and-healthy",
                 "state": "recorded-after-health", "recovery": "stopped-and-recovered",
-                "interrupted_recovery": "orphan-runtime-reconciled"}
+                "interrupted_recovery": "orphan-runtime-reconciled",
+                "interrupted_stop": "knowledge-stop-completed"}
     finally:
         if orphan_services is not None:
             stop_runtime(orphan_services)

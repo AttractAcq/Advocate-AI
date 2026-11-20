@@ -50,8 +50,8 @@ open.
 
 ## Operator command
 
-`python -m scripts.vesselctl` exposes `install`, `status`, `stop`, `reconcile`
-and `recover`
+`python -m scripts.vesselctl` exposes `install`, `status`, `stop`,
+`finish-stop`, `reconcile` and `recover`
 for the synthetic candidate. Every command requires explicit absolute paths
 for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
 requires `--bundle`, `--console-config`, `--core-state` and
@@ -70,5 +70,14 @@ resource passes does it remove the orphan containers, networks and disposable
 socket volumes. The persistent Knowledge data volume and credentials remain.
 The signed-image rehearsal creates a full orphan Core, Console and Knowledge
 runtime, reconciles it and recovers the same installation. An interruption
-during the initial installation, a partially completed stop, and a crash
-after active-state replacement still require separate handling.
+during the initial installation and a crash after active-state replacement
+still require separate handling.
+
+`finish-stop` handles an interrupted or incomplete stop. It requires every
+remaining container, network and socket volume to be one of the recorded
+resources, verifies their signed image and installation identity, and removes
+them in service, network, Knowledge order. It preserves the persistent
+database volume. A foreign or unrecorded resource causes a refusal before
+deletion. The actual-image rehearsal leaves Knowledge running after Core,
+Console and their network are removed, then uses `finish-stop` before
+reconciliation and recovery.
