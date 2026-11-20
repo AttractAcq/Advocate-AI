@@ -26,11 +26,13 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_recovery_set import (
-    activate_vessel_recovery_set, create_vessel_recovery_set, restore_vessel_recovery_files,
+    abandon_incomplete_vessel_restore, activate_vessel_recovery_set,
+    create_vessel_recovery_set, restore_vessel_recovery_files,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _ingest, _stage, _write_intent, finish_vessel_stop, install_vessel,
+    VesselInstallError, _ingest, _stage, _write_intent, _write_private_record,
+    finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
     reset_first_install, resume_first_install, status_vessel,
 )
@@ -360,6 +362,54 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
                            capture_output=True, text=True, timeout=30)
 
 
+def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
+                                          crane: Path, root: Path) -> dict[str, str]:
+    """Discard only a signed partial candidate volume, retaining evidence."""
+    recovery = root / "vessel-recovery"
+    receipt = recovery / "receipt.json"
+    receipt_key = recovery / "receipt-public.pem"
+    value = verify_vessel_recovery_receipt(receipt, receipt_key)
+    install = root / "partial-recovery-install"
+    install.mkdir(mode=0o700)
+    state = root / "partial-recovery-state"
+    state.mkdir(mode=0o700)
+    release, _ = _stage(install, bundle, trusted, root / "console-config.json")
+    if release != value["release"]:
+        raise AssertionError("partial recovery signed stage changed")
+    _write_private_record(install, "vessel-restore-intent.json", {
+        "schema": 1, "snapshot_id": value["snapshot_id"],
+        "release": release, "installation_id": value["installation_id"]})
+    _write_intent(install, release, value["installation_id"], state,
+                  root / "lab-password")
+    created = False
+    try:
+        _volume(value["data_volume"], value["installation_id"],
+                "knowledge-data", create=True)
+        created = True
+        try:
+            resume_first_install(install, trusted, crane)
+        except VesselInstallError as exc:
+            if "restore candidate" not in str(exc):
+                raise
+        else:
+            raise AssertionError("generic first-install resume accepted partial restore")
+        result = abandon_incomplete_vessel_restore(
+            install, trusted, receipt, receipt_key, discard_partial_data=True)
+        created = False
+        if (result["result"] != "abandoned" or
+                result["snapshot_id"] != value["snapshot_id"] or
+                not (install / "vessel-restore-intent.json").is_file() or
+                not (install / "vessel-restore-abandoned.json").is_file() or
+                not state.is_dir()):
+            raise AssertionError("partial recovery evidence was not retained")
+        return {"result": "pass", "volume": "checked-and-discarded",
+                "generic_resume": "denied", "evidence": "retained"}
+    finally:
+        if created:
+            subprocess.run(["docker", "volume", "rm", value["data_volume"]],
+                           capture_output=True, text=True, timeout=30)
+
+
 def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
                                     root: Path) -> dict[str, str]:
     """Simulate process loss before first activation and resume from intent."""
@@ -613,6 +663,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["signed_vessel_clean_restore"] = \
                     _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
                                                     restic, restic_sha256)
+                result["interrupted_restore_abandon"] = \
+                    _rehearse_interrupted_restore_abandon(bundle, trusted, crane, root)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
                 result["bootstrap_reset"] = \

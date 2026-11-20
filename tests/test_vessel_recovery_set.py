@@ -15,8 +15,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.vessel_recovery_set import (
     VesselRecoveryError, _grant_restored_knowledge, _stage_core, _sign_receipt,
+    abandon_incomplete_vessel_restore,
     activate_vessel_recovery_set, verify_vessel_recovery_receipt,
 )
+from infrastructure.deploy.vessel_installer import _write_intent, _write_private_record
 from scripts.synthetic_pg_fixture import fixture, put
 from services.policy.audit import AuditLog
 
@@ -131,6 +133,49 @@ class VesselRecoverySetTests(unittest.TestCase):
         self.assertEqual(sum(item.startswith("ALTER TABLE") for item in statements), 5)
         self.assertTrue(any("TO sovereign_ingest" in item for item in statements))
         self.assertTrue(any("TO sovereign_read" in item for item in statements))
+
+    def test_partial_restore_abandon_requires_receipt_and_exact_volume(self) -> None:
+        install = self.root / "partial-install"
+        install.mkdir(mode=0o700)
+        identifier = "a" * 32
+        release = "b" * 24
+        snapshot = "c" * 64
+        data_volume = f"sovereign-{identifier}-knowledge-data"
+        _write_intent(install, release, identifier, self.state,
+                      self.root / "lab-password")
+        _write_private_record(install, "vessel-restore-intent.json", {
+            "schema": 1, "snapshot_id": snapshot, "release": release,
+            "installation_id": identifier})
+        receipt = {"snapshot_id": snapshot, "release": release,
+                   "installation_id": identifier, "data_volume": data_volume}
+        with self.assertRaisesRegex(VesselRecoveryError, "explicit flag"):
+            abandon_incomplete_vessel_restore(
+                install, self.root / "key", self.root / "receipt",
+                self.root / "receipt-key", discard_partial_data=False)
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value={**receipt, "snapshot_id": "d" * 64}), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+                abandon_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "receipt",
+                    self.root / "receipt-key", discard_partial_data=True)
+        docker.assert_not_called()
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_stage"), \
+             patch("infrastructure.deploy.vessel_recovery_set._scoped_list",
+                   side_effect=[[], [], [data_volume], [], [], []]), \
+             patch("infrastructure.deploy.vessel_recovery_set._volume"), \
+             patch("infrastructure.deploy.vessel_recovery_set._assert_missing"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            result = abandon_incomplete_vessel_restore(
+                install, self.root / "key", self.root / "receipt",
+                self.root / "receipt-key", discard_partial_data=True)
+        self.assertEqual(result["result"], "abandoned")
+        docker.assert_called_once_with("volume", "rm", data_volume)
+        self.assertTrue((install / "vessel-restore-intent.json").exists())
+        self.assertTrue((install / "vessel-restore-abandoned.json").exists())
+        self.assertTrue(self.state.exists())
 
 
 if __name__ == "__main__":

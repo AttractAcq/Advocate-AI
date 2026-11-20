@@ -20,21 +20,19 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from infrastructure.deploy.container_runtime import _image_id
+from infrastructure.deploy.container_runtime import RuntimeHandle, _docker, _image_id
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeHandle, _credentials, start_signed_knowledge, stop_knowledge,
+    KnowledgeVolumeHandle, _credentials, _volume, start_signed_knowledge,
+    stop_knowledge,
 )
 from infrastructure.deploy.vessel_installer import (
-    _assert_missing, _cleanup_failed_install, _operation_lock, _owner_directory, _read_state,
-    _recovery_inventory, _release_id, _stage, _state_payload, _verify_knowledge_schema,
-    _verify_stage, _write_intent, _write_state,
-    _write_private_record,
+    _assert_missing, _cleanup_failed_install, _operation_lock, _owner_directory,
+    _read_intent, _read_state, _recovery_inventory, _release_id, _scoped_list,
+    _stage, _state_payload, _verify_knowledge_schema, _verify_stage,
+    _write_intent, _write_private_record, _write_state,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql, verify_security
-from infrastructure.deploy.container_runtime import RuntimeHandle
-from infrastructure.deploy.container_runtime import _docker
-from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
-from infrastructure.deploy.vessel_runtime import _state_options
+from infrastructure.deploy.vessel_runtime import _state_options, start_signed_vessel_services
 from infrastructure.release.bundle import verify_bundle
 from infrastructure.restic_repository import create_snapshot, restore_snapshot
 from scripts.phase5_postgres_rehearsal import _dump, _restore
@@ -546,3 +544,78 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
             shutil.rmtree(root)
             shutil.rmtree(core_state, ignore_errors=True)
             raise
+
+
+def _read_restore_intent(root: Path) -> dict[str, object]:
+    path = root / "vessel-restore-intent.json"
+    try:
+        value = json.loads(_private_bytes(path, 4096), object_pairs_hook=_unique)
+    except (ValueError, UnicodeError) as exc:
+        raise VesselRecoveryError("invalid vessel restore intent") from exc
+    if (not isinstance(value, dict) or
+            set(value) != {"schema", "snapshot_id", "release", "installation_id"} or
+            type(value["schema"]) is not int or value["schema"] != 1 or
+            not isinstance(value["snapshot_id"], str) or
+            not _ID.fullmatch(value["snapshot_id"]) or
+            not isinstance(value["release"], str) or
+            not _RELEASE.fullmatch(value["release"]) or
+            not isinstance(value["installation_id"], str) or
+            not _INSTALL.fullmatch(value["installation_id"])):
+        raise VesselRecoveryError("invalid vessel restore intent fields")
+    return value
+
+
+def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
+                                      receipt: Path, receipt_key: Path,
+                                      *, discard_partial_data: bool) -> dict[str, str]:
+    """Discard only a checked partial synthetic volume; retain private evidence."""
+    if discard_partial_data is not True:
+        raise VesselRecoveryError("partial restore discard requires explicit flag")
+    with _operation_lock(root):
+        marker = _read_restore_intent(root)
+        intent = _read_intent(root)
+        value = verify_vessel_recovery_receipt(receipt, receipt_key)
+        if (marker["snapshot_id"] != value["snapshot_id"] or
+                marker["release"] != value["release"] or
+                marker["installation_id"] != value["installation_id"] or
+                intent["release"] != value["release"] or
+                intent["installation_id"] != value["installation_id"] or
+                intent["data_volume"] != value["data_volume"]):
+            raise VesselRecoveryError("restore intent differs from signed receipt")
+        _verify_stage(root / "vessel-releases" / value["release"],
+                      trusted_key, value["release"])
+        active = root / "vessel-state.json"
+        if active.exists() or active.is_symlink():
+            raise VesselRecoveryError("active vessel cannot be abandoned")
+        state = Path(intent["core_state"])
+        _owner_directory(state)
+        if state.resolve().is_relative_to(root.resolve()):
+            raise VesselRecoveryError("partial Core state overlaps installation")
+        scope = f"label=sovereign.synthetic.install={value['installation_id']}"
+        containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope,
+                                  "--quiet")
+        networks = _scoped_list("network", "ls", "--no-trunc", "--filter",
+                                scope, "--quiet")
+        volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                               volume=True)
+        if containers or networks or volumes not in ([], [value["data_volume"]]):
+            raise VesselRecoveryError("partial restore has unexpected Docker resources")
+        if (_read_restore_intent(root) != marker or _read_intent(root) != intent):
+            raise VesselRecoveryError("partial restore intent changed")
+        if volumes:
+            _volume(value["data_volume"], value["installation_id"],
+                    "knowledge-data", create=False)
+            _docker("volume", "rm", value["data_volume"])
+        _assert_missing("volume", value["data_volume"])
+        if (_scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
+                _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                             "--quiet") or
+                _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                             volume=True)):
+            raise VesselRecoveryError("partial restore cleanup is incomplete")
+        _write_private_record(root, "vessel-restore-abandoned.json", {
+            "schema": 1, "snapshot_id": value["snapshot_id"],
+            "installation_id": value["installation_id"],
+            "discarded_utc": datetime.now(timezone.utc).isoformat()})
+        return {"result": "abandoned", "data_volume": "removed",
+                "snapshot_id": value["snapshot_id"]}

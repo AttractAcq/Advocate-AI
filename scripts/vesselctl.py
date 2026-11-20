@@ -12,7 +12,8 @@ from infrastructure.deploy.vessel_installer import (
     resume_first_install, status_vessel, stop_vessel,
 )
 from infrastructure.deploy.vessel_recovery_set import (
-    activate_vessel_recovery_set, create_vessel_recovery_set, restore_vessel_recovery_files,
+    abandon_incomplete_vessel_restore, activate_vessel_recovery_set,
+    create_vessel_recovery_set, restore_vessel_recovery_files,
     verify_vessel_recovery_receipt,
 )
 
@@ -66,6 +67,12 @@ def main(argv: list[str] | None = None) -> None:
     activate.add_argument("--core-state", type=Path, required=True)
     activate.add_argument("--lab-password-file", type=Path, required=True)
     activate.add_argument("--staging-parent", type=Path, required=True)
+    abandon = commands.add_parser("abandon-incomplete-restore")
+    abandon.add_argument("--root", type=Path, required=True)
+    abandon.add_argument("--trusted-key", type=Path, required=True)
+    abandon.add_argument("--receipt", type=Path, required=True)
+    abandon.add_argument("--receipt-key", type=Path, required=True)
+    abandon.add_argument("--discard-partial-data", action="store_true", required=True)
     args = parser.parse_args(argv)
     if args.command == "install":
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
@@ -102,6 +109,10 @@ def main(argv: list[str] | None = None) -> None:
             args.receipt, args.receipt_key, args.password_file, args.restic,
             args.restic_sha256, args.root, args.core_state,
             args.lab_password_file, args.staging_parent)
+    elif args.command == "abandon-incomplete-restore":
+        result = abandon_incomplete_vessel_restore(
+            args.root, args.trusted_key, args.receipt, args.receipt_key,
+            discard_partial_data=args.discard_partial_data)
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
     print(json.dumps(result, sort_keys=True))
