@@ -21,11 +21,15 @@ bundle. They reuse the checked persistent Knowledge volume and Core state.
    After accepting the updated release, stop it and capture a new encrypted
    recovery set. Its signed receipt must name the updated release. Keep the
    pre-update set until the approved retention policy permits removal.
-5. For rollback, ensure the new runtime is stopped and run
-   `vesselctl rollback-stopped --root ROOT --trusted-key KEY --crane CRANE`.
+5. For rollback, stop the current runtime and capture a new encrypted recovery
+   set for that active release. Keep its signed receipt, repository, password
+   and verification key. Run `vesselctl rollback-stopped --root ROOT
+   --trusted-key KEY --crane CRANE --recovery-receipt UPDATED_RECEIPT
+   --receipt-key RECEIPT_KEY --password-file BACKUP_PASSWORD --restic RESTIC
+   --restic-sha256 RESTIC_SHA256 --staging-parent PRIVATE_STAGING`.
    Check status again.
 
-The switch requires a clean stopped runtime with exactly the recorded,
+Both switch and rollback require a clean stopped runtime with exactly the recorded,
 labelled Knowledge data volume. It verifies both the existing signed stage and
 new signed bundle. Both must declare the supported Knowledge schema and Core
 state format in their signed compatibility contract. An unsupported candidate
@@ -34,7 +38,7 @@ that the signed recovery receipt names the current installation, release and
 Knowledge data volume. It checks the encrypted repository, clean-restores the
 set into private temporary staging, then compares the restored Core files with
 a fresh stopped-state snapshot. A missing, mismatched or unrestorable set stops
-the switch before candidate staging. During activation, it checks live
+the transition before candidate staging or rollback activation. During activation, it checks live
 Knowledge source and passage counts and a canonical digest of every schema-1
 Knowledge row against the recovery receipt. A same-count change to a source,
 passage, vector or schema row is rejected. The switch

@@ -51,7 +51,13 @@ def main(argv: list[str] | None = None) -> None:
     switch.add_argument("--restic", type=Path, required=True)
     switch.add_argument("--restic-sha256", required=True)
     switch.add_argument("--staging-parent", type=Path, required=True)
-    commands.add_parser("rollback-stopped", parents=[shared])
+    rollback = commands.add_parser("rollback-stopped", parents=[shared])
+    rollback.add_argument("--recovery-receipt", type=Path, required=True)
+    rollback.add_argument("--receipt-key", type=Path, required=True)
+    rollback.add_argument("--password-file", type=Path, required=True)
+    rollback.add_argument("--restic", type=Path, required=True)
+    rollback.add_argument("--restic-sha256", required=True)
+    rollback.add_argument("--staging-parent", type=Path, required=True)
     discard_stage = commands.add_parser("discard-staged-candidate")
     discard_stage.add_argument("--root", type=Path, required=True)
     discard_stage.add_argument("--trusted-key", type=Path, required=True)
@@ -159,7 +165,9 @@ def main(argv: list[str] | None = None) -> None:
             args.staging_parent)
     elif args.command == "rollback-stopped":
         result = rollback_stopped_vessel_release(
-            args.root, args.trusted_key, args.crane)
+            args.root, args.trusted_key, args.crane, args.recovery_receipt,
+            args.receipt_key, args.password_file, args.restic,
+            args.restic_sha256, args.staging_parent)
     elif args.command == "discard-staged-candidate":
         result = discard_stopped_vessel_stage(
             args.root, args.trusted_key, args.bundle, args.console_config,

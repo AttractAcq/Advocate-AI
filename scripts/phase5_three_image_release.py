@@ -403,7 +403,9 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 updated_capture["sources"] != captured["sources"] or
                 updated_capture["passages"] != captured["passages"]):
             raise AssertionError("post-switch vessel recovery set changed")
-        rolled = rollback_stopped_vessel_release(install_root, trusted, crane)
+        rolled = rollback_stopped_vessel_release(
+            install_root, trusted, crane, updated_receipt, receipt_public,
+            password, restic, restic_sha256, updated_staging)
         rolled_status = status_vessel(install_root, trusted, crane)
         rolled_record = json.loads((install_root / "vessel-state.json").read_text())
         rolled_core_image = _run(

@@ -236,8 +236,45 @@ class VesselReleaseSwitchTests(unittest.TestCase):
     def test_rollback_requires_recorded_predecessor(self) -> None:
         with patch("infrastructure.deploy.vessel_release_switch._verify_stage") as verify:
             with self.assertRaisesRegex(VesselInstallError, "no previous"):
-                rollback_stopped_vessel_release(self.root, self.key, self.crane)
+                rollback_stopped_vessel_release(
+                    self.root, self.key, self.crane, *self.receipt_args)
             verify.assert_not_called()
+
+    def test_rollback_requires_current_recovery_before_activation(self) -> None:
+        current = dict(self.current, previous="2" * 24)
+        _write_state(self.root, current)
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   side_effect=VesselInstallError("live Core differs")), \
+             patch("infrastructure.deploy.vessel_release_switch._activate_stopped") as activate:
+            with self.assertRaisesRegex(VesselInstallError, "live Core differs"):
+                rollback_stopped_vessel_release(
+                    self.root, self.key, self.crane, *self.receipt_args)
+            activate.assert_not_called()
+        self.assertEqual(_read_state(self.root), current)
+
+    def test_rollback_passes_verified_knowledge_digest_to_activation(self) -> None:
+        current = dict(self.current, previous="2" * 24)
+        _write_state(self.root, current)
+        recovery = {"sources": 1, "passages": 2,
+                    "knowledge_sha256": "d" * 64}
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory") as inventory, \
+             patch("infrastructure.deploy.vessel_release_switch._verify_preupdate_recovery",
+                   return_value=recovery) as verify, \
+             patch("infrastructure.deploy.vessel_release_switch._activate_stopped",
+                   return_value={"result": "rolled-back"}) as activate:
+            self.assertEqual(rollback_stopped_vessel_release(
+                self.root, self.key, self.crane, *self.receipt_args),
+                {"result": "rolled-back"})
+        verify.assert_called_once_with(current, *self.receipt_args, self.root)
+        self.assertEqual(inventory.call_count, 2)
+        activate.assert_called_once_with(
+            self.root, self.key, self.crane, current, "2" * 24,
+            self.root / "vessel-releases" / ("2" * 24), "rolled-back", recovery)
 
     def test_partial_stage_discard_requires_signed_identity_and_clean_stop(self) -> None:
         candidate = self.root / "vessel-releases" / ("2" * 24)
