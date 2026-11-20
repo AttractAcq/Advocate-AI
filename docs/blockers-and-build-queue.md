@@ -167,6 +167,8 @@ from independent product security review.
 
 | W-116 | Reconcile orphan runtime after interrupted vessel recovery (T-028) | [PR #144](https://github.com/AttractAcq/Advocate-AI/pull/144) verifies a signed release and absent old runtime IDs, checks every installation-scoped container, network and volume, then removes only orphan runtime resources while preserving the persistent database volume. The actual-image rehearsal creates a full unrecorded three-service runtime before reconciliation and recovery. `make check` passes 339 tests with 12 skips. Initial-install and partial-stop interruption handling, target hardware and independent review remain open. | Local tests passed; actual-image CI and review pending; T-028/G3 open |
 
+| W-117 | Complete interrupted stop of recorded vessel runtime (T-028) | The [finish-stop command](phase-5/signed-vessel-first-install.md) verifies remaining recorded containers, network and socket by signed image, labels, mounts and exact IDs before removal, while retaining the PostgreSQL data volume. The actual-image rehearsal removes Core and Console first, then completes Knowledge stop before orphan reconciliation and recovery. `make check` passes 341 tests with 12 skips. Initial-install interruption, target hardware and independent review remain open. | Local tests passed; actual-image CI and PR pending; T-028/G3 open |
+
 When a row is completed, link its commit, CI result and evidence; then change
 its state to **locally complete**. Do not remove it until its external gate is
 closed. Phase-specific gate records: [G0A](phase-1/gate.md), [G1](phase-2/gate.md),

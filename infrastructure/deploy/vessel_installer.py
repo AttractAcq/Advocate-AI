@@ -410,6 +410,123 @@ def _scoped_list(*args: str, volume: bool = False) -> list[str]:
 
 
 @_serialized
+def finish_vessel_stop(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]:
+    """Finish an interrupted stop using only the recorded, signed resources."""
+    value = _read_state(root)
+    identifier = value["active"]
+    stage = root / "vessel-releases" / identifier
+    _verify_stage(stage, trusted_key, identifier)
+    manifest = verify_bundle(stage / "bundle", trusted_key)
+    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
+    _state_options(state, password, root)
+    installation_id = value["installation_id"]
+    runtime = value["runtime"]
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
+    networks = _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                            "--quiet")
+    volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                           volume=True)
+    recorded_ids = {runtime["core_id"], runtime["console_id"],
+                    runtime["knowledge_id"]}
+    if (not set(containers) <= recorded_ids or
+            not set(networks) <= {runtime["network_id"]} or
+            not set(volumes) <= {runtime["data_volume"], runtime["socket_volume"]}
+            or runtime["data_volume"] not in volumes):
+        raise VesselInstallError("interrupted stop contains unrecorded resources")
+    _volume(runtime["data_volume"], installation_id, "knowledge-data", create=False)
+    socket_present = runtime["socket_volume"] in volumes
+    if socket_present:
+        _volume(runtime["socket_volume"], installation_id, "knowledge-socket",
+                create=False, run_name=runtime["knowledge_run"])
+    else:
+        _assert_missing("volume", runtime["socket_volume"])
+    network_present = runtime["network_id"] in networks
+    if network_present:
+        labels = json.loads(_docker("network", "inspect", runtime["network_id"],
+                                    "--format", "{{json .Labels}}"))
+        run_name = _docker("network", "inspect", runtime["network_id"],
+                           "--format", "{{.Name}}")
+        if (not isinstance(labels, dict) or
+                labels.get("sovereign.synthetic.install") != installation_id or
+                labels.get("sovereign.synthetic.run") != run_name or
+                not re.fullmatch(r"sovereign-synthetic-[0-9a-f]{12}", run_name) or
+                _docker("network", "inspect", runtime["network_id"],
+                        "--format", "{{.Internal}}") != "true"):
+            raise VesselInstallError("recorded vessel network identity mismatch")
+    else:
+        _assert_missing("network", runtime["network_id"])
+        run_name = None
+    for role in ("core", "console", "knowledge"):
+        container_id = runtime[role + "_id"]
+        if container_id not in containers:
+            _assert_missing("container", container_id)
+            continue
+        labels = json.loads(_docker("inspect", container_id,
+                                    "--format", "{{json .Config.Labels}}"))
+        name = _docker("inspect", container_id, "--format", "{{.Name}}")
+        mode = _docker("inspect", container_id,
+                       "--format", "{{.HostConfig.NetworkMode}}")
+        ports = _docker("inspect", container_id,
+                        "--format", "{{json .HostConfig.PortBindings}}")
+        expected_image = _image_id(stage / "bundle", role,
+                                   manifest["images"][role], crane)
+        if (not isinstance(labels, dict) or
+                labels.get("sovereign.synthetic.install") != installation_id or
+                ports not in ("null", "{}") or
+                _docker("inspect", container_id, "--format", "{{.Image}}") !=
+                expected_image):
+            raise VesselInstallError("recorded vessel container identity mismatch")
+        if role == "knowledge":
+            if (not socket_present or
+                    labels.get("sovereign.synthetic.role") != "knowledge" or
+                    labels.get("sovereign.synthetic.run") != runtime["knowledge_run"] or
+                    name != "/" + runtime["knowledge_run"] or mode != "none"):
+                raise VesselInstallError("recorded Knowledge identity mismatch")
+            mounts = json.loads(_docker("inspect", container_id,
+                                        "--format", "{{json .Mounts}}"))
+            required = {"/var/lib/postgresql/data": runtime["data_volume"],
+                        "/var/run/postgresql": runtime["socket_volume"]}
+            if (not isinstance(mounts, list) or
+                    any(sum(isinstance(item, dict) and
+                            item.get("Type") == "volume" and
+                            item.get("Destination") == destination and
+                            item.get("Name") == volume for item in mounts) != 1
+                        for destination, volume in required.items())):
+                raise VesselInstallError("recorded Knowledge mount mismatch")
+        elif (not network_present or labels.get("sovereign.synthetic.run") != run_name
+              or labels.get("sovereign.synthetic.role") is not None
+              or name != f"/{run_name}-{role}" or mode != run_name):
+            raise VesselInstallError("recorded Core or Console identity mismatch")
+    if _read_state(root) != value:
+        raise VesselInstallError("vessel active state changed during stop completion")
+    for role in ("console", "core"):
+        if runtime[role + "_id"] in containers:
+            _docker("rm", "-f", runtime[role + "_id"])
+    if network_present:
+        _docker("network", "rm", runtime["network_id"])
+    if runtime["knowledge_id"] in containers:
+        knowledge = KnowledgeVolumeHandle(runtime["knowledge_id"],
+                                          runtime["socket_volume"],
+                                          runtime["data_volume"],
+                                          runtime["knowledge_run"],
+                                          installation_id)
+        running = _docker("inspect", knowledge.container_id,
+                          "--format", "{{.State.Running}}")
+        if running == "true":
+            stop_knowledge(knowledge)
+        elif running == "false":
+            _docker("rm", "-f", knowledge.container_id)
+            _docker("volume", "rm", knowledge.socket_volume)
+        else:
+            raise VesselInstallError("invalid Knowledge running state")
+    elif socket_present:
+        _docker("volume", "rm", runtime["socket_volume"])
+    _recovery_inventory(installation_id, runtime)
+    return {"result": "stopped", "active": identifier}
+
+
+@_serialized
 def reconcile_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, int | str]:
     """Remove checked orphan runtime resources after interrupted recovery."""
     value = _read_state(root)

@@ -12,7 +12,8 @@ from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _cleanup_failed_install, _read_state, _scoped_list,
-    _state_payload, _write_state, install_vessel, reconcile_vessel, recover_vessel,
+    _state_payload, _write_state, finish_vessel_stop, install_vessel,
+    reconcile_vessel, recover_vessel,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -259,6 +260,30 @@ class VesselInstallerTests(unittest.TestCase):
                    return_value=f"{identifier}\n{identifier}"):
             with self.assertRaisesRegex(VesselInstallError, "invalid scoped"):
                 _scoped_list("ps", "-a")
+
+    def test_finish_stop_rejects_unrecorded_container_before_removal(self) -> None:
+        self.root.mkdir(mode=0o700)
+        installation_id = "f" * 32
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                          f"sovereign-{installation_id}-knowledge-data",
+                                          "sovereign-knowledge-" + "e" * 12,
+                                          installation_id)
+        _write_state(self.root, _state_payload(
+            "6" * 24, installation_id, self.parent / "state",
+            self.parent / "password", services, knowledge))
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6}), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._scoped_list",
+                   side_effect=[["9" * 64], [], [knowledge.data_volume]]), \
+             patch("infrastructure.deploy.vessel_installer._docker") as docker:
+            with self.assertRaisesRegex(VesselInstallError, "unrecorded resources"):
+                finish_vessel_stop(self.root, self.parent / "key",
+                                   self.parent / "crane")
+            docker.assert_not_called()
 
 
 if __name__ == "__main__":
