@@ -13,7 +13,10 @@ bundle. They reuse the checked persistent Knowledge volume and Core state.
    --bundle NEW_BUNDLE --console-config CONFIG`.
 4. Run `vesselctl status --root ROOT --trusted-key KEY --crane CRANE` and
    check the returned active release ID.
-5. For rollback, stop the new runtime and run
+   After accepting the updated release, stop it and capture a new encrypted
+   recovery set. Its signed receipt must name the updated release. Keep the
+   pre-update set until the approved retention policy permits removal.
+5. For rollback, ensure the new runtime is stopped and run
    `vesselctl rollback-stopped --root ROOT --trusted-key KEY --crane CRANE`.
    Check status again.
 
