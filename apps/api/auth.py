@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import deque
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -19,6 +20,55 @@ from threading import RLock
 import time
 
 from services.policy.policy_file import PolicyUnavailable, active_user, load_policy
+
+
+CORE_STATE_SCHEMA_VERSION = 1
+
+
+def _history_shape(db: sqlite3.Connection) -> None:
+    if db.execute("PRAGMA quick_check").fetchone() != ("ok",):
+        raise ValueError("conversation database integrity failed")
+    columns = [(row[1], row[2].upper(), row[3], row[5])
+               for row in db.execute("PRAGMA table_info(conversations)")]
+    if columns != [("id", "TEXT", 0, 1), ("owner", "TEXT", 1, 0),
+                   ("turns_json", "TEXT", 1, 0)]:
+        raise ValueError("unsupported conversation database shape")
+    index = db.execute("PRAGMA index_info(conversations_owner)").fetchall()
+    if [(row[1], row[2]) for row in index] != [(1, "owner")]:
+        raise ValueError("conversation owner index unavailable")
+
+
+def verify_history_format(db: sqlite3.Connection) -> None:
+    if db.execute("PRAGMA user_version").fetchone() != (CORE_STATE_SCHEMA_VERSION,):
+        raise ValueError("unsupported Core history schema version")
+    _history_shape(db)
+
+
+def migrate_legacy_history(path: Path) -> int:
+    """Explicitly ledger the old history shape after an offline backup."""
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        raise ValueError("invalid legacy conversation database")
+    details = path.stat()
+    if details.st_uid != os.getuid() or stat.S_IMODE(details.st_mode) & 0o077:
+        raise ValueError("unsafe legacy conversation database")
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=rw", uri=True)) as db:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("PRAGMA user_version").fetchone() != (0,):
+                raise ValueError("legacy conversation database is already versioned")
+            _history_shape(db)
+            count = 0
+            for identifier, owner, raw in db.execute("SELECT id,owner,turns_json FROM conversations"):
+                if (not isinstance(identifier, str) or not 1 <= len(identifier) <= 80
+                        or not isinstance(owner, str) or not 1 <= len(owner) <= 200):
+                    raise ValueError("invalid legacy conversation identity")
+                turns = json.loads(raw)
+                if not isinstance(turns, list) or len(turns) > 20 or any(
+                        not isinstance(turn, dict) for turn in turns):
+                    raise ValueError("invalid legacy conversation turns")
+                count += 1
+            db.execute(f"PRAGMA user_version={CORE_STATE_SCHEMA_VERSION}")
+            return count
 
 
 @dataclass
@@ -48,16 +98,29 @@ class LabSessions:
         self._lock = RLock()
         if history_db is not None:
             history_db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            descriptor = os.open(history_db, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            flags = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC
             try:
-                os.fchmod(descriptor, 0o600)
+                descriptor = os.open(history_db, flags | os.O_CREAT | os.O_EXCL, 0o600)
+                fresh = True
+            except FileExistsError:
+                descriptor = os.open(history_db, flags)
+                fresh = False
+            try:
+                details = os.fstat(descriptor)
+                if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
+                        or stat.S_IMODE(details.st_mode) & 0o077):
+                    raise ValueError("unsafe conversation database")
             finally:
                 os.close(descriptor)
-            with self._history() as db:
-                db.execute("""CREATE TABLE IF NOT EXISTS conversations (
-                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, turns_json TEXT NOT NULL
-                )""")
-                db.execute("CREATE INDEX IF NOT EXISTS conversations_owner ON conversations(owner)")
+            with closing(self._history()) as db, db:
+                if fresh:
+                    db.execute("BEGIN IMMEDIATE")
+                    db.execute("""CREATE TABLE conversations (
+                        id TEXT PRIMARY KEY, owner TEXT NOT NULL, turns_json TEXT NOT NULL
+                    )""")
+                    db.execute("CREATE INDEX conversations_owner ON conversations(owner)")
+                    db.execute(f"PRAGMA user_version={CORE_STATE_SCHEMA_VERSION}")
+                verify_history_format(db)
 
     def _history(self) -> sqlite3.Connection:
         if self.history_db is None:

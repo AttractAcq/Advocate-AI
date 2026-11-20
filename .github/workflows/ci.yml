@@ -21,6 +21,20 @@ jobs:
         run: |
           docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
+      - name: Reject mismatched Core state schema image
+        run: |
+          set -euo pipefail
+          if docker build --progress=plain -f infrastructure/containers/Core.Dockerfile \
+              --build-arg SOVEREIGN_CORE_STATE_SCHEMA=2 \
+              -t sovereign-core:invalid-compatibility . \
+              > "$RUNNER_TEMP/core-schema-denial.log" 2>&1; then
+            echo "Core image accepted an unsupported state schema"
+            exit 1
+          fi
+          if ! grep -q 'exit code: 1' "$RUNNER_TEMP/core-schema-denial.log"; then
+            cat "$RUNNER_TEMP/core-schema-denial.log"
+            exit 1
+          fi
       - name: Exercise isolated synthetic stack
         run: bash infrastructure/containers/smoke.sh
       - name: Exercise Core against networkless pgvector socket

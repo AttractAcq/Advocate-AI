@@ -37,8 +37,12 @@ class VesselRecoverySetTests(unittest.TestCase):
             actor="engineer", action="read", resource="synthetic",
             decision="allow", policy_version="1")
         with closing(sqlite3.connect(self.state / "history.db")) as database:
-            database.execute("CREATE TABLE conversations (id TEXT PRIMARY KEY)")
-            database.execute("INSERT INTO conversations VALUES ('synthetic')")
+            database.execute("""CREATE TABLE conversations (
+                id TEXT PRIMARY KEY, owner TEXT NOT NULL, turns_json TEXT NOT NULL)""")
+            database.execute("CREATE INDEX conversations_owner ON conversations(owner)")
+            database.execute("INSERT INTO conversations VALUES (?,?,?)",
+                             ("synthetic", "engineer", "[]"))
+            database.execute("PRAGMA user_version=1")
             database.commit()
         (self.state / "history.db").chmod(0o600)
 
@@ -53,6 +57,13 @@ class VesselRecoverySetTests(unittest.TestCase):
         with closing(sqlite3.connect(frozen / "history.db")) as database:
             self.assertEqual(database.execute("SELECT id FROM conversations").fetchone(),
                              ("synthetic",))
+
+    def test_capture_refuses_future_core_history_format(self) -> None:
+        with closing(sqlite3.connect(self.state / "history.db")) as database:
+            database.execute("PRAGMA user_version=2")
+            database.commit()
+        with self.assertRaisesRegex(VesselRecoveryError, "conversation database snapshot"):
+            _stage_core(self.state, self.root / "frozen")
 
     def test_unlisted_source_denies_capture(self) -> None:
         put(self.state / "sources/unlisted.txt", b"secret")

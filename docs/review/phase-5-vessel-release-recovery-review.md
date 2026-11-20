@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #166](https://github.com/AttractAcq/Advocate-AI/pull/166), including
+through [PR #167](https://github.com/AttractAcq/Advocate-AI/pull/167), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -63,8 +63,9 @@ upgrade compatibility between real software or database versions.
 | Post-switch recovery | [PR #160 implementation-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44796531764) | Updated-release receipt, clean second install, audit/history and database-role continuity |
 | Source permissions through release changes | [PR #162 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44803530310) | The running Core API permitted the engineer's engineering source and denied it to the deckhand at first install, after switch, rollback and clean restore; all 12 CI jobs passed |
 | Signed schema compatibility | [PR #164 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44808448854) | Current release declares Knowledge and Core state format 1; a signed future declaration is rejected before first-install resources or a stopped candidate stage; all 12 CI jobs passed |
-| Core image label binding | [PR #165](https://github.com/AttractAcq/Advocate-AI/pull/165) | Exact Core image configuration labels match the signed contract on signing and copied-bundle verification; final-head actual-image CI pending |
-| Pre-version Knowledge migration | [PR #166](https://github.com/AttractAcq/Advocate-AI/pull/166) | In a disposable pgvector database, altered source and unknown table shape are refused before the version ledger; the known prior shape migrates transactionally; final-head CI pending |
+| Core image label binding | [PR #165 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44810754082) | Exact Core image configuration labels match the signed contract on signing and copied-bundle verification; all 12 CI jobs passed |
+| Pre-version Knowledge migration | [PR #166 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44811781751) | In a disposable pgvector database, altered source and unknown table shape are refused before the version ledger; the known prior shape migrates transactionally; all 12 CI jobs passed |
+| Core history format | [PR #167](https://github.com/AttractAcq/Advocate-AI/pull/167) and [format boundary](../phase-5/core-history-format.md) | Core and stopped recovery capture reject old, future or malformed SQLite history; image build asserts its version constant; actual-image CI pending |
 
 At the PR #160 implementation head, `make check` passed 375 tests with 12
 expected skips; all 12 CI jobs passed after a targeted retry of an unrelated
