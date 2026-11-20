@@ -60,6 +60,17 @@ class VesselCtlTests(unittest.TestCase):
                                        Path("/tmp/crane"))
         self.assertEqual(json.loads(output.getvalue())["result"], "stopped")
 
+    def test_resume_install_routes_to_private_root(self) -> None:
+        output = StringIO()
+        with patch("scripts.vesselctl.resume_first_install",
+                   return_value={"result": "activated", "active": "a" * 24}) as resume, \
+             redirect_stdout(output):
+            main(["resume-install", "--root", "/tmp/vessel",
+                  "--trusted-key", "/tmp/key", "--crane", "/tmp/crane"])
+        resume.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
+                                       Path("/tmp/crane"))
+        self.assertEqual(json.loads(output.getvalue())["result"], "activated")
+
 
 if __name__ == "__main__":
     unittest.main()

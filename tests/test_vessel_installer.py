@@ -14,7 +14,8 @@ from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _cleanup_failed_install, _read_intent, _read_state,
     _scoped_list,
     _state_payload, _write_intent, _write_state, finish_vessel_stop, install_vessel,
-    reconcile_vessel, recover_vessel,
+    reconcile_first_install, reconcile_vessel, recover_vessel,
+    resume_first_install,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -124,6 +125,54 @@ class VesselInstallerTests(unittest.TestCase):
         path.write_text(path.read_text().replace('"schema":1', '"schema":1,"schema":1'))
         with self.assertRaises(VesselInstallError):
             _read_intent(self.root)
+
+    def test_reconcile_early_install_resets_unbound_credentials(self) -> None:
+        self.root.mkdir(mode=0o700)
+        _write_intent(self.root, "6" * 24, "f" * 32,
+                      self.parent / "state", self.parent / "password")
+        credentials = self.root / "knowledge-secrets"
+        credentials.mkdir(mode=0o700)
+        secret = credentials / "admin-password"
+        secret.write_text("synthetic")
+        secret.chmod(0o600)
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer._scoped_list",
+                   side_effect=[[], [], []]), \
+             patch("infrastructure.deploy.vessel_installer._assert_missing"):
+            result = reconcile_first_install(self.root, self.parent / "key",
+                                             self.parent / "crane")
+        self.assertEqual(result["result"], "reconciled")
+        self.assertFalse(credentials.exists())
+        self.assertEqual(_read_intent(self.root)["release"], "6" * 24)
+
+    def test_resume_clean_first_install_preserves_installation_id(self) -> None:
+        self.root.mkdir(mode=0o700)
+        installation_id = "f" * 32
+        data_volume = f"sovereign-{installation_id}-knowledge-data"
+        _write_intent(self.root, "6" * 24, installation_id,
+                      self.parent / "state", self.parent / "password")
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                          data_volume, "sovereign-knowledge-" + "e" * 12,
+                                          installation_id)
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer._scoped_list",
+                   side_effect=[[], [], [data_volume]]), \
+             patch("infrastructure.deploy.vessel_installer._volume"), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
+                   return_value=knowledge) as start, \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._ingest",
+                   return_value={"indexed": 1, "unchanged": 0}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
+                   return_value=services):
+            result = resume_first_install(self.root, self.parent / "key",
+                                          self.parent / "crane")
+        self.assertEqual(result["result"], "activated")
+        self.assertFalse(start.call_args.kwargs["initialize"])
+        self.assertFalse((self.root / "vessel-intent.json").exists())
+        self.assertEqual(_read_state(self.root)["installation_id"], installation_id)
 
     def test_cleanup_requires_empty_scoped_inventory_after_volume_removal(self) -> None:
         installation_id = "b" * 32
