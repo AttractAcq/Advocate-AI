@@ -44,7 +44,8 @@ from infrastructure.deploy.vessel_release_switch import (
     switch_stopped_vessel_release,
 )
 from infrastructure.release.bundle import (
-    SUPPORTED_VESSEL_COMPATIBILITY, create_knowledge_bundle, verify_bundle,
+    BundleError, SUPPORTED_VESSEL_COMPATIBILITY, create_knowledge_bundle,
+    verify_bundle,
 )
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
@@ -826,6 +827,11 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
             payload = root / "payload"
             (payload / "images").mkdir(parents=True)
             (payload / "evidence").mkdir()
+            (payload / "model").mkdir()
+            (payload / "model" / "config.json").write_text(
+                '{"model_type":"synthetic-release-fixture"}\n')
+            (payload / "model" / "weights.bin").write_bytes(
+                b"fictional model bytes for release-binding only")
             descriptors: dict[str, dict[str, str]] = {}
             for role in ROLES:
                 tag = f"sovereign-{role}:synthetic"
@@ -854,20 +860,39 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                                   "synthetic-three-image-trial",
                                                   descriptors,
                                                   SUPPORTED_VESSEL_COMPATIBILITY,
-                                                  crane=crane)
+                                                  crane=crane,
+                                                  model_id="synthetic-lab-model")
                 verified = verify_bundle(bundle, trusted)
-                if (verified != created or verified.get("schema") != 6 or
+                if (verified != created or verified.get("schema") != 7 or
                         verified.get("target") != "vessel" or
                         verified.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY or
-                        set(verified.get("images", {})) != set(ROLES)):
+                        set(verified.get("images", {})) != set(ROLES) or
+                        verified.get("model", {}).get("id") != "synthetic-lab-model"):
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
+                result["model_artifact"] = "synthetic-bytes-signed-not-served"
+                model_file = bundle / "model" / "weights.bin"
+                original_model = model_file.read_bytes()
+                model_file.write_bytes(b"altered fictional model")
+                try:
+                    try:
+                        verify_bundle(bundle, trusted)
+                    except BundleError:
+                        result["model_tamper"] = "denied"
+                    else:
+                        raise AssertionError("modified model bytes passed bundle verification")
+                finally:
+                    model_file.write_bytes(original_model)
+                if verify_bundle(bundle, trusted) != verified:
+                    raise AssertionError("restored model bytes failed bundle verification")
                 result["core_image_compatibility"] = "matched-signed-contract"
                 update_payload = root / "update-payload"
                 shutil.copytree(payload, update_payload, copy_function=os.link)
                 for name in ("images/core.tar", "evidence/core-scan.json",
-                             "evidence/core-sbom.json"):
+                             "evidence/core-sbom.json", "model/weights.bin"):
                     (update_payload / name).unlink()
+                (update_payload / "model" / "weights.bin").write_bytes(
+                    b"different fictional model bytes for updated release")
                 update_output = output / "updated-core"
                 update_output.mkdir()
                 # The signed vessel runtime accepts only this canonical archive tag.
@@ -890,13 +915,17 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                         "synthetic-three-image-trial-v2",
                                         update_descriptors,
                                         SUPPORTED_VESSEL_COMPATIBILITY,
-                                        crane=crane)
+                                        crane=crane,
+                                        model_id="synthetic-lab-model")
                 update_verified = verify_bundle(update_bundle, trusted)
-                if (update_verified.get("schema") != 6 or
+                if (update_verified.get("schema") != 7 or
                         update_verified.get("target") != "vessel" or
                         update_verified.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY or
-                        set(update_verified.get("images", {})) != set(ROLES)):
+                        set(update_verified.get("images", {})) != set(ROLES) or
+                        update_verified.get("model", {}).get("id") != "synthetic-lab-model" or
+                        update_verified.get("model") == verified.get("model")):
                     raise AssertionError("second signed vessel bundle verification failed")
+                result["model_update"] = "different-signed-bytes"
                 if (_image_id(update_bundle, "core", update_verified["images"]["core"], crane)
                         == _image_id(bundle, "core", verified["images"]["core"], crane)):
                     raise AssertionError("signed Core image identity did not change")

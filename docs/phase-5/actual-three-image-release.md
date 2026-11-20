@@ -6,9 +6,13 @@ images. It saves each exact local image into a temporary archive, validates
 the archive layers and manifest digest with pinned crane, produces a CycloneDX
 inventory with pinned Syft, and scans the same archive with pinned Trivy and
 the dated offline vulnerability database. Each role must pass the release
-intake before [schema 6](signed-knowledge-bundle.md) can sign the exact three
-archives, their evidence files and `target=vessel` under one detached Ed25519
+intake before [schema 7](signed-knowledge-bundle.md) can sign the exact three
+archives, their evidence files, a fictional model file tree and `target=vessel` under one detached Ed25519
 signature. The verifier checks the resulting copy with a separate public key.
+The rehearsal changes the fictional model bytes in the second release and
+requires the model descriptor to change; it also alters a signed model file
+and requires verification to fail. These bytes are a package fixture, not a
+loadable model.
 The result records `core_image_compatibility=matched-signed-contract` only when
 the signed schema contract matches the hash-bound Core image configuration.
 It then loads Core, Console and Knowledge only from those verified archives,

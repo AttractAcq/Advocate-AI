@@ -1,6 +1,6 @@
 # Three-image vessel release format
 
-The release signer can now create schema 6 vessel bundles containing exactly
+The release signer can create schema-6 or schema-7 vessel bundles containing exactly
 three evidenced image roles: `core`, `console` and `knowledge`. Each role needs
 its own OCI archive, generated SBOM, vulnerability scan, archive digest and
 crane verification result. The signer refuses missing or extra archives and
@@ -15,6 +15,13 @@ installed or switched by this runtime. The verifier repeats the evidence
 and payload checks after copying; a valid signature with the wrong target or
 malformed contract is rejected. The earlier two-image product and separate
 Fleet formats remain valid.
+
+Schema 7 adds a signed model-file descriptor to the same vessel bundle. It
+requires every file under `model/` to appear in both the full payload inventory
+and the exact model descriptor. The signer rejects model files without a model
+ID, and verification rejects altered, missing or extra model files before
+installation. Existing schema-6 lab bundles remain verifiable. See the
+[model artifact procedure](model-artifact-bundle.md).
 
 For the vessel format, the signer and verifier also read the hash-bound Core
 configuration from the exact Docker archive. Its `sovereign.compat.knowledge-schema`
@@ -32,6 +39,7 @@ The CLI accepts a strict descriptor file:
   --signing-key /path/to/custodian-key.pem --version <version> \
   --images-json /path/to/three-image-descriptors.json \
   --knowledge-schema 1 --core-state-schema 1 \
+  --model-id APPROVED_MODEL_ID \
   --crane /path/to/verified/crane
 ```
 
@@ -40,13 +48,14 @@ remain [denied by archive intake](pgvector-image-intake.md). The locally built
 [Alpine Knowledge candidate](alpine-knowledge-image.md) has a resolved SBOM
 and a zero-finding synthetic scan, but distribution provenance, licence review
 and release-signing custody remain open. The [vessel installer](signed-vessel-first-install.md)
-now stages and activates the schema 6 database image with separate database
+now stages and activates the schema-6 or schema-7 database image with separate database
 roles and protected credentials. [Stopped release switching](vessel-release-switch.md)
 and [coordinated recovery](vessel-recovery-set.md) have synthetic rehearsals.
 Actual schema migration and rollback compatibility across versions, target
 hardware and independent security review remain open.
 
-The [actual-image rehearsal](actual-three-image-release.md) now tests this
+The [actual-image rehearsal](actual-three-image-release.md) now tests the schema-7
+model-file binding and this
 contract against the locally built Alpine Knowledge candidate alongside Core
 and Console. Its result is a disposable synthetic trial, not a production
 release authorization.

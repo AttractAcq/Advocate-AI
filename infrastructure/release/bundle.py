@@ -11,6 +11,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path, PurePosixPath
 
@@ -91,7 +92,8 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
                    *, evidence: dict[str, str] | None = None,
                    images: dict[str, dict[str, str]] | None = None,
                    fleet: bool = False, knowledge: bool = False,
-                   vessel_compatibility: dict[str, int] | None = None) -> dict[str, object]:
+                   vessel_compatibility: dict[str, int] | None = None,
+                   model_id: str | None = None) -> dict[str, object]:
     """Copy an approved payload and sign its exact manifest bytes."""
     if not isinstance(version, str) or not version or len(version) > 80 or any(c.isspace() for c in version):
         raise BundleError("invalid release version")
@@ -104,6 +106,8 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
         _validate_vessel_compatibility(vessel_compatibility)
     elif vessel_compatibility is not None:
         raise BundleError("vessel compatibility applies only to vessel bundles")
+    if knowledge or model_id is not None:
+        _validate_model_files(model_id, {name for name, _ in source_files}, knowledge)
     if evidence is not None:
         _validate_evidence(evidence, {name for name, _ in source_files})
     if images is not None:
@@ -128,7 +132,8 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
             shutil.copyfile(source, target)
             rows.append({"path": name, "sha256": _sha256(target), "size": target.stat().st_size})
         manifest: dict[str, object] = {
-            "schema": (5 if fleet else 6 if knowledge else 4) if images is not None else
+            "schema": (5 if fleet else 7 if knowledge and model_id else
+                       6 if knowledge else 4) if images is not None else
                       (3 if evidence is not None else 2),
             "version": version, "key_id": _key_id(key.public_key()), "files": rows,
         }
@@ -142,6 +147,9 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
                 manifest["target"] = "fleet" if fleet else "vessel"
             if knowledge:
                 manifest["compatibility"] = vessel_compatibility
+                if model_id is not None:
+                    manifest["model"] = {"id": model_id, "files": [
+                        row for row in rows if row["path"].startswith("model/")]}
         raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
         (output / MANIFEST).write_bytes(raw)
         (output / SIGNATURE).write_bytes(base64.b64encode(key.sign(raw)))
@@ -154,6 +162,28 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
 def create_bundle(payload: Path, output: Path, signing_key: Path, version: str) -> dict[str, object]:
     """Create a schema-2 synthetic bundle without release evidence."""
     return _create_bundle(payload, output, signing_key, version)
+
+
+def _validate_model_files(model_id: str | None, files: set[str], knowledge: bool) -> None:
+    paths = {name for name in files if name.startswith("model/")}
+    if model_id is None:
+        if paths:
+            raise BundleError("model files require a vessel model descriptor")
+        return
+    if (not knowledge or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", model_id)
+            or not 1 <= len(paths) <= 4096 or
+            any(len(name) > 240 for name in paths)):
+        raise BundleError("invalid vessel model descriptor")
+
+
+def _validate_model_descriptor(model: object, rows: list[dict[str, object]]) -> None:
+    if (not isinstance(model, dict) or set(model) != {"id", "files"} or
+            not isinstance(model["id"], str)):
+        raise BundleError("invalid vessel model descriptor")
+    _validate_model_files(model["id"], {row["path"] for row in rows}, True)
+    expected = [row for row in rows if row["path"].startswith("model/")]
+    if model["files"] != expected:
+        raise BundleError("vessel model files differ from signed inventory")
 
 
 def _validate_evidence(evidence: object, files: set[str]) -> None:
@@ -221,7 +251,7 @@ def _validate_vessel_compatibility(value: object) -> None:
 
 def require_supported_vessel_compatibility(manifest: dict[str, object]) -> None:
     """Refuse a signed vessel release this installed software cannot run."""
-    if (manifest.get("schema") != 6 or manifest.get("target") != "vessel" or
+    if (manifest.get("schema") not in (6, 7) or manifest.get("target") != "vessel" or
             manifest.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY):
         raise BundleError("unsupported vessel compatibility contract")
 
@@ -275,18 +305,22 @@ def create_product_bundle(payload: Path, output: Path, signing_key: Path,
 
 def create_knowledge_bundle(payload: Path, output: Path, signing_key: Path,
                             version: str, images: dict[str, dict[str, str]],
-                            compatibility: dict[str, int], *, crane: Path) -> dict[str, object]:
+                            compatibility: dict[str, int], *, crane: Path,
+                            model_id: str | None = None) -> dict[str, object]:
     """Sign Core, Console and Knowledge only after all three archives pass intake."""
     _validate_vessel_compatibility(compatibility)
     roles = ("core", "console", "knowledge")
-    _validate_image_set(images, {name for name, _ in _files(payload)}, roles)
+    source_files = {name for name, _ in _files(payload)}
+    _validate_image_set(images, source_files, roles)
+    _validate_model_files(model_id, source_files, True)
     for role in roles:
         _preflight_image(payload, images[role], crane)
     _check_core_image_compatibility(payload / images["core"]["archive_path"],
                                     compatibility)
     manifest = _create_bundle(payload, output, signing_key, version,
                               images=images, knowledge=True,
-                              vessel_compatibility=compatibility)
+                              vessel_compatibility=compatibility,
+                              model_id=model_id)
     try:
         for role in roles:
             item = images[role]
@@ -375,17 +409,21 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
         raise BundleError("invalid manifest, signature or public key") from exc
     if not isinstance(key, Ed25519PublicKey):
         raise BundleError("trusted key must be Ed25519")
-    if not isinstance(manifest, dict) or manifest.get("schema") not in (2, 3, 4, 5, 6):
+    if (not isinstance(manifest, dict) or
+            type(manifest.get("schema")) is not int or
+            manifest["schema"] not in (2, 3, 4, 5, 6, 7)):
         raise BundleError("invalid manifest fields")
     required = {"schema", "version", "key_id", "files"}
     if manifest["schema"] == 3:
         required |= {"signed_at", "evidence"}
-    elif manifest["schema"] in (4, 5, 6):
+    elif manifest["schema"] in (4, 5, 6, 7):
         required |= {"signed_at", "images"}
-        if manifest["schema"] in (5, 6):
+        if manifest["schema"] in (5, 6, 7):
             required.add("target")
-        if manifest["schema"] == 6:
+        if manifest["schema"] in (6, 7):
             required.add("compatibility")
+        if manifest["schema"] == 7:
+            required.add("model")
     if set(manifest) != required:
         raise BundleError("invalid manifest fields")
     if manifest["key_id"] != _key_id(key):
@@ -420,7 +458,7 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
     actual = {name for name, _ in _files(bundle, allow_control=True)} - {MANIFEST, SIGNATURE}
     if actual != expected:
         raise BundleError("unlisted or missing payload")
-    if manifest["schema"] in (3, 4, 5, 6):
+    if manifest["schema"] in (3, 4, 5, 6, 7):
         try:
             signed_at = datetime.fromisoformat(manifest["signed_at"])
         except (TypeError, ValueError) as exc:
@@ -444,17 +482,21 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
                 raise BundleError("signed image archive does not match the SBOM")
         elif "archive_path" in evidence:
             raise BundleError("signed image archive lacks generated inventory")
-    elif manifest["schema"] in (4, 5, 6):
+    elif manifest["schema"] in (4, 5, 6, 7):
         images = manifest["images"]
         roles = (("core", "console") if manifest["schema"] == 4 else
                  ("fleet-api", "fleet-portal") if manifest["schema"] == 5 else
                  ("core", "console", "knowledge"))
         if manifest["schema"] == 5 and manifest["target"] != "fleet":
             raise BundleError("signed Fleet bundle target is invalid")
-        if manifest["schema"] == 6 and manifest["target"] != "vessel":
+        if manifest["schema"] in (6, 7) and manifest["target"] != "vessel":
             raise BundleError("signed knowledge bundle target is invalid")
-        if manifest["schema"] == 6:
+        if manifest["schema"] in (6, 7):
             _validate_vessel_compatibility(manifest["compatibility"])
+            if manifest["schema"] == 6:
+                _validate_model_files(None, expected, True)
+            else:
+                _validate_model_descriptor(manifest["model"], rows)
         _validate_image_set(images, expected, roles)
         for role in roles:
             item = images[role]
@@ -467,7 +509,7 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
             if intake.get("archive_sha256") != item["archive_sha256"] or \
                     _sha256(bundle / item["archive_path"]) != item["archive_sha256"]:
                 raise BundleError("signed product image archive does not match the SBOM")
-        if manifest["schema"] == 6:
+        if manifest["schema"] in (6, 7):
             _check_core_image_compatibility(bundle / images["core"]["archive_path"],
                                             manifest["compatibility"])
     return manifest
@@ -511,6 +553,7 @@ def main() -> None:
     knowledge.add_argument("--knowledge-schema", required=True, type=int)
     knowledge.add_argument("--core-state-schema", required=True, type=int)
     knowledge.add_argument("--crane", required=True, type=Path)
+    knowledge.add_argument("--model-id")
     fleet = commands.add_parser("pack-fleet")
     fleet.add_argument("payload", type=Path)
     fleet.add_argument("output", type=Path)
@@ -551,7 +594,7 @@ def main() -> None:
                                              args.version, images,
                                              {"knowledge_schema": args.knowledge_schema,
                                               "core_state_schema": args.core_state_schema},
-                                             crane=args.crane)
+                                             crane=args.crane, model_id=args.model_id)
         elif args.command == "pack-fleet":
             if args.images_json.is_symlink() or not args.images_json.is_file() or \
                     args.images_json.stat().st_size > MAX_MANIFEST_BYTES:
