@@ -21,11 +21,17 @@ The CLI accepts a strict descriptor file:
   --crane /path/to/verified/crane
 ```
 
-This establishes the release contract; it does not yet create a releasable
-Knowledge image. The digest-pinned pgvector image used in the synthetic lab
-still needs a [resolved SBOM and offline archive intake](pgvector-image-intake.md), vulnerability triage, offline archive provenance
-and licence review. The current signed installer only accepts the schema 4
-Core and Console bundle. The next implementation must stage and activate the
-schema 6 database image, separate migration and runtime identities, protected
-credentials, state volumes and a coordinated clean restore. Target hardware
-and independent security review remain open.
+The original digest-pinned pgvector image and the official Trixie comparison
+remain [denied by archive intake](pgvector-image-intake.md). The locally built
+[Alpine Knowledge candidate](alpine-knowledge-image.md) has a resolved SBOM
+and a zero-finding synthetic scan, but distribution provenance, licence review
+and release-signing custody remain open. The current signed installer only
+accepts the schema 4 Core and Console bundle. The next implementation must
+stage and activate the schema 6 database image, carry separate database roles
+and protected credentials, preserve state volumes and coordinate a clean
+restore. Target hardware and independent security review remain open.
+
+The [actual-image rehearsal](actual-three-image-release.md) now tests this
+contract against the locally built Alpine Knowledge candidate alongside Core
+and Console. Its result is a disposable synthetic trial, not a production
+release authorization.
