@@ -23,7 +23,7 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_installer import (
-    install_vessel, recover_vessel, status_vessel, stop_vessel,
+    install_vessel, reconcile_vessel, recover_vessel, status_vessel, stop_vessel,
 )
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -112,6 +112,8 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
     lab_password = root / "lab-password"
     config = root / "console-config.json"
     install_root = root / "installed-vessel"
+    orphan_knowledge = None
+    orphan_services = None
     try:
         activated = install_vessel(bundle, trusted, crane, config, install_root,
                                    state, lab_password)
@@ -121,26 +123,49 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 activated.get("active") != status.get("active")):
             raise AssertionError("signed first installation did not become healthy")
         stopped = stop_vessel(install_root, trusted, crane)
+        record = json.loads((install_root / "vessel-state.json").read_text())
+        stage = install_root / "vessel-releases" / record["active"]
+        orphan_knowledge = start_signed_knowledge(
+            stage / "bundle", trusted, crane, install_root,
+            record["installation_id"], initialize=False)
+        orphan_services = start_signed_vessel_services(
+            stage / "bundle", trusted, crane, stage / "console-config.json",
+            state, lab_password, install_root, orphan_knowledge,
+            record["installation_id"])
+        reconciled = reconcile_vessel(install_root, trusted, crane)
         recovered = recover_vessel(install_root, trusted, crane)
         restored_status = status_vessel(install_root, trusted, crane)
         if (stopped.get("result") != "stopped" or
+                reconciled != {"result": "reconciled", "containers": 3,
+                               "networks": 1, "sockets": 1} or
                 recovered.get("result") != "recovered" or
                 restored_status.get("result") != "healthy" or
                 recovered.get("active") != activated.get("active")):
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         return {"result": "pass", "activation": "signed-and-healthy",
-                "state": "recorded-after-health", "recovery": "stopped-and-recovered"}
+                "state": "recorded-after-health", "recovery": "stopped-and-recovered",
+                "interrupted_recovery": "orphan-runtime-reconciled"}
     finally:
+        if orphan_services is not None:
+            stop_runtime(orphan_services)
+        if orphan_knowledge is not None:
+            try:
+                stop_knowledge(orphan_knowledge)
+            except Exception:
+                pass
         path = install_root / "vessel-state.json"
         if path.exists():
             record = json.loads(path.read_text())
             runtime = record["runtime"]
             stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
                                        runtime["console_id"]))
-            stop_knowledge(KnowledgeVolumeHandle(
-                runtime["knowledge_id"], runtime["socket_volume"],
-                runtime["data_volume"], runtime["knowledge_run"],
-                record["installation_id"]))
+            try:
+                stop_knowledge(KnowledgeVolumeHandle(
+                    runtime["knowledge_id"], runtime["socket_volume"],
+                    runtime["data_volume"], runtime["knowledge_run"],
+                    record["installation_id"]))
+            except Exception:
+                pass
             subprocess.run(["docker", "volume", "rm", runtime["data_volume"]],
                            capture_output=True, text=True, timeout=30)
 

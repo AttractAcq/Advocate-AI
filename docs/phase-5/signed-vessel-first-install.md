@@ -50,7 +50,8 @@ open.
 
 ## Operator command
 
-`python -m scripts.vesselctl` exposes `install`, `status`, `stop` and `recover`
+`python -m scripts.vesselctl` exposes `install`, `status`, `stop`, `reconcile`
+and `recover`
 for the synthetic candidate. Every command requires explicit absolute paths
 for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
 requires `--bundle`, `--console-config`, `--core-state` and
@@ -59,3 +60,15 @@ exit nonzero. Stop and recover take an exclusive owner-only installation lock
 and reject a competing operator command. `recover` requires a clean stop and
 refuses residual old Docker resources. The command is not yet a vessel service
 unit or a production commissioning workflow.
+
+`reconcile` addresses an interruption after a clean stop when new signed
+services started but their IDs were never committed to the active record. It
+first proves the old recorded resource IDs are absent. It then inventories
+installation-scoped containers, networks and volumes, checking their labels,
+names, roles, network isolation and Knowledge volume mounts. Only after every
+resource passes does it remove the orphan containers, networks and disposable
+socket volumes. The persistent Knowledge data volume and credentials remain.
+The signed-image rehearsal creates a full orphan Core, Console and Knowledge
+runtime, reconciles it and recovers the same installation. An interruption
+during the initial installation, a partially completed stop, and a crash
+after active-state replacement still require separate handling.

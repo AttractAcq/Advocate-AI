@@ -399,6 +399,114 @@ def _serialized(operation):
     return locked
 
 
+def _scoped_list(*args: str, volume: bool = False) -> list[str]:
+    items = _docker(*args).splitlines()
+    pattern = r"sovereign-(?:knowledge-[0-9a-f]{12}-socket|[0-9a-f]{32}-knowledge-data)" \
+              if volume else r"[0-9a-f]{64}"
+    if (len(items) > 20 or len(items) != len(set(items)) or
+            any(not re.fullmatch(pattern, item) for item in items)):
+        raise VesselInstallError("invalid scoped Docker resource inventory")
+    return items
+
+
+@_serialized
+def reconcile_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, int | str]:
+    """Remove checked orphan runtime resources after interrupted recovery."""
+    value = _read_state(root)
+    identifier = value["active"]
+    _verify_stage(root / "vessel-releases" / identifier, trusted_key, identifier)
+    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
+    _state_options(state, password, root)
+    installation_id = value["installation_id"]
+    runtime = value["runtime"]
+    for kind, old_id in (("container", runtime["core_id"]),
+                         ("container", runtime["console_id"]),
+                         ("container", runtime["knowledge_id"]),
+                         ("network", runtime["network_id"]),
+                         ("volume", runtime["socket_volume"])):
+        _assert_missing(kind, old_id)
+    data_volume = runtime["data_volume"]
+    _volume(data_volume, installation_id, "knowledge-data", create=False)
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
+    networks = _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                            "--quiet")
+    volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                           volume=True)
+    if volumes.count(data_volume) != 1:
+        raise VesselInstallError("persistent Knowledge volume missing from inventory")
+    sockets = [name for name in volumes if name != data_volume]
+    for name in sockets:
+        run_name = name.removesuffix("-socket")
+        _volume(name, installation_id, "knowledge-socket", create=False,
+                run_name=run_name)
+    runs: dict[str, str] = {}
+    for network_id in networks:
+        labels = json.loads(_docker("network", "inspect", network_id,
+                                    "--format", "{{json .Labels}}"))
+        run_name = _docker("network", "inspect", network_id, "--format", "{{.Name}}")
+        if (not re.fullmatch(r"sovereign-synthetic-[0-9a-f]{12}", run_name)
+                or not isinstance(labels, dict)
+                or labels.get("sovereign.synthetic.install") != installation_id
+                or labels.get("sovereign.synthetic.run") != run_name
+                or _docker("network", "inspect", network_id,
+                           "--format", "{{.Internal}}") != "true"
+                or run_name in runs):
+            raise VesselInstallError("orphan vessel network identity mismatch")
+        runs[run_name] = network_id
+    seen: set[tuple[str, str]] = set()
+    for container_id in containers:
+        labels = json.loads(_docker("inspect", container_id,
+                                    "--format", "{{json .Config.Labels}}"))
+        name = _docker("inspect", container_id, "--format", "{{.Name}}")
+        mode = _docker("inspect", container_id,
+                       "--format", "{{.HostConfig.NetworkMode}}")
+        ports = _docker("inspect", container_id,
+                        "--format", "{{json .HostConfig.PortBindings}}")
+        if not isinstance(labels, dict) or \
+                labels.get("sovereign.synthetic.install") != installation_id or \
+                ports not in ("null", "{}"):
+            raise VesselInstallError("orphan vessel container identity mismatch")
+        run_name = labels.get("sovereign.synthetic.run")
+        role = labels.get("sovereign.synthetic.role")
+        if (isinstance(run_name, str)
+                and re.fullmatch(r"sovereign-knowledge-[0-9a-f]{12}", run_name)
+                and role == "knowledge" and name == "/" + run_name
+                and mode == "none" and run_name + "-socket" in sockets):
+            key = (run_name, "knowledge")
+            mounts = json.loads(_docker("inspect", container_id,
+                                        "--format", "{{json .Mounts}}"))
+            required = {"/var/lib/postgresql/data": data_volume,
+                        "/var/run/postgresql": run_name + "-socket"}
+            if (not isinstance(mounts, list) or
+                    any(sum(isinstance(item, dict) and
+                            item.get("Type") == "volume" and
+                            item.get("Destination") == destination and
+                            item.get("Name") == volume for item in mounts) != 1
+                        for destination, volume in required.items())):
+                raise VesselInstallError("orphan Knowledge volume mount mismatch")
+        elif (isinstance(run_name, str) and run_name in runs
+              and role is None and mode == run_name
+              and name in ("/" + run_name + "-core", "/" + run_name + "-console")):
+            key = (run_name, name.removeprefix("/" + run_name + "-"))
+        else:
+            raise VesselInstallError("orphan vessel container identity mismatch")
+        if key in seen:
+            raise VesselInstallError("duplicate orphan vessel container role")
+        seen.add(key)
+    if _read_state(root) != value:
+        raise VesselInstallError("vessel active state changed during reconciliation")
+    for container_id in containers:
+        _docker("rm", "-f", container_id)
+    for network_id in networks:
+        _docker("network", "rm", network_id)
+    for name in sockets:
+        _docker("volume", "rm", name)
+    _recovery_inventory(installation_id, runtime)
+    return {"result": "reconciled", "containers": len(containers),
+            "networks": len(networks), "sockets": len(sockets)}
+
+
 @_serialized
 def stop_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]:
     """Stop a verified synthetic vessel runtime while retaining Knowledge data."""
