@@ -24,6 +24,8 @@ changing the version.
 The [synthetic encrypted migration rehearsal](encrypted-legacy-history-migration.md)
 now creates that restic backup, verifies a clean restore and compares every
 conversation before it calls the helper. This remains a lab operation.
+The [stopped vessel command](stopped-vessel-history-migration.md) additionally
+checks the recorded release and stopped runtime, then signs migration evidence.
 
 This is a synthetic compatibility boundary. A production vessel migration
 still needs a signed release procedure, recoverable pre-update set, key

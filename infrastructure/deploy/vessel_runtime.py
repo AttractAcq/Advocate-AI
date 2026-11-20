@@ -31,7 +31,7 @@ from infrastructure.release.bundle import (
 from services.knowledge.manifest_io import load_manifest
 from services.policy.audit import verify as verify_audit
 from services.policy.policy_file import load_policy
-from apps.api.auth import verify_history_format
+from apps.api.auth import _history_shape, verify_history_format
 
 
 class VesselRuntimeError(ValueError):
@@ -61,7 +61,8 @@ def _persistent_file(path: Path) -> None:
 
 
 def _state_options(state: Path, lab_password: Path,
-                   knowledge_root: Path) -> tuple[list[str], Path]:
+                   knowledge_root: Path, *,
+                   allow_legacy_history: bool = False) -> tuple[list[str], Path]:
     if (not state.is_absolute() or state.is_symlink() or not state.is_dir()
             or state.stat().st_uid != os.getuid()
             or stat.S_IMODE(state.stat().st_mode) & 0o077):
@@ -89,11 +90,18 @@ def _state_options(state: Path, lab_password: Path,
     for name in ("history.db", "history.db-wal", "history.db-shm"):
         _persistent_file(state / name)
     history = state / "history.db"
+    if allow_legacy_history and not history.exists():
+        raise VesselRuntimeError("legacy vessel Core history is missing")
     if history.exists():
         try:
             with closing(sqlite3.connect(history.resolve().as_uri() + "?mode=ro",
                                          uri=True)) as database:
-                verify_history_format(database)
+                if allow_legacy_history:
+                    if database.execute("PRAGMA user_version").fetchone() != (0,):
+                        raise ValueError("Core history is not legacy")
+                    _history_shape(database)
+                else:
+                    verify_history_format(database)
         except (sqlite3.DatabaseError, ValueError) as exc:
             raise VesselRuntimeError("unsupported vessel Core history format") from exc
     try:
