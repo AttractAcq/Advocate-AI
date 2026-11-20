@@ -14,7 +14,7 @@ COPY services/connectors ./services/connectors
 COPY fixtures ./fixtures
 ARG SOVEREIGN_KNOWLEDGE_SCHEMA=1
 ARG SOVEREIGN_CORE_STATE_SCHEMA=1
-RUN python -c "import os; from apps.api.auth import CORE_STATE_SCHEMA_VERSION; from services.knowledge.postgres_index import KNOWLEDGE_SCHEMA_VERSION; assert int(os.environ['SOVEREIGN_KNOWLEDGE_SCHEMA']) == KNOWLEDGE_SCHEMA_VERSION; assert int(os.environ['SOVEREIGN_CORE_STATE_SCHEMA']) == CORE_STATE_SCHEMA_VERSION"
+RUN python -c "import os, sys; from apps.api.auth import CORE_STATE_SCHEMA_VERSION; from services.knowledge.postgres_index import KNOWLEDGE_SCHEMA_VERSION; sys.exit(0 if (int(os.environ['SOVEREIGN_KNOWLEDGE_SCHEMA']) == KNOWLEDGE_SCHEMA_VERSION and int(os.environ['SOVEREIGN_CORE_STATE_SCHEMA']) == CORE_STATE_SCHEMA_VERSION) else 1)"
 RUN python fixtures/generate.py && adduser -D -u 10001 sovereign
 USER 10001:10001
 ARG SOVEREIGN_SYNTHETIC_RELEASE=baseline
