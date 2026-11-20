@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #174](https://github.com/AttractAcq/Advocate-AI/pull/174), including
+through [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -22,6 +22,7 @@ the reviewer must identify the exact final tree tested. The main paths are:
 | Encrypted recovery | `infrastructure/deploy/vessel_recovery_set.py` | Frozen snapshot, signed receipt, restic verification, clean activation, interrupted restore abandonment and retry |
 | Operator entry points | `scripts/vesselctl.py`, [switch runbook](../phase-5/vessel-release-switch.md), [recovery runbook](../phase-5/vessel-recovery-set.md) | Required inputs, refusal paths and operator-visible state |
 | Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks; review the engineer/deckhand API probe in PR #162 |
+| Signed model artifact and request route | `infrastructure/release/bundle.py`, `infrastructure/deploy/vessel_runtime.py`, `scripts/phase5_three_image_release.py`, [model bundle procedure](../phase-5/model-artifact-bundle.md) | Exact model tree and ID binding, stage capacity preflight, Core runtime configuration, container-loopback request, wrong-name refusal and outage behavior |
 
 ## Claims to verify
 
@@ -51,6 +52,13 @@ the reviewer must identify the exact final tree tested. The main paths are:
    Core state. Interrupted activation must retain inspectable evidence;
    abandonment may delete only the exact partial volume identified by its
    unique restore-attempt label. Retry uses a new private root.
+6. A schema-7 bundle binds the exact model file tree and request ID to its
+   release signature. Before stage creation, the installer checks local free
+   space for a complete staged copy plus reserve. Core receives that signed
+   model ID and a fixed loopback endpoint; vessel status rejects configuration
+   drift. The actual-image probe sends the signed ID through Core to a
+   temporary responder, rejects a wrong requested name before that responder,
+   and returns 503 after the responder stops.
 
 These are implementation claims for the reviewer to challenge, not accepted
 security findings. The second Core image in CI has a distinct image identity
@@ -74,8 +82,11 @@ upgrade compatibility between real software or database versions.
 | Pre-update and rollback recovery gates | [PR #170](https://github.com/AttractAcq/Advocate-AI/pull/170), [PR #172](https://github.com/AttractAcq/Advocate-AI/pull/172) and [switch procedure](../phase-5/vessel-release-switch.md) | Both directions require a signed recovery set of the active release, clean-restore it and compare current Core state before activation. The actual-image rehearsal captures one set on each side of the transition; [all 12 PR #172 CI jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44825084735), including the signed vessel rehearsal. |
 | Knowledge row equality | [PR #171](https://github.com/AttractAcq/Advocate-AI/pull/171), [schema-2 recovery set](../phase-5/vessel-recovery-set.md) and [all 12 final-head CI jobs](https://github.com/AttractAcq/Advocate-AI/actions/runs/44823012458) | A changed pgvector value with unchanged row counts alters the signed row digest. Restore and release activation compare the digest before starting Core. |
 | Managed Core file aliases | [PR #174](https://github.com/AttractAcq/Advocate-AI/pull/174) and [recovery procedure](../phase-5/vessel-recovery-set.md) | Capture refuses hard-linked managed configuration, audit, history and source files; local tests cover each class. Target filesystem semantics and non-cooperating writers remain separate review questions. |
+| Signed model tree and staging capacity | [PR #175](https://github.com/AttractAcq/Advocate-AI/pull/175), [PR #176](https://github.com/AttractAcq/Advocate-AI/pull/176) and [model bundle procedure](../phase-5/model-artifact-bundle.md) | A signed inventory covers fictional model bytes and ID; altered files fail verification. Low stage space refuses before candidate creation. The [PR #175](https://github.com/AttractAcq/Advocate-AI/actions/runs/44828966126) and [PR #176](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831181328) final-head runs passed all 12 jobs. |
+| Signed model request route | [PR #177](https://github.com/AttractAcq/Advocate-AI/pull/177) and [PR #178](https://github.com/AttractAcq/Advocate-AI/pull/178) | Core is configured with the signed model ID and container-loopback endpoint. The actual-image rehearsal uses a temporary OpenAI-compatible responder to observe the request ID, wrong-name denial and 503 after responder shutdown. All 12 final-head jobs passed for [PR #177](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831684982) and [PR #178](https://github.com/AttractAcq/Advocate-AI/actions/runs/44833680520). |
+| Authenticated model advertisement | [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), `apps/api/model.py`, `apps/api/main.py`, `tests/test_core_api.py` | AV/IT-only readiness checks the loopback `/v1/models` advertisement for the configured ID; absent, wrong, malformed or oversized responses fail with 503. The actual-image rehearsal checks role denial, matching ID and outage. [All 12 implementation-head jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44835630041); the Fleet browser job passed on retry after a transient DNS error, and the signed vessel step passed initially. This is a control-plane signal, not a model inference or GPU acceptance test. |
 
-At the PR #174 implementation head, `make check` passed 410 tests with 16
+At the PR #179 implementation head, `make check` passed 417 tests with 16
 expected skips. For an independent reproduction, record the commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
@@ -95,6 +106,9 @@ lab and retain the observed output, resource inventory and timing.
 | Substitute a wrong receipt key, restic password, snapshot ID, release ID or old receipt | Check signature, repository and release binding in both switch and rollback; an old receipt from the prior active release must not authorise rollback from the updated release |
 | Change one Knowledge row or vector after capture while preserving source and passage counts | Confirm schema-2 digest mismatch prevents Core and Console startup on switch, rollback and clean restore |
 | Hard-link a managed Core file to an outside path before capture | Confirm configuration, audit, history and approved source aliases are rejected before an encrypted recovery snapshot is made; test host filesystem semantics separately |
+| Alter a model file, add an unlisted model file, or change the Core model name or endpoint | Confirm signature and tree verification refuse altered bytes, and active status refuses runtime drift; try both stopped and running states |
+| Name an unapproved model in a chat request, then stop the loopback responder | Confirm Core denies the name before forwarding and returns 503 after the responder stops, without a remote or fallback route |
+| Advertise a different model ID, return malformed or oversized metadata, or remove the model service | Check AV/IT readiness returns 503 while other roles remain denied; separately determine whether an actual prompt can be answered after a cold start |
 | Add a labelled container, network, extra volume or different restore-attempt label | Check that cleanup and abandonment do not remove ambiguous resources |
 | Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate |
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |

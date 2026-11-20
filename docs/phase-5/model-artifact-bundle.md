@@ -29,6 +29,17 @@ Core has no fallback model route. The responder and its canned answer exist only
 synthetic probe. This confirms local request routing, not inference quality or
 the production model service lifecycle.
 
+An authenticated AV/IT administrator can call `GET /api/admin/model-readiness`
+to check whether the configured loopback service advertises the signed model
+ID at `/v1/models`. The request has a three-second timeout and a 64 KiB response
+limit. A missing service, malformed response, unexpected ID or upstream error
+returns 503. Other roles receive 403. `/health` remains Core liveness; an
+advertised model ID does not prove that its weights can answer a prompt. A
+target-lab acceptance run must pair this check with an actual cited answer and
+an offline restart. The actual-image synthetic rehearsal checks 403 for a
+non-administrator, a matching advertisement while its responder runs and 503
+after shutdown.
+
 The ID is an operator label, not proof of model publisher, licence, weights
 quality or serving compatibility. The connected preparation process must
 record source, revision, publisher authentication, redistribution terms and

@@ -95,6 +95,16 @@ seen=[]
 class Responder(BaseHTTPRequestHandler):
  def log_message(self,*args):
   pass
+ def do_GET(self):
+  if self.path!='/v1/models':
+   self.send_error(404)
+   return
+  body=json.dumps({'data':[{'id':model_id}]}).encode()
+  self.send_response(200)
+  self.send_header('Content-Type','application/json')
+  self.send_header('Content-Length',str(len(body)))
+  self.end_headers()
+  self.wfile.write(body)
  def do_POST(self):
   size=int(self.headers.get('Content-Length','0'))
   if self.path!='/v1/chat/completions' or not 0<size<=16384:
@@ -117,6 +127,13 @@ try:
   login=client.post('/api/login',json={'user_id':'engineer','password':password})
   assert login.status_code==200,login.text
   headers={'Authorization':'Bearer '+login.json()['access_token']}
+  avit_login=client.post('/api/login',json={'user_id':'avit','password':password})
+  assert avit_login.status_code==200,avit_login.text
+  avit_headers={'Authorization':'Bearer '+avit_login.json()['access_token']}
+  assert client.get('/api/admin/model-readiness',headers=headers).status_code==403
+  readiness=client.get('/api/admin/model-readiness',headers=avit_headers)
+  assert readiness.status_code==200,readiness.text
+  assert readiness.json()=={'model':model_id,'route':'advertised'},readiness.text
   denied=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':'unapproved-model'})
   assert denied.status_code==400,denied.text
   answer=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':model_id})
@@ -129,10 +146,12 @@ finally:
  server.server_close()
  thread.join(timeout=2)
 with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=10) as client:
+ readiness=client.get('/api/admin/model-readiness',headers=avit_headers)
+ assert readiness.status_code==503,readiness.text
  outage=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':model_id})
  assert outage.status_code==503,outage.text
 print(json.dumps({'result':'pass','route':'container-loopback','model':model_id,
-                  'outage':'failed-closed'}))
+                  'readiness':'advertised-then-unavailable','outage':'failed-closed'}))
 """
 
 

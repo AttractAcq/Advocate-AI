@@ -410,6 +410,18 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                                     "wazuh_alert_search" if wazuh else "synthetic_alert_search"],
                 "write_tools": []}
 
+    @app.get("/api/admin/model-readiness")
+    async def model_readiness(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, str]:
+        if identity[1]["role"] != "avit_admin":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "admin scope required")
+        try:
+            await model.check_ready()
+        except ModelUnavailable as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "local model route unavailable") from exc
+        revalidate_identity(identity)
+        return {"model": settings.model_name, "route": "advertised"}
+
     @app.get("/api/security/incidents")
     def security_list(since: datetime | None = None, until: datetime | None = None,
                       _: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
