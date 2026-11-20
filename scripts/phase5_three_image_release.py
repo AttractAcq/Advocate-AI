@@ -327,6 +327,22 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 not audit_path.read_bytes().startswith(final_audit)):
             raise AssertionError("stopped signed vessel release switch failed")
         stop_vessel(install_root, trusted, crane)
+        updated_recovery = recovery_root / "updated"
+        updated_recovery.mkdir(mode=0o700)
+        updated_staging = updated_recovery / "staging"
+        updated_staging.mkdir(mode=0o700)
+        updated_receipt = updated_recovery / "receipt.json"
+        updated_capture = create_vessel_recovery_set(
+            install_root, trusted, crane, updated_recovery / "repository",
+            password, restic, restic_sha256, updated_staging,
+            receipt_private, updated_receipt)
+        if (verify_vessel_recovery_receipt(updated_receipt, receipt_public)
+                != updated_capture or
+                updated_capture["release"] != switched["active"] or
+                updated_capture["audit_count"] <= captured["audit_count"] or
+                updated_capture["sources"] != captured["sources"] or
+                updated_capture["passages"] != captured["passages"]):
+            raise AssertionError("post-switch vessel recovery set changed")
         rolled = rollback_stopped_vessel_release(install_root, trusted, crane)
         rolled_status = status_vessel(install_root, trusted, crane)
         rolled_record = json.loads((install_root / "vessel-state.json").read_text())
@@ -353,7 +369,8 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 "release_switch": "stopped-signed-and-healthy",
                 "release_rollback": "stopped-signed-and-healthy",
                 "core_image_change": "distinct-and-restored",
-                "partial_stage": "rejected-then-discarded"}
+                "partial_stage": "rejected-then-discarded",
+                "post_switch_recovery_set": "signed-and-bound-to-updated-release"}
     finally:
         if orphan_services is not None:
             stop_runtime(orphan_services)
@@ -381,20 +398,26 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
 
 def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
                                     root: Path, restic: Path,
-                                    restic_sha256: str) -> dict[str, str]:
+                                    restic_sha256: str, *,
+                                    updated: bool = False) -> dict[str, str]:
     """Activate the signed recovery set on clean, restricted synthetic data."""
-    recovery = root / "vessel-recovery"
-    install_root = root / "recovered-install"
-    state = root / "recovered-state"
+    recovery_root = root / "vessel-recovery"
+    recovery = recovery_root / "updated" if updated else recovery_root
+    install_root = root / ("updated-recovered-install" if updated else "recovered-install")
+    state = root / ("updated-recovered-state" if updated else "recovered-state")
     try:
         result = activate_vessel_recovery_set(
             bundle, trusted, crane, root / "console-config.json",
-            recovery / "receipt.json", recovery / "receipt-public.pem",
-            recovery / "restic-password", restic, restic_sha256,
+            recovery / "receipt.json", recovery_root / "receipt-public.pem",
+            recovery_root / "restic-password", restic, restic_sha256,
             install_root, state, root / "lab-password", recovery / "staging")
         status = status_vessel(install_root, trusted, crane)
         record = json.loads((install_root / "vessel-state.json").read_text())
         runtime = record["runtime"]
+        manifest = verify_bundle(bundle, trusted)
+        expected_core = _image_id(bundle, "core", manifest["images"]["core"], crane)
+        running_core = _run("docker", "inspect", runtime["core_id"],
+                            "--format", "{{.Image}}")
         with closing(sqlite3.connect(state / "history.db")) as database:
             rows = database.execute("SELECT id FROM conversations").fetchall()
         if len(rows) != 1:
@@ -405,13 +428,15 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
                 result["active"] != status["active"] or
                 result["installation_id"] != record["installation_id"] or
                 result["sources"] < 1 or result["passages"] < 1 or
+                running_core != expected_core or
                 history["turns"] != 1 or
                 (state / "postgres.dump").exists() or
                 (install_root / "vessel-intent.json").exists()):
             raise AssertionError("clean secure vessel restore did not activate")
         return {"result": "pass", "runtime": "signed-and-healthy",
                 "database_roles": "scram-restricted",
-                "history": "readable", "dump_exposure": "absent"}
+                "history": "readable", "dump_exposure": "absent",
+                "source_release": "post-switch" if updated else "initial"}
     finally:
         path = install_root / "vessel-state.json"
         if path.exists():
@@ -828,6 +853,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["signed_vessel_clean_restore"] = \
                     _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
                                                     restic, restic_sha256)
+                result["signed_vessel_updated_restore"] = \
+                    _rehearse_secure_vessel_restore(update_bundle, trusted, crane,
+                                                    root, restic, restic_sha256,
+                                                    updated=True)
                 result["interrupted_restore_abandon"] = \
                     _rehearse_interrupted_restore_abandon(
                         bundle, trusted, crane, root, restic, restic_sha256)
