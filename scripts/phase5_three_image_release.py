@@ -33,8 +33,35 @@ from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
 from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
 from scripts.synthetic_pg_fixture import fixture as synthetic_fixture, put as private_put
+from services.policy.audit import verify as verify_audit
 
 ROLES = ("core", "console", "knowledge")
+
+_VESSEL_HISTORY_PROBE = """\
+import json,sys
+from pathlib import Path
+import httpx
+with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) as client:
+ password=Path('/run/secrets/lab-password').read_text().strip()
+ login=client.post('/api/login',json={'user_id':'engineer','password':password})
+ assert login.status_code==200,login.text
+ headers={'Authorization':'Bearer '+login.json()['access_token']}
+ conversation_id=sys.argv[1]
+ if conversation_id=='-':
+  chat=client.post('/api/chat',headers=headers,json={'mode':'documents','message':'unfindable quasar zebra procedure'})
+  assert chat.status_code==200,chat.text
+  assert chat.json()['answer'].startswith('No matching permitted source'),chat.text
+  conversation_id=chat.json()['conversation_id']
+ result=client.get('/api/conversations/'+conversation_id,headers=headers)
+ assert result.status_code==200,result.text
+ assert len(result.json()['turns'])==1,result.text
+ print(json.dumps({'conversation_id':conversation_id,'turns':len(result.json()['turns'])}))
+"""
+
+
+def _probe_vessel_history(core_id: str, conversation_id: str | None = None) -> dict[str, object]:
+    return json.loads(_run("docker", "exec", core_id, "python", "-c",
+                           _VESSEL_HISTORY_PROBE, conversation_id or "-"))
 
 
 def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
@@ -128,6 +155,13 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
         finally:
             postgres_sql(runtime["knowledge_id"],
                          "UPDATE public.knowledge_schema_version SET version=1")
+        first_history = _probe_vessel_history(runtime["core_id"])
+        audit_path = state / "audit.jsonl"
+        initial_audit = audit_path.read_bytes()
+        initial_count, _ = verify_audit(audit_path, require_current_clock=True)
+        if (not (state / "history.db").is_file() or
+                first_history.get("turns") != 1 or initial_count < 1):
+            raise AssertionError("vessel audit or conversation state was not persisted")
         stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
                                    runtime["console_id"]))
         stopped = finish_vessel_stop(install_root, trusted, crane)
@@ -142,16 +176,25 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
         reconciled = reconcile_vessel(install_root, trusted, crane)
         recovered = recover_vessel(install_root, trusted, crane)
         restored_status = status_vessel(install_root, trusted, crane)
+        restored_record = json.loads((install_root / "vessel-state.json").read_text())
+        restored_history = _probe_vessel_history(restored_record["runtime"]["core_id"],
+                                                  first_history["conversation_id"])
+        final_audit = audit_path.read_bytes()
+        final_count, _ = verify_audit(audit_path, require_current_clock=True)
         if (stopped.get("result") != "stopped" or
                 reconciled != {"result": "reconciled", "containers": 3,
                                "networks": 1, "sockets": 1} or
                 recovered.get("result") != "recovered" or
                 restored_status.get("result") != "healthy" or
-                recovered.get("active") != activated.get("active")):
+                recovered.get("active") != activated.get("active") or
+                restored_history != first_history or
+                not final_audit.startswith(initial_audit) or
+                final_count <= initial_count):
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         return {"result": "pass", "activation": "signed-and-healthy",
                 "schema_authority": "migration-role-only",
                 "schema_version": 1, "unknown_schema": "denied",
+                "audit_history": "persisted-across-recovery",
                 "state": "recorded-after-health", "recovery": "stopped-and-recovered",
                 "interrupted_recovery": "orphan-runtime-reconciled",
                 "interrupted_stop": "knowledge-stop-completed"}

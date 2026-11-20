@@ -45,6 +45,19 @@ status denies it, and restores `1` before continuing. This is a compatibility
 guard, not a migration from an older schema. A real upgrade path and rollback
 compatibility remain open.
 
+## Persistent Core audit and history
+
+The signed vessel Core now writes its hash-chained audit trail to
+`audit.jsonl` and conversation history to `history.db` under the external
+owner-only Core state directory. Startup and status refuse linked, exposed or
+nonregular persistent files and verify the audit chain and clock before Core
+uses them. Runtime inspection checks both environment bindings. The actual
+image rehearsal makes an audited API request and a document-mode conversation
+that needs no model, stops all three services, recovers from the same external
+state, and requires the conversation to remain readable and the audit trail
+to retain its prefix and grow. Coordinated encrypted backup and clean restore
+of these files with PostgreSQL remain open.
+
 ## Clean stopped-runtime recovery candidate
 
 `stop_vessel` checks the healthy signed installation, removes the Core and
