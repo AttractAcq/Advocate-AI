@@ -24,7 +24,26 @@ inventory confirms that the candidate's containers, network and volumes are
 gone. If cleanup cannot be confirmed, it retains the private root and its
 database credentials and reports an incomplete cleanup for manual recovery.
 
-This only covers first activation. Release updates, rollback, stopped-runtime
-recovery, separate schema-migration authority, database encryption, coordinated
-restic capture and clean restore, key custody, real vessel identity/model/NAS
+The first-install path covers initial activation. Release updates, rollback,
+separate schema-migration authority, database encryption, coordinated restic
+capture and clean restore, key custody, real vessel identity/model/NAS
 integration, target hardware checks and independent review remain open.
+
+## Clean stopped-runtime recovery candidate
+
+`stop_vessel` checks the healthy signed installation, removes the Core and
+Console containers and their private network, then stops Knowledge and removes
+its disposable socket volume. It retains the database volume and active
+release record. `recover_vessel` re-verifies the signed stage, Core state and
+credentials, and requires Docker to show only the installation's checked
+persistent data volume. It also confirms that the old container, network and
+socket IDs are absent. It starts a new signed Knowledge container against the
+existing data, then new Core and Console containers, and records their IDs only
+after health checks pass. A failed recovery keeps the old state and data; if
+cleanup or state reconciliation is uncertain, it retains the private root for
+investigation. The actual-image CI rehearsal stops and recovers the synthetic
+installation and rechecks signed image identity and health.
+
+Interrupted-process reconciliation, automated rollback, schema migration,
+coordinated encrypted recovery, target hardware and independent review remain
+open.

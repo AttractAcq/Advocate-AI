@@ -22,7 +22,9 @@ from infrastructure.deploy.knowledge_volume import (
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
-from infrastructure.deploy.vessel_installer import install_vessel, status_vessel
+from infrastructure.deploy.vessel_installer import (
+    install_vessel, recover_vessel, status_vessel, stop_vessel,
+)
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
@@ -118,8 +120,16 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 status.get("result") != "healthy" or
                 activated.get("active") != status.get("active")):
             raise AssertionError("signed first installation did not become healthy")
+        stopped = stop_vessel(install_root, trusted, crane)
+        recovered = recover_vessel(install_root, trusted, crane)
+        restored_status = status_vessel(install_root, trusted, crane)
+        if (stopped.get("result") != "stopped" or
+                recovered.get("result") != "recovered" or
+                restored_status.get("result") != "healthy" or
+                recovered.get("active") != activated.get("active")):
+            raise AssertionError("signed stopped-runtime recovery did not become healthy")
         return {"result": "pass", "activation": "signed-and-healthy",
-                "state": "recorded-after-health"}
+                "state": "recorded-after-health", "recovery": "stopped-and-recovered"}
     finally:
         path = install_root / "vessel-state.json"
         if path.exists():
