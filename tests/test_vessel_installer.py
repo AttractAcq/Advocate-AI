@@ -30,6 +30,15 @@ class VesselInstallerTests(unittest.TestCase):
         self.parent.chmod(0o700)
         self.root = self.parent / "new-install"
 
+    def test_restore_intent_blocks_generic_first_install_recovery(self) -> None:
+        self.root.mkdir(mode=0o700)
+        (self.root / "vessel-restore-intent.json").write_text('{"schema":1}')
+        for operation in (reconcile_first_install, reset_first_install,
+                          resume_first_install):
+            with self.subTest(operation=operation.__name__), \
+                 self.assertRaisesRegex(VesselInstallError, "restore candidate"):
+                operation(self.root, self.parent / "key", self.parent / "crane")
+
     def test_wrong_release_target_cannot_create_install_root(self) -> None:
         with patch("infrastructure.deploy.vessel_installer.verify_bundle",
                    return_value={"schema": 6, "target": "fleet"}), \

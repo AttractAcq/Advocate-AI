@@ -8,12 +8,14 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.vessel_recovery_set import (
-    VesselRecoveryError, _stage_core, _sign_receipt, verify_vessel_recovery_receipt,
+    VesselRecoveryError, _grant_restored_knowledge, _stage_core, _sign_receipt,
+    activate_vessel_recovery_set, verify_vessel_recovery_receipt,
 )
 from scripts.synthetic_pg_fixture import fixture, put
 from services.policy.audit import AuditLog
@@ -81,6 +83,54 @@ class VesselRecoverySetTests(unittest.TestCase):
         receipt.write_text(json.dumps(envelope))
         with self.assertRaisesRegex(VesselRecoveryError, "verification failed"):
             verify_vessel_recovery_receipt(receipt, public)
+
+    def test_clean_activation_refuses_existing_data_volume(self) -> None:
+        identifier = "a" * 32
+        payload = {"schema": 1, "installation_id": identifier,
+                   "release": "b" * 24,
+                   "data_volume": f"sovereign-{identifier}-knowledge-data"}
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        put(self.root / "lab-password", b"synthetic-private-password\n")
+        payload["repository"] = str(self.root / "repository")
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=payload), \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel"}), \
+             patch("infrastructure.deploy.vessel_recovery_set._release_id",
+                   return_value="b" * 24), \
+             patch("infrastructure.deploy.vessel_recovery_set._assert_missing",
+                   side_effect=VesselRecoveryError("volume already exists")), \
+             patch("infrastructure.deploy.vessel_recovery_set._cleanup_failed_install") as cleanup:
+            with self.assertRaisesRegex(VesselRecoveryError, "volume already exists"):
+                activate_vessel_recovery_set(
+                    self.root / "bundle", self.root / "key", self.root / "crane",
+                    self.root / "config", self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "c" * 64,
+                    self.root / "new-install", self.root / "new-state",
+                    self.root / "lab-password", staging)
+        self.assertFalse((self.root / "new-install").exists())
+        cleanup.assert_not_called()
+
+    def test_restricted_table_grants_follow_clean_restore(self) -> None:
+        def sql(_container: str, statement: str) -> str:
+            if "SELECT tablename FROM pg_tables" in statement:
+                return "\n".join(sorted(("knowledge_sources", "knowledge_passages",
+                    "knowledge_quarantine", "knowledge_vectors",
+                    "knowledge_schema_version")))
+            if "has_table_privilege" in statement:
+                return "1:0:1:0"
+            return ""
+
+        with patch("infrastructure.deploy.vessel_recovery_set.postgres_sql",
+                   side_effect=sql) as query, \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_security") as security:
+            _grant_restored_knowledge("a" * 64)
+        security.assert_called_once_with("a" * 64)
+        statements = [call.args[1] for call in query.call_args_list]
+        self.assertEqual(sum(item.startswith("ALTER TABLE") for item in statements), 5)
+        self.assertTrue(any("TO sovereign_ingest" in item for item in statements))
+        self.assertTrue(any("TO sovereign_read" in item for item in statements))
 
 
 if __name__ == "__main__":

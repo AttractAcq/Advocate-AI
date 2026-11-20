@@ -25,13 +25,19 @@ from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, _credentials, start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.vessel_installer import (
-    _operation_lock, _owner_directory, _read_state, _recovery_inventory,
-    _verify_knowledge_schema, _verify_stage,
+    _assert_missing, _cleanup_failed_install, _operation_lock, _owner_directory, _read_state,
+    _recovery_inventory, _release_id, _stage, _state_payload, _verify_knowledge_schema,
+    _verify_stage, _write_intent, _write_state,
+    _write_private_record,
 )
+from infrastructure.deploy.postgres_socket import sql as postgres_sql, verify_security
+from infrastructure.deploy.container_runtime import RuntimeHandle
+from infrastructure.deploy.container_runtime import _docker
+from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_runtime import _state_options
 from infrastructure.release.bundle import verify_bundle
 from infrastructure.restic_repository import create_snapshot, restore_snapshot
-from scripts.phase5_postgres_rehearsal import _dump
+from scripts.phase5_postgres_rehearsal import _dump, _restore
 from services.knowledge.ingestion import _valid_source
 from services.knowledge.manifest_io import load_manifest, read_manifest_bytes
 from services.policy.audit import verify as verify_audit
@@ -403,3 +409,140 @@ def restore_vessel_recovery_files(receipt: Path, receipt_key: Path,
     return {"result": "files-restored-and-verified",
             "snapshot_id": value["snapshot_id"], "sources": sources,
             "audit_count": checkpoint[0]}
+
+
+def _grant_restored_knowledge(container_id: str) -> None:
+    """Recreate the table boundary after pg_restore omits owners and ACLs."""
+    tables = ("knowledge_sources", "knowledge_passages", "knowledge_quarantine",
+              "knowledge_vectors", "knowledge_schema_version")
+    actual = postgres_sql(container_id,
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+    if actual.splitlines() != sorted(tables):
+        raise VesselRecoveryError("restored Knowledge table inventory changed")
+    for table in tables:
+        postgres_sql(container_id,
+                     f"ALTER TABLE public.{table} OWNER TO sovereign_migrate")
+    postgres_sql(container_id,
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON "
+        "public.knowledge_sources, public.knowledge_passages, "
+        "public.knowledge_quarantine, public.knowledge_vectors TO sovereign_ingest")
+    postgres_sql(container_id,
+        "GRANT SELECT ON public.knowledge_sources, public.knowledge_passages, "
+        "public.knowledge_quarantine, public.knowledge_vectors, "
+        "public.knowledge_schema_version TO sovereign_read")
+    verify_security(container_id)
+    rights = postgres_sql(container_id,
+        "SELECT has_table_privilege('sovereign_read','public.knowledge_sources','SELECT')::int"
+        " || ':' || has_table_privilege('sovereign_read','public.knowledge_sources','INSERT')::int"
+        " || ':' || has_table_privilege('sovereign_ingest','public.knowledge_sources','INSERT')::int"
+        " || ':' || has_table_privilege('sovereign_ingest','public.knowledge_schema_version','UPDATE')::int")
+    if rights != "1:0:1:0":
+        raise VesselRecoveryError("restored Knowledge role boundary changed")
+
+
+def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
+                                 console_config: Path, receipt: Path,
+                                 receipt_key: Path, password_file: Path,
+                                 restic: Path, restic_sha256: str,
+                                 root: Path, core_state: Path,
+                                 lab_password: Path,
+                                 staging_parent: Path) -> dict[str, object]:
+    """Activate a clean synthetic host only after signed, restricted restore."""
+    _owner_directory(root.parent)
+    _owner_directory(core_state.parent)
+    _owner_directory(staging_parent)
+    value = verify_vessel_recovery_receipt(receipt, receipt_key)
+    manifest = verify_bundle(bundle, trusted_key)
+    if (manifest.get("schema") != 6 or manifest.get("target") != "vessel"
+            or _release_id(bundle, console_config) != value["release"]):
+        raise VesselRecoveryError("recovery release differs from signed receipt")
+    if (not root.is_absolute() or root.exists() or root.is_symlink()
+            or not core_state.is_absolute() or core_state.exists()
+            or core_state.is_symlink() or
+            root.resolve().is_relative_to(core_state.resolve()) or
+            core_state.resolve().is_relative_to(root.resolve()) or
+            staging_parent.resolve().is_relative_to(root.resolve()) or
+            staging_parent.resolve().is_relative_to(core_state.resolve())):
+        raise VesselRecoveryError("clean recovery requires separate new directories")
+    repository = Path(value["repository"])
+    if any(candidate.resolve().is_relative_to(repository.resolve()) or
+           repository.resolve().is_relative_to(candidate.resolve())
+           for candidate in (root, core_state, staging_parent)):
+        raise VesselRecoveryError("clean recovery paths overlap encrypted repository")
+    lab_secret = _private_bytes(lab_password, 4096).decode("utf-8")
+    if (not 16 <= len(lab_secret.rstrip("\n")) <= 200 or
+            "\r" in lab_secret or "\n" in lab_secret.rstrip("\n")):
+        raise VesselRecoveryError("invalid clean recovery lab credential")
+    services: RuntimeHandle | None = None
+    knowledge: KnowledgeVolumeHandle | None = None
+    installation_id = value["installation_id"]
+    data_volume = value["data_volume"]
+    _assert_missing("volume", data_volume)
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    if (_docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
+            _docker("network", "ls", "--no-trunc", "--filter", scope, "--quiet") or
+            _docker("volume", "ls", "--filter", scope, "--quiet")):
+        raise VesselRecoveryError("installation identity already has Docker resources")
+    with tempfile.TemporaryDirectory(prefix=".vessel-activate-",
+                                     dir=staging_parent) as temporary:
+        restored = Path(temporary) / "restored"
+        restore_vessel_recovery_files(receipt, receipt_key, password_file,
+                                      restic, restic_sha256, restored)
+        root.mkdir(mode=0o700)
+        try:
+            release, stage = _stage(root, bundle, trusted_key, console_config)
+            if release != value["release"]:
+                raise VesselRecoveryError("staged recovery release changed")
+            core_state.mkdir(mode=0o700)
+            shutil.copytree(restored / "sources", core_state / "sources")
+            for name in ("roles.json", "approved.json", "audit.jsonl", "history.db"):
+                shutil.copy2(restored / name, core_state / name, follow_symlinks=False)
+            _write_private_record(root, "vessel-restore-intent.json", {
+                "schema": 1, "snapshot_id": value["snapshot_id"],
+                "release": release, "installation_id": installation_id})
+            _write_intent(root, release, installation_id, core_state, lab_password)
+            knowledge = start_signed_knowledge(stage / "bundle", trusted_key,
+                                               crane, root, installation_id,
+                                               initialize=True)
+            _state_options(core_state, lab_password, root)
+            _restore(knowledge.container_id, restored / "postgres.dump")
+            _grant_restored_knowledge(knowledge.container_id)
+            _verify_knowledge_schema(knowledge)
+            database = _verify_database(stage / "bundle", trusted_key, crane,
+                                        knowledge, core_state, root)
+            if database != {"sources": value["sources"],
+                            "passages": value["passages"]}:
+                raise VesselRecoveryError("restored Knowledge differs from receipt")
+            services = start_signed_vessel_services(
+                stage / "bundle", trusted_key, crane, stage / "console-config.json",
+                core_state, lab_password, root, knowledge, installation_id)
+            _write_state(root, _state_payload(release, installation_id,
+                                               core_state, lab_password,
+                                               services, knowledge))
+            (root / "vessel-restore-intent.json").unlink()
+            (root / "vessel-intent.json").unlink(missing_ok=True)
+            return {"result": "restored-and-activated", "active": release,
+                    "installation_id": installation_id,
+                    "sources": database["sources"],
+                    "passages": database["passages"],
+                    "audit_count": value["audit_count"]}
+        except Exception as exc:
+            (root / "vessel-state.json").unlink(missing_ok=True)
+            if knowledge is None:
+                if (_docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
+                        _docker("network", "ls", "--no-trunc", "--filter", scope, "--quiet") or
+                        _docker("volume", "ls", "--filter", scope, "--quiet")):
+                    raise VesselRecoveryError(
+                        "recovery activation failed before ownership; private state retained"
+                    ) from exc
+                shutil.rmtree(root)
+                shutil.rmtree(core_state, ignore_errors=True)
+                raise
+            if not _cleanup_failed_install(installation_id, services, knowledge,
+                                           data_volume):
+                raise VesselRecoveryError(
+                    "recovery activation failed; cleanup incomplete; private state retained"
+                ) from exc
+            shutil.rmtree(root)
+            shutil.rmtree(core_state, ignore_errors=True)
+            raise
