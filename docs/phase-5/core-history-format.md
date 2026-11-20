@@ -11,7 +11,8 @@ format before and after its SQLite backup copy.
 The Core image build compares the signed bundle's Knowledge and Core-state
 schema labels with the implementation constants. The release verifier still
 checks those labels against the signed compatibility contract in the exact
-Core archive.
+Core archive. CI also attempts an image build declaring Core state schema 2
+and requires that build to fail.
 
 `migrate_legacy_history(path)` is an explicit local helper for a known
 pre-version history database. It checks the old table shape and stored turn
