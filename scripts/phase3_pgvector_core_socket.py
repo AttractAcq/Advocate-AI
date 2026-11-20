@@ -18,13 +18,14 @@ from infrastructure.deploy.container_runtime import (
     RuntimeError as ProductRuntimeError, _health as _product_health,
 )
 from infrastructure.deploy.postgres_socket import (
-    ready as _ready, secure_database as _secure_database, sql as _sql,
+    ready as _ready, secure_database as _secure_database,
 )
 
 _IMAGE = re.compile(r"(?:(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}"
                     r"|sovereign-knowledge:synthetic)\Z")
 _CORE = re.compile(r"sovereign-core:[a-z0-9-]{1,40}\Z")
 _WRITER_DSN = "postgresql://sovereign_ingest@/postgres?host=/run/postgresql"
+_MIGRATION_DSN = "postgresql://sovereign_migrate@/postgres?host=/run/postgresql"
 _READER_DSN = "postgresql://sovereign_read@/postgres?host=/run/postgresql"
 _STAGING = Path(__file__).resolve().parents[1] / "infrastructure/lab/runtime"
 
@@ -38,28 +39,39 @@ def _docker(*args: str, timeout: int = 120) -> str:
     return result.stdout.strip()
 
 
-def _credentials(root: Path) -> tuple[Path, Path, Path, str, str]:
+def _credentials(root: Path) -> tuple[Path, Path, Path, Path, str, str, str]:
     admin = root / "postgres-admin-password"
+    migrate = root / "postgres-migrate.pgpass"
     writer = root / "postgres-writer.pgpass"
     reader = root / "postgres-reader.pgpass"
     admin_secret = secrets.token_hex(32)
+    migration_secret = secrets.token_hex(32)
     writer_secret = secrets.token_hex(32)
     reader_secret = secrets.token_hex(32)
     _put(admin, (admin_secret + "\n").encode())
+    _put(migrate, (f"/run/postgresql:5432:postgres:sovereign_migrate:{migration_secret}\n").encode())
     _put(writer, (f"/run/postgresql:5432:postgres:sovereign_ingest:{writer_secret}\n").encode())
     _put(reader, (f"/run/postgresql:5432:postgres:sovereign_read:{reader_secret}\n").encode())
-    return admin, writer, reader, writer_secret, reader_secret
+    return admin, migrate, writer, reader, migration_secret, writer_secret, reader_secret
+
+
+_SCHEMA_SETUP = """\
+from services.knowledge.postgres_index import _connect, initialize_schema
+dsn='postgresql://sovereign_migrate@/postgres?host=/run/postgresql'
+initialize_schema(dsn)
+with _connect(dsn) as db:
+ db.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_ingest')
+ db.execute('GRANT SELECT ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_read')
+"""
 
 
 _BOOTSTRAP = """\
 import os
 from pathlib import Path
-from services.knowledge.postgres_index import initialize_schema
 from services.knowledge.ingestion import sync_manifest
 from services.knowledge.embedding import build_vectors, vector_search
 root=Path('/var/lib/sovereign')
 dsn=os.environ['SOVEREIGN_KNOWLEDGE_DB']
-initialize_schema(dsn)
 result=sync_manifest(root, root/'approved.json', dsn)
 assert result['indexed']==['ENG-001','DEC-001'], result
 class TestEmbedder:
@@ -143,7 +155,8 @@ def _rehearse_verified_images(image: str, core_image: str,
             _fixture(state)
             credential = root / "lab-password"
             _put(credential, (secrets.token_urlsafe(24) + "\n").encode())
-            admin_password, writer_passfile, reader_passfile, writer_secret, reader_secret = \
+            admin_password, migrate_passfile, writer_passfile, reader_passfile, \
+                migration_secret, writer_secret, reader_secret = \
                 _credentials(root)
             if console_image is not None:
                 config = root / "console-config.json"
@@ -161,7 +174,18 @@ def _rehearse_verified_images(image: str, core_image: str,
                          "-e", "POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password", image)
             created.append(pg)
             _ready(pg)
-            _secure_database(pg, writer_secret, reader_secret)
+            _secure_database(pg, migration_secret, writer_secret, reader_secret)
+            _docker("run", "--rm", "--pull", "never", "--name", name + "-migrate",
+                    "--network", "none", "--read-only",
+                    "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                    "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                    "--user", f"{os.getuid()}:{os.getgid()}",
+                    "--mount", f"type=volume,source={volume},target=/run/postgresql,readonly",
+                    "--mount", (f"type=bind,source={migrate_passfile.resolve()},"
+                                "target=/run/secrets/pgpass,readonly"),
+                    "-e", f"SOVEREIGN_KNOWLEDGE_DB={_MIGRATION_DSN}",
+                    "-e", "PGPASSFILE=/run/secrets/pgpass",
+                    core_image, "python", "-c", _SCHEMA_SETUP)
             _docker("run", "--rm", "--pull", "never", "--name", name + "-ingest",
                     "--network", "none", "--read-only",
                     "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
@@ -174,8 +198,6 @@ def _rehearse_verified_images(image: str, core_image: str,
                     "-e", f"SOVEREIGN_KNOWLEDGE_DB={_WRITER_DSN}",
                     "-e", "PGPASSFILE=/run/secrets/pgpass",
                     core_image, "python", "-c", _BOOTSTRAP)
-            _sql(pg, "GRANT SELECT ON knowledge_sources, knowledge_passages, "
-                 "knowledge_quarantine, knowledge_vectors TO sovereign_read")
             core = _docker("run", "-d", "--rm", "--pull", "never", "--name", name + "-core",
                            "--network", name if network else "none",
                            *(["--network-alias", "core"] if network else []),
