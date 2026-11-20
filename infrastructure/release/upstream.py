@@ -70,6 +70,15 @@ def image_labels_from_archive(archive: Path, role: str) -> dict[str, str]:
     """Read the hash-bound config labels from one validated Docker save."""
     if archive.is_symlink() or not archive.is_file() or not re.fullmatch(r"[a-z-]+", role):
         raise UpstreamError("invalid image archive or role")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise UpstreamError("duplicate image configuration key")
+            value[key] = item
+        return value
+
     try:
         with tarfile.open(archive, "r") as stream:
             members: dict[str, list[tarfile.TarInfo]] = {}
@@ -86,7 +95,7 @@ def image_labels_from_archive(archive: Path, role: str) -> dict[str, str]:
                     raise UpstreamError("missing image configuration file")
                 return source.read()
 
-            manifest = json.loads(small_file("manifest.json"))
+            manifest = json.loads(small_file("manifest.json"), object_pairs_hook=unique_object)
             if (not isinstance(manifest, list) or len(manifest) != 1 or
                     not isinstance(manifest[0], dict) or
                     manifest[0].get("RepoTags") != [f"sovereign-{role}:synthetic"]):
@@ -101,7 +110,7 @@ def image_labels_from_archive(archive: Path, role: str) -> dict[str, str]:
             raw = small_file(config_path)
             if hashlib.sha256(raw).hexdigest() != expected:
                 raise UpstreamError("image configuration digest mismatch")
-            configuration = json.loads(raw)
+            configuration = json.loads(raw, object_pairs_hook=unique_object)
             labels = configuration.get("config", {}).get("Labels") if isinstance(configuration, dict) else None
             if (not isinstance(labels, dict) or
                     any(not isinstance(key, str) or not isinstance(value, str)

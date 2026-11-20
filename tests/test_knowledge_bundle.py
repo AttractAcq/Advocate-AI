@@ -173,6 +173,29 @@ class KnowledgeBundleTests(unittest.TestCase):
             with self.assertRaisesRegex(BundleError, "Core image and signed compatibility"):
                 verify_bundle(self.bundle, self.trusted)
 
+    def test_signer_rejects_duplicate_core_configuration_keys(self) -> None:
+        archive = self.payload / "images" / "core.tar"
+        config = (b'{"config":{"Labels":{'
+                  b'"sovereign.compat.knowledge-schema":"1",'
+                  b'"sovereign.compat.knowledge-schema":"2",'
+                  b'"sovereign.compat.core-state-schema":"1"}}}')
+        name = digest(config) + ".json"
+        manifest = json.dumps([{"Config": name,
+                                "RepoTags": ["sovereign-core:synthetic"],
+                                "Layers": []}]).encode()
+        with tarfile.open(archive, "w") as output:
+            for filename, payload in ((name, config), ("manifest.json", manifest)):
+                member = tarfile.TarInfo(filename)
+                member.size = len(payload)
+                output.addfile(member, io.BytesIO(payload))
+        hash_value = digest(archive.read_bytes())
+        self.images["core"]["archive_sha256"] = hash_value
+        self.images["core"]["image_ref"] = (
+            f"registry.example.invalid/sovereign/core@sha256:{hash_value}")
+        with self.assertRaisesRegex(BundleError, "Core archive has no verified"):
+            self.create()
+        self.assertFalse(self.bundle.exists())
+
     def test_resigned_wrong_target_is_still_rejected(self) -> None:
         self.create()
         manifest_path = self.bundle / "release-manifest.json"
