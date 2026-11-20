@@ -11,8 +11,8 @@ from unittest.mock import patch
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
-    VesselInstallError, _cleanup_failed_install, _read_state, _state_payload,
-    _write_state, install_vessel, recover_vessel,
+    VesselInstallError, _cleanup_failed_install, _read_state, _scoped_list,
+    _state_payload, _write_state, install_vessel, reconcile_vessel, recover_vessel,
 )
 from infrastructure.release.bundle import BundleError
 
@@ -229,6 +229,36 @@ class VesselInstallerTests(unittest.TestCase):
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+    def test_reconcile_rejects_unexpected_scoped_resource_before_removal(self) -> None:
+        self.root.mkdir(mode=0o700)
+        installation_id = "f" * 32
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                          f"sovereign-{installation_id}-knowledge-data",
+                                          "sovereign-knowledge-" + "e" * 12,
+                                          installation_id)
+        _write_state(self.root, _state_payload(
+            "6" * 24, installation_id, self.parent / "state",
+            self.parent / "password", services, knowledge))
+        with patch("infrastructure.deploy.vessel_installer._verify_stage"), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._assert_missing"), \
+             patch("infrastructure.deploy.vessel_installer._volume"), \
+             patch("infrastructure.deploy.vessel_installer._docker",
+                   side_effect=["", "", knowledge.data_volume + "\nunexpected-volume"]) as docker:
+            with self.assertRaises(VesselInstallError):
+                reconcile_vessel(self.root, self.parent / "key", self.parent / "crane")
+            self.assertFalse(any(call.args[:1] == ("rm",)
+                                 for call in docker.call_args_list))
+
+    def test_scoped_inventory_rejects_duplicate_docker_ids(self) -> None:
+        identifier = "a" * 64
+        with patch("infrastructure.deploy.vessel_installer._docker",
+                   return_value=f"{identifier}\n{identifier}"):
+            with self.assertRaisesRegex(VesselInstallError, "invalid scoped"):
+                _scoped_list("ps", "-a")
 
 
 if __name__ == "__main__":

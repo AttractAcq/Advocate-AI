@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from infrastructure.deploy.vessel_installer import (
-    install_vessel, recover_vessel, status_vessel, stop_vessel,
+    install_vessel, reconcile_vessel, recover_vessel, status_vessel, stop_vessel,
 )
 
 
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> None:
     install.add_argument("--console-config", type=Path, required=True)
     install.add_argument("--core-state", type=Path, required=True)
     install.add_argument("--lab-password-file", type=Path, required=True)
-    for command in ("status", "stop", "recover"):
+    for command in ("status", "stop", "reconcile", "recover"):
         commands.add_parser(command, parents=[shared])
     args = parser.parse_args(argv)
     if args.command == "install":
@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> None:
         result = status_vessel(args.root, args.trusted_key, args.crane)
     elif args.command == "stop":
         result = stop_vessel(args.root, args.trusted_key, args.crane)
+    elif args.command == "reconcile":
+        result = reconcile_vessel(args.root, args.trusted_key, args.crane)
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
     print(json.dumps(result, sort_keys=True))

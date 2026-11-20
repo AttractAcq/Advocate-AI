@@ -37,6 +37,18 @@ class VesselCtlTests(unittest.TestCase):
                                         Path("/tmp/crane"))
         self.assertEqual(json.loads(output.getvalue())["result"], "recovered")
 
+    def test_reconcile_routes_to_existing_root(self) -> None:
+        output = StringIO()
+        with patch("scripts.vesselctl.reconcile_vessel",
+                   return_value={"result": "reconciled", "containers": 3,
+                                 "networks": 1, "sockets": 1}) as reconcile, \
+             redirect_stdout(output):
+            main(["reconcile", "--root", "/tmp/vessel", "--trusted-key", "/tmp/key",
+                  "--crane", "/tmp/crane"])
+        reconcile.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
+                                          Path("/tmp/crane"))
+        self.assertEqual(json.loads(output.getvalue())["containers"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
