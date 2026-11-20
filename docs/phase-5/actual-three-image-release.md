@@ -9,6 +9,8 @@ the dated offline vulnerability database. Each role must pass the release
 intake before [schema 6](signed-knowledge-bundle.md) can sign the exact three
 archives, their evidence files and `target=vessel` under one detached Ed25519
 signature. The verifier checks the resulting copy with a separate public key.
+The result records `core_image_compatibility=matched-signed-contract` only when
+the signed schema contract matches the hash-bound Core image configuration.
 It then loads Core, Console and Knowledge only from those verified archives,
 binds the loaded image IDs back to each archive, and runs all three signed
 images together. Core and Console use an internal Docker network with no host

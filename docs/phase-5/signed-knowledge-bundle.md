@@ -16,6 +16,14 @@ and payload checks after copying; a valid signature with the wrong target or
 malformed contract is rejected. The earlier two-image product and separate
 Fleet formats remain valid.
 
+For the vessel format, the signer and verifier also read the hash-bound Core
+configuration from the exact Docker archive. Its `sovereign.compat.knowledge-schema`
+and `sovereign.compat.core-state-schema` labels must equal the signed contract.
+This catches a release metadata mismatch before signing and again when a copied
+bundle is verified. The image builder declares these labels; independent code
+review still needs to confirm the running Core actually implements the declared
+formats.
+
 The CLI accepts a strict descriptor file:
 
 ```sh

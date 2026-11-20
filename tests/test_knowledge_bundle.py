@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,6 +27,27 @@ def digest(payload: bytes) -> str:
 
 
 class KnowledgeBundleTests(unittest.TestCase):
+    def core_archive(self, knowledge_schema: int = 1) -> None:
+        archive = self.payload / "images" / "core.tar"
+        config = json.dumps({"config": {"Labels": {
+            "sovereign.compat.knowledge-schema": str(knowledge_schema),
+            "sovereign.compat.core-state-schema": "1",
+        }}}).encode()
+        name = digest(config) + ".json"
+        manifest = json.dumps([{"Config": name,
+                                "RepoTags": ["sovereign-core:synthetic"],
+                                "Layers": []}]).encode()
+        with tarfile.open(archive, "w") as output:
+            for filename, payload in ((name, config), ("manifest.json", manifest)):
+                member = tarfile.TarInfo(filename)
+                member.size = len(payload)
+                output.addfile(member, io.BytesIO(payload))
+        if hasattr(self, "images") and "core" in self.images:
+            hash_value = digest(archive.read_bytes())
+            self.images["core"]["archive_sha256"] = hash_value
+            self.images["core"]["image_ref"] = (
+                f"registry.example.invalid/sovereign/core@sha256:{hash_value}")
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -48,6 +71,8 @@ class KnowledgeBundleTests(unittest.TestCase):
             scan = self.payload / "evidence" / f"{role}-scan.json"
             sbom = self.payload / "evidence" / f"{role}-sbom.json"
             archive.write_bytes(f"{role} image archive".encode())
+            if role == "core":
+                self.core_archive()
             scan.write_bytes(f"{role} scan".encode())
             sbom.write_bytes(f"{role} sbom".encode())
             self.images[role] = {
@@ -123,12 +148,30 @@ class KnowledgeBundleTests(unittest.TestCase):
 
     def test_future_signed_contract_is_not_runnable_by_this_installer(self) -> None:
         self.compatibility = {"knowledge_schema": 2, "core_state_schema": 1}
+        self.core_archive(2)
         self.create()
         with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
             future = verify_bundle(self.bundle, self.trusted)
         self.assertEqual(future["compatibility"]["knowledge_schema"], 2)
         with self.assertRaisesRegex(BundleError, "unsupported vessel compatibility"):
             require_supported_vessel_compatibility(future)
+
+    def test_signer_and_verifier_reject_core_label_mismatch(self) -> None:
+        self.compatibility = {"knowledge_schema": 2, "core_state_schema": 1}
+        with self.assertRaisesRegex(BundleError, "Core image and signed compatibility"):
+            self.create()
+        self.assertFalse(self.bundle.exists())
+        self.compatibility = SUPPORTED_VESSEL_COMPATIBILITY.copy()
+        self.create()
+        manifest_path = self.bundle / "release-manifest.json"
+        value = json.loads(manifest_path.read_bytes())
+        value["compatibility"]["knowledge_schema"] = 2
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        manifest_path.write_bytes(raw)
+        (self.bundle / "release-manifest.sig").write_bytes(base64.b64encode(self.key.sign(raw)))
+        with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
+            with self.assertRaisesRegex(BundleError, "Core image and signed compatibility"):
+                verify_bundle(self.bundle, self.trusted)
 
     def test_resigned_wrong_target_is_still_rejected(self) -> None:
         self.create()

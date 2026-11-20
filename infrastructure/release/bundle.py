@@ -19,7 +19,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from infrastructure.release.intake import IntakeError, verify_intake
-from infrastructure.release.upstream import UpstreamError, validate_image_archive
+from infrastructure.release.upstream import (
+    UpstreamError, image_labels_from_archive, validate_image_archive,
+)
 
 MANIFEST = "release-manifest.json"
 SIGNATURE = "release-manifest.sig"
@@ -224,6 +226,19 @@ def require_supported_vessel_compatibility(manifest: dict[str, object]) -> None:
         raise BundleError("unsupported vessel compatibility contract")
 
 
+def _check_core_image_compatibility(archive: Path,
+                                    compatibility: dict[str, int]) -> None:
+    try:
+        labels = image_labels_from_archive(archive, "core")
+    except UpstreamError as exc:
+        raise BundleError("Core archive has no verified compatibility labels") from exc
+    if (labels.get("sovereign.compat.knowledge-schema") !=
+            str(compatibility["knowledge_schema"]) or
+            labels.get("sovereign.compat.core-state-schema") !=
+            str(compatibility["core_state_schema"])):
+        raise BundleError("Core image and signed compatibility contract differ")
+
+
 def _preflight_image(payload: Path, evidence: dict[str, str], crane: Path) -> None:
     result = verify_intake(payload / evidence["scan_path"], payload / evidence["sbom_path"],
                            evidence["image_ref"], evidence["scan_sha256"], evidence["sbom_sha256"])
@@ -267,6 +282,8 @@ def create_knowledge_bundle(payload: Path, output: Path, signing_key: Path,
     _validate_image_set(images, {name for name, _ in _files(payload)}, roles)
     for role in roles:
         _preflight_image(payload, images[role], crane)
+    _check_core_image_compatibility(payload / images["core"]["archive_path"],
+                                    compatibility)
     manifest = _create_bundle(payload, output, signing_key, version,
                               images=images, knowledge=True,
                               vessel_compatibility=compatibility)
@@ -450,6 +467,9 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
             if intake.get("archive_sha256") != item["archive_sha256"] or \
                     _sha256(bundle / item["archive_path"]) != item["archive_sha256"]:
                 raise BundleError("signed product image archive does not match the SBOM")
+        if manifest["schema"] == 6:
+            _check_core_image_compatibility(bundle / images["core"]["archive_path"],
+                                            manifest["compatibility"])
     return manifest
 
 

@@ -16,5 +16,6 @@ RUN python fixtures/generate.py && adduser -D -u 10001 sovereign
 USER 10001:10001
 ARG SOVEREIGN_SYNTHETIC_RELEASE=baseline
 LABEL sovereign.synthetic.release="${SOVEREIGN_SYNTHETIC_RELEASE}"
+LABEL sovereign.compat.knowledge-schema="1" sovereign.compat.core-state-schema="1"
 EXPOSE 18100
 CMD ["python", "-m", "uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "18100", "--no-server-header"]
