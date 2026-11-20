@@ -191,6 +191,8 @@ from independent product security review.
 
 | W-128 | Receipt-verified retry of abandoned synthetic restore (T-028) | [PR #156](https://github.com/AttractAcq/Advocate-AI/pull/156) and the [recovery design](phase-5/vessel-recovery-set.md) add a retry command that validates abandoned evidence and the signed receipt before activating a new clean root and Core state with a fresh restore attempt. The [Linux signed-image rehearsal and all twelve CI jobs pass](https://github.com/AttractAcq/Advocate-AI/actions/runs/44772378731), verifying healthy runtime, history and dump isolation after retry. Local `make check` passes 366 tests with 12 skips. In-place replacement and rollback, target hardware and independent review remain open. | Actual-image retry and all CI jobs passed; review pending; T-028/G3 open |
 
+| W-129 | Stopped synthetic vessel release switch and rollback (T-024/T-028) | The [switch and rollback runbook](phase-5/vessel-release-switch.md) adds signed three-image release activation on the checked existing Knowledge volume after a clean stop, full source index verification before Core starts, a one-step prior release pointer, and a stopped rollback command. The Linux actual-image rehearsal switches between two distinct signed manifests and checks history and audit continuity. Different image versions, migrations, target hardware, protected media, key custody and independent review remain open. | Local candidate; CI and review pending; T-024/T-028/G3 open |
+
 When a row is completed, link its commit, CI result and evidence; then change
 its state to **locally complete**. Do not remove it until its external gate is
 closed. Phase-specific gate records: [G0A](phase-1/gate.md), [G1](phase-2/gate.md),

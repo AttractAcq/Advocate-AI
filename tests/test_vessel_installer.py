@@ -326,6 +326,17 @@ class VesselInstallerTests(unittest.TestCase):
                                  services, knowledge)
         _write_state(self.root, payload)
         self.assertEqual(_read_state(self.root)["active"], "1" * 24)
+        with_previous = _state_payload("1" * 24, "f" * 32,
+                                       self.parent / "state", self.parent / "password",
+                                       services, knowledge, previous="2" * 24)
+        _write_state(self.root, with_previous)
+        self.assertEqual(_read_state(self.root)["previous"], "2" * 24)
+        for invalid in ("1" * 24, "z" * 24):
+            path = self.root / "vessel-state.json"
+            path.write_text(json.dumps({**with_previous, "previous": invalid}))
+            with self.assertRaises(VesselInstallError):
+                _read_state(self.root)
+        _write_state(self.root, payload)
         path = self.root / "vessel-state.json"
         path.write_text(path.read_text().replace('"schema":1', '"schema":1,"schema":1'))
         with self.assertRaises(VesselInstallError):

@@ -37,6 +37,10 @@ from infrastructure.deploy.vessel_installer import (
     finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
     reset_first_install, resume_first_install, status_vessel,
+    stop_vessel,
+)
+from infrastructure.deploy.vessel_release_switch import (
+    rollback_stopped_vessel_release, switch_stopped_vessel_release,
 )
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -178,7 +182,8 @@ def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
                        capture_output=True, text=True, timeout=30)
 
 
-def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
+def _rehearse_first_install(bundle: Path, update_bundle: Path,
+                            trusted: Path, crane: Path,
                             root: Path, restic: Path,
                             restic_sha256: str) -> dict[str, str]:
     """Activate from signed media and check the recorded three-image state."""
@@ -283,6 +288,32 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 not final_audit.startswith(initial_audit) or
                 final_count <= initial_count):
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
+        stop_vessel(install_root, trusted, crane)
+        switched = switch_stopped_vessel_release(
+            install_root, trusted, crane, update_bundle, config)
+        switched_status = status_vessel(install_root, trusted, crane)
+        switched_record = json.loads((install_root / "vessel-state.json").read_text())
+        switched_history = _probe_vessel_history(
+            switched_record["runtime"]["core_id"], first_history["conversation_id"])
+        if (switched["result"] != "upgraded" or
+                switched["previous"] != activated["active"] or
+                switched["active"] == activated["active"] or
+                switched_status["active"] != switched["active"] or
+                switched_history != first_history or
+                not audit_path.read_bytes().startswith(final_audit)):
+            raise AssertionError("stopped signed vessel release switch failed")
+        stop_vessel(install_root, trusted, crane)
+        rolled = rollback_stopped_vessel_release(install_root, trusted, crane)
+        rolled_status = status_vessel(install_root, trusted, crane)
+        rolled_record = json.loads((install_root / "vessel-state.json").read_text())
+        rolled_history = _probe_vessel_history(
+            rolled_record["runtime"]["core_id"], first_history["conversation_id"])
+        if (rolled["result"] != "rolled-back" or
+                rolled["active"] != activated["active"] or
+                rolled["previous"] != switched["active"] or
+                rolled_status["active"] != activated["active"] or
+                rolled_history != first_history):
+            raise AssertionError("stopped signed vessel rollback failed")
         return {"result": "pass", "activation": "signed-and-healthy",
                 "schema_authority": "migration-role-only",
                 "schema_version": 1, "unknown_schema": "denied",
@@ -290,7 +321,9 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                 "encrypted_recovery_set": "signed-restored-and-knowledge-verified",
                 "state": "recorded-after-health", "recovery": "stopped-and-recovered",
                 "interrupted_recovery": "orphan-runtime-reconciled",
-                "interrupted_stop": "knowledge-stop-completed"}
+                "interrupted_stop": "knowledge-stop-completed",
+                "release_switch": "stopped-signed-and-healthy",
+                "release_rollback": "stopped-signed-and-healthy"}
     finally:
         if orphan_services is not None:
             stop_runtime(orphan_services)
@@ -694,6 +727,15 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         set(verified.get("images", {})) != set(ROLES)):
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
+                update_bundle = root / "signed-three-image-trial-v2"
+                create_knowledge_bundle(payload, update_bundle, private,
+                                        "synthetic-three-image-trial-v2",
+                                        descriptors, crane=crane)
+                update_verified = verify_bundle(update_bundle, trusted)
+                if (update_verified.get("schema") != 6 or
+                        update_verified.get("target") != "vessel" or
+                        set(update_verified.get("images", {})) != set(ROLES)):
+                    raise AssertionError("second signed vessel bundle verification failed")
                 result["bundle_manifest_sha256"] = _sha256(bundle / "release-manifest.json")
                 ids = {role: _image_id(bundle, role, verified["images"][role], crane)
                        for role in ROLES}
@@ -718,7 +760,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["persistent_knowledge_restart"] = \
                     _rehearse_persistent_knowledge(bundle, trusted, crane, root)
                 result["signed_vessel_first_install"] = \
-                    _rehearse_first_install(bundle, trusted, crane, root, restic,
+                    _rehearse_first_install(bundle, update_bundle, trusted, crane,
+                                            root, restic,
                                             restic_sha256)
                 result["signed_vessel_clean_restore"] = \
                     _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
