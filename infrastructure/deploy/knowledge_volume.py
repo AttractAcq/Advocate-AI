@@ -114,7 +114,7 @@ def _volume(name: str, installation_id: str, role: str, *, create: bool,
                                capture_output=True, timeout=10)
         if probe.returncode == 0:
             raise KnowledgeVolumeError("Knowledge volume already exists")
-        if b"No such volume" not in probe.stderr:
+        if b"no such volume" not in probe.stderr.lower():
             raise KnowledgeVolumeError("cannot confirm Knowledge volume absence")
         labels = ["--label", f"sovereign.synthetic.install={installation_id}",
                   "--label", f"sovereign.synthetic.role={role}"]

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeError, KnowledgeVolumeHandle, _credentials,
+    KnowledgeVolumeError, KnowledgeVolumeHandle, _credentials, _volume,
     start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import (
@@ -74,6 +76,26 @@ class KnowledgeVolumeTests(unittest.TestCase):
             self.assertNotIn(secret, input_call.call_args.args[1])
             with self.assertRaises(PostgresSocketError):
                 verify_login("b" * 64, "postgres", secret)
+
+    def test_volume_creation_distinguishes_absence_from_daemon_failure(self) -> None:
+        name, installation = "sovereign-test-volume", "a" * 32
+        metadata = {"Name": name, "Driver": "local",
+                    "Labels": {"sovereign.synthetic.install": installation,
+                               "sovereign.synthetic.role": "knowledge-data"}}
+        missing = subprocess.CompletedProcess([], 1, b"", b"Error: no such volume")
+        with patch("infrastructure.deploy.knowledge_volume.subprocess.run",
+                   return_value=missing), \
+             patch("infrastructure.deploy.knowledge_volume.docker",
+                   side_effect=[name, json.dumps(metadata)]) as docker:
+            _volume(name, installation, "knowledge-data", create=True)
+            self.assertEqual(docker.call_count, 2)
+        denied = subprocess.CompletedProcess([], 1, b"", b"permission denied")
+        with patch("infrastructure.deploy.knowledge_volume.subprocess.run",
+                   return_value=denied), \
+             patch("infrastructure.deploy.knowledge_volume.docker") as docker:
+            with self.assertRaises(KnowledgeVolumeError):
+                _volume(name, installation, "knowledge-data", create=True)
+            docker.assert_not_called()
 
 
 if __name__ == "__main__":
