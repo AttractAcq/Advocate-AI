@@ -27,6 +27,7 @@ from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, _credentials, _migration_credential, _volume, probe_knowledge,
     start_signed_knowledge, stop_knowledge,
 )
+from infrastructure.deploy.postgres_socket import PostgresSocketError, sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import (
     _state_options, probe_signed_vessel_services, start_signed_vessel_services,
 )
@@ -111,7 +112,7 @@ dsn='postgresql://sovereign_migrate@/postgres?host=/run/postgresql'
 initialize_schema(dsn)
 with _connect(dsn) as db:
  db.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_ingest')
- db.execute('GRANT SELECT ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_read')
+ db.execute('GRANT SELECT ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors, knowledge_schema_version TO sovereign_read')
 """
     program = """\
 import json
@@ -170,6 +171,17 @@ def _state_payload(identifier: str, installation_id: str,
                     "socket_volume": knowledge.socket_volume,
                     "data_volume": knowledge.data_volume},
     }
+
+
+def _verify_knowledge_schema(knowledge: KnowledgeVolumeHandle) -> None:
+    try:
+        rows = postgres_sql(
+            knowledge.container_id,
+            "SELECT singleton::int || ':' || version FROM public.knowledge_schema_version")
+    except PostgresSocketError as exc:
+        raise VesselInstallError("Knowledge schema version unavailable") from exc
+    if rows != "1:1":
+        raise VesselInstallError("unsupported or incomplete Knowledge schema version")
 
 
 def _write_private_record(root: Path, name: str,
@@ -383,6 +395,7 @@ def status_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
         raise VesselInstallError("Core state and lab credential must be external")
     _, reader = _state_options(state, password, root)
     probe_knowledge(knowledge)
+    _verify_knowledge_schema(knowledge)
     probe_signed_vessel_services(services, knowledge, state, password, reader)
     try:
         console_mounts = json.loads(_docker("inspect", services.console_id,
@@ -914,6 +927,7 @@ def recover_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]
     try:
         knowledge = start_signed_knowledge(stage / "bundle", trusted_key, crane,
                                            root, installation_id, initialize=False)
+        _verify_knowledge_schema(knowledge)
         services = start_signed_vessel_services(
             stage / "bundle", trusted_key, crane, stage / "console-config.json",
             state, password, root, knowledge, installation_id)

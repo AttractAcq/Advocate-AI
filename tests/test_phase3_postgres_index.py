@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
 from urllib.parse import urlsplit
 
 import httpx
@@ -18,7 +19,8 @@ from apps.api.main import Settings, create_app
 from services.knowledge.ingestion import sync_manifest
 from services.knowledge.indexed_retrieval import approved_rows, preview_index, search_index
 from services.knowledge.embedding import build_vectors, vector_search
-from services.knowledge.postgres_index import (_connect, initialize_schema,
+from services.knowledge.postgres_index import (_connect, _schema_state, initialize_schema,
+                                               PostgresIndexUnavailable,
                                                verify_knowledge_snapshot)
 
 
@@ -33,6 +35,26 @@ class FakeEmbedder:
 class FakeModel:
     async def complete(self, question: str, context: list[dict[str, object]], *, general: bool = False) -> str:
         return "Synthetic answer [ENG-001 v1]"
+
+
+class SchemaVersionBoundaryTests(unittest.TestCase):
+    def test_unversioned_existing_table_requires_explicit_migration(self) -> None:
+        db = Mock()
+        db.execute.return_value.fetchone.side_effect = [
+            {"present": False}, {"present": True},
+            {"present": False}, {"present": False}, {"present": False},
+        ]
+        with self.assertRaisesRegex(PostgresIndexUnavailable, "unversioned"):
+            _schema_state(db)
+        self.assertFalse(db.execute.return_value.fetchall.called)
+
+    def test_future_version_is_not_accepted_as_current(self) -> None:
+        db = Mock()
+        db.execute.return_value.fetchone.side_effect = [{"present": True}] * 5
+        db.execute.return_value.fetchall.return_value = [
+            {"singleton": True, "version": 2}]
+        with self.assertRaisesRegex(PostgresIndexUnavailable, "unsupported"):
+            _schema_state(db)
 
 
 @unittest.skipUnless(os.environ.get("SOVEREIGN_TEST_PG_DSN"), "local pgvector database not configured")

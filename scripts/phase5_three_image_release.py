@@ -23,7 +23,7 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_installer import (
-    _ingest, _stage, _write_intent, finish_vessel_stop, install_vessel,
+    VesselInstallError, _ingest, _stage, _write_intent, finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
     reset_first_install, resume_first_install, status_vessel,
 )
@@ -115,6 +115,19 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
             "has_schema_privilege('sovereign_read','public','CREATE')::int")
         if schema_rights != "1:0:0":
             raise AssertionError("Knowledge migration and application roles are not separated")
+        try:
+            postgres_sql(runtime["knowledge_id"],
+                         "UPDATE public.knowledge_schema_version SET version=2")
+            try:
+                status_vessel(install_root, trusted, crane)
+            except VesselInstallError as exc:
+                if "schema version" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("unknown Knowledge schema version was accepted")
+        finally:
+            postgres_sql(runtime["knowledge_id"],
+                         "UPDATE public.knowledge_schema_version SET version=1")
         stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
                                    runtime["console_id"]))
         stopped = finish_vessel_stop(install_root, trusted, crane)
@@ -138,6 +151,7 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
             raise AssertionError("signed stopped-runtime recovery did not become healthy")
         return {"result": "pass", "activation": "signed-and-healthy",
                 "schema_authority": "migration-role-only",
+                "schema_version": 1, "unknown_schema": "denied",
                 "state": "recorded-after-health", "recovery": "stopped-and-recovered",
                 "interrupted_recovery": "orphan-runtime-reconciled",
                 "interrupted_stop": "knowledge-stop-completed"}

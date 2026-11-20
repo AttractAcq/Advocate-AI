@@ -26,6 +26,13 @@ class PostgresIndexUnavailable(OSError):
     """The configured local index cannot be read safely."""
 
 
+KNOWLEDGE_SCHEMA_VERSION = 1
+_KNOWLEDGE_TABLES = (
+    "knowledge_sources", "knowledge_passages", "knowledge_quarantine",
+    "knowledge_vectors",
+)
+
+
 def _connect(dsn: str) -> psycopg.Connection:
     parsed = urlsplit(dsn)
     try:
@@ -47,34 +54,73 @@ def _connect(dsn: str) -> psycopg.Connection:
         raise ValueError("PostgreSQL index requires a numeric loopback or approved local socket URI")
     try:
         return psycopg.connect(dsn, connect_timeout=3,
-                               options="-c statement_timeout=10000", row_factory=dict_row)
+                               options="-c statement_timeout=10000 -c search_path=public",
+                               row_factory=dict_row)
     except psycopg.Error as exc:
         raise PostgresIndexUnavailable("PostgreSQL index unavailable") from exc
 
 
+def _schema_state(db: psycopg.Connection) -> int:
+    ledger = db.execute(
+        "SELECT to_regclass('public.knowledge_schema_version') IS NOT NULL AS present"
+    ).fetchone()["present"]
+    relations = [db.execute("SELECT to_regclass(%s) IS NOT NULL AS present",
+                            (f"public.{name}",)).fetchone()["present"]
+                 for name in _KNOWLEDGE_TABLES]
+    if not ledger:
+        if any(relations):
+            raise PostgresIndexUnavailable("unversioned Knowledge schema requires explicit migration")
+        return 0
+    rows = db.execute("SELECT singleton, version FROM public.knowledge_schema_version").fetchall()
+    if (len(rows) != 1 or rows[0]["singleton"] is not True or
+            type(rows[0]["version"]) is not int or
+            rows[0]["version"] != KNOWLEDGE_SCHEMA_VERSION or
+            not all(relations)):
+        raise PostgresIndexUnavailable("unsupported or incomplete Knowledge schema version")
+    return KNOWLEDGE_SCHEMA_VERSION
+
+
+def verify_schema_version(dsn: str) -> int:
+    """Reject an absent, unversioned, incomplete or future database schema."""
+    try:
+        with _connect(dsn) as db:
+            if _schema_state(db) != KNOWLEDGE_SCHEMA_VERSION:
+                raise PostgresIndexUnavailable("Knowledge schema is not initialized")
+    except psycopg.Error as exc:
+        raise PostgresIndexUnavailable("Knowledge schema version unavailable") from exc
+    return KNOWLEDGE_SCHEMA_VERSION
+
+
 def initialize_schema(dsn: str) -> None:
-    """Provision once with a migration role after pgvector is installed."""
+    """Provision schema 1 once; refuse unversioned or incompatible databases."""
     try:
         with _connect(dsn) as db:
             if db.execute("SELECT 1 FROM pg_extension WHERE extname='vector'").fetchone() is None:
                 raise PostgresIndexUnavailable("pgvector extension unavailable")
-            db.execute("""CREATE TABLE IF NOT EXISTS knowledge_sources (
+            if _schema_state(db) == KNOWLEDGE_SCHEMA_VERSION:
+                return
+            db.execute("""CREATE TABLE public.knowledge_sources (
                 document_id text PRIMARY KEY, relative_path text NOT NULL,
                 collection text NOT NULL, classification text NOT NULL,
                 owner text NOT NULL, version text NOT NULL, sha256 text NOT NULL,
                 source_type text NOT NULL, state text NOT NULL)""")
-            db.execute("""CREATE TABLE IF NOT EXISTS knowledge_passages (
-                document_id text NOT NULL REFERENCES knowledge_sources(document_id) ON DELETE CASCADE,
+            db.execute("""CREATE TABLE public.knowledge_passages (
+                document_id text NOT NULL REFERENCES public.knowledge_sources(document_id) ON DELETE CASCADE,
                 ordinal integer NOT NULL, text text NOT NULL,
                 PRIMARY KEY (document_id, ordinal))""")
-            db.execute("""CREATE TABLE IF NOT EXISTS knowledge_quarantine (
+            db.execute("""CREATE TABLE public.knowledge_quarantine (
                 document_id text PRIMARY KEY, reason text NOT NULL)""")
-            db.execute("""CREATE TABLE IF NOT EXISTS knowledge_vectors (
+            db.execute("""CREATE TABLE public.knowledge_vectors (
                 document_id text NOT NULL, ordinal integer NOT NULL,
                 model text NOT NULL, embedding vector NOT NULL,
                 PRIMARY KEY (document_id, ordinal),
-                FOREIGN KEY (document_id, ordinal) REFERENCES knowledge_passages(document_id, ordinal)
+                FOREIGN KEY (document_id, ordinal) REFERENCES public.knowledge_passages(document_id, ordinal)
                     ON DELETE CASCADE)""")
+            db.execute("""CREATE TABLE public.knowledge_schema_version (
+                singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+                version integer NOT NULL CHECK (version > 0))""")
+            db.execute("INSERT INTO public.knowledge_schema_version (version) VALUES (%s)",
+                       (KNOWLEDGE_SCHEMA_VERSION,))
     except psycopg.Error as exc:
         raise PostgresIndexUnavailable("PostgreSQL schema unavailable") from exc
 
@@ -103,6 +149,8 @@ def verify_knowledge_snapshot(root: Path, manifest: Path, dsn: str,
     try:
         with _connect(dsn) as db:
             db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            if _schema_state(db) != KNOWLEDGE_SCHEMA_VERSION:
+                raise ValueError("Knowledge snapshot has no schema version")
             sources = {row["document_id"]: row for row in db.execute("SELECT * FROM knowledge_sources")}
             if set(sources) != set(ids) or db.execute("SELECT 1 FROM knowledge_quarantine LIMIT 1").fetchone():
                 raise ValueError("knowledge index source set or quarantine mismatch")

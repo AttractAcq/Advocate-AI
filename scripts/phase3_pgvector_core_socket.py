@@ -61,7 +61,7 @@ dsn='postgresql://sovereign_migrate@/postgres?host=/run/postgresql'
 initialize_schema(dsn)
 with _connect(dsn) as db:
  db.execute('GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_ingest')
- db.execute('GRANT SELECT ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors TO sovereign_read')
+ db.execute('GRANT SELECT ON knowledge_sources, knowledge_passages, knowledge_quarantine, knowledge_vectors, knowledge_schema_version TO sovereign_read')
 """
 
 
@@ -86,10 +86,11 @@ _API_CHECK = """\
 import json, os, psycopg
 from pathlib import Path
 import httpx
-from services.knowledge.postgres_index import _connect
+from services.knowledge.postgres_index import _connect, verify_schema_version
 root=Path('/var/lib/sovereign')
 password=Path('/run/secrets/lab-password').read_text().strip()
 dsn=os.environ['SOVEREIGN_KNOWLEDGE_DB']
+assert verify_schema_version(dsn)==1
 with _connect(dsn) as db:
  assert db.execute('SELECT current_user').fetchone()['current_user']=='sovereign_read'
 def denied(statement):
@@ -128,6 +129,7 @@ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) a
  revoked=client.post('/api/search',headers=engineer,json={'query':'generator inspection'})
  assert revoked.status_code==200 and revoked.json()['results']==[],revoked.text
  print(json.dumps({'result':'pass','sources':2,'denied_role':'deckhand','revocation':'denied',
+                   'schema_version':1,
                    'database_role':'sovereign_read','database_write':'denied',
                    'writer_auth':'denied'}))
 """
