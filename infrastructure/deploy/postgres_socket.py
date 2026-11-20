@@ -62,18 +62,21 @@ def pg_input(identifier: str, program: str, payload: str) -> str:
     return completed.stdout.strip()
 
 
-def secure_database(identifier: str, writer_secret: str, reader_secret: str) -> None:
-    """Create separate roles and replace bootstrap trust with local SCRAM."""
+def secure_database(identifier: str, migration_secret: str,
+                    writer_secret: str, reader_secret: str) -> None:
+    """Separate schema, ingestion and read roles behind local SCRAM."""
     if not all(re.fullmatch(r"[0-9a-f]{64}", value)
-               for value in (writer_secret, reader_secret)):
+               for value in (migration_secret, writer_secret, reader_secret)):
         raise PostgresSocketError("invalid PostgreSQL role secret")
     sql(identifier, "CREATE EXTENSION vector")
     pg_input(identifier, "psql -X -v ON_ERROR_STOP=1 -d postgres",
              "SET password_encryption='scram-sha-256';\n"
+             f"CREATE ROLE sovereign_migrate LOGIN PASSWORD '{migration_secret}';\n"
              f"CREATE ROLE sovereign_ingest LOGIN PASSWORD '{writer_secret}';\n"
              f"CREATE ROLE sovereign_read LOGIN PASSWORD '{reader_secret}';\n"
              "REVOKE ALL ON SCHEMA public FROM PUBLIC;\n"
-             "GRANT USAGE, CREATE ON SCHEMA public TO sovereign_ingest;\n"
+             "GRANT USAGE, CREATE ON SCHEMA public TO sovereign_migrate;\n"
+             "GRANT USAGE ON SCHEMA public TO sovereign_ingest;\n"
              "GRANT USAGE ON SCHEMA public TO sovereign_read;\n")
     pg_input(identifier, "cat > /var/lib/postgresql/data/pg_hba.conf", HBA)
     verify_security(identifier, reload=True)
@@ -92,18 +95,22 @@ def verify_security(identifier: str, *, reload: bool = False) -> None:
                 "SELECT rolname || ':' || rolsuper::int || ':' || rolcreatedb::int || ':' || "
                 "rolcreaterole::int || ':' || rolreplication::int || ':' || rolbypassrls::int "
                 "FROM pg_roles WHERE rolname IN "
-                "('sovereign_ingest','sovereign_read') ORDER BY rolname")
+                "('sovereign_ingest','sovereign_migrate','sovereign_read') ORDER BY rolname")
     if roles.splitlines() != ["sovereign_ingest:0:0:0:0:0",
+                              "sovereign_migrate:0:0:0:0:0",
                               "sovereign_read:0:0:0:0:0"]:
         raise PostgresSocketError("PostgreSQL application role privileges changed")
-    if sql(identifier,
-           "SELECT has_schema_privilege('sovereign_read','public','CREATE')") != "f":
-        raise PostgresSocketError("Core database role can create schema objects")
+    for role, allowed in (("sovereign_migrate", "t"),
+                          ("sovereign_ingest", "f"),
+                          ("sovereign_read", "f")):
+        if sql(identifier,
+               f"SELECT has_schema_privilege('{role}','public','CREATE')") != allowed:
+            raise PostgresSocketError("Knowledge schema privileges changed")
 
 
 def verify_login(identifier: str, role: str, secret: str) -> None:
     """Check a role password via stdin without putting it in Docker arguments."""
-    if (role not in {"sovereign_ingest", "sovereign_read"}
+    if (role not in {"sovereign_migrate", "sovereign_ingest", "sovereign_read"}
             or not re.fullmatch(r"[0-9a-f]{64}", secret)):
         raise PostgresSocketError("invalid PostgreSQL login probe")
     program = ("IFS= read -r password; export PGPASSWORD=\"$password\"; "
