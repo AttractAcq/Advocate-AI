@@ -91,12 +91,59 @@ class KnowledgeBundleTests(unittest.TestCase):
     def identity(archive: Path, *args: object) -> dict[str, str]:
         return {"archive_sha256": digest(archive.read_bytes())}
 
-    def create(self) -> dict[str, object]:
+    def create(self, model_id: str | None = None) -> dict[str, object]:
         with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake), \
                 patch("infrastructure.release.bundle.validate_image_archive", side_effect=self.identity):
             return create_knowledge_bundle(self.payload, self.bundle, self.private,
                                            "0.1.0", self.images, self.compatibility,
-                                           crane=self.root / "crane")
+                                           crane=self.root / "crane", model_id=model_id)
+
+    def test_model_files_are_signed_with_exact_inventory(self) -> None:
+        model = self.payload / "model"
+        model.mkdir()
+        (model / "config.json").write_text('{"model_type":"synthetic"}')
+        (model / "weights.bin").write_bytes(b"fictional weights")
+        with self.assertRaisesRegex(BundleError, "model files require"):
+            self.create()
+        manifest = self.create("synthetic-lab-model")
+        self.assertEqual(manifest["schema"], 7)
+        self.assertEqual(manifest["model"]["id"], "synthetic-lab-model")
+        self.assertEqual([row["path"] for row in manifest["model"]["files"]],
+                         ["model/config.json", "model/weights.bin"])
+        with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
+            verified = verify_bundle(self.bundle, self.trusted)
+        self.assertEqual(verified, manifest)
+        require_supported_vessel_compatibility(verified)
+        (self.bundle / "model" / "weights.bin").write_bytes(b"fictional weightX")
+        with self.assertRaisesRegex(BundleError, "payload hash mismatch"):
+            verify_bundle(self.bundle, self.trusted)
+
+    def test_signed_model_descriptor_must_match_signed_file_rows(self) -> None:
+        (self.payload / "model").mkdir()
+        (self.payload / "model" / "weights.bin").write_bytes(b"fictional weights")
+        self.create("synthetic-lab-model")
+        manifest_path = self.bundle / "release-manifest.json"
+        value = json.loads(manifest_path.read_bytes())
+        value["model"]["files"] = []
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        manifest_path.write_bytes(raw)
+        (self.bundle / "release-manifest.sig").write_bytes(base64.b64encode(self.key.sign(raw)))
+        with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
+            with self.assertRaisesRegex(BundleError, "model files differ"):
+                verify_bundle(self.bundle, self.trusted)
+
+    def test_resigned_fractional_schema_cannot_select_model_format(self) -> None:
+        (self.payload / "model").mkdir()
+        (self.payload / "model" / "weights.bin").write_bytes(b"fictional weights")
+        self.create("synthetic-lab-model")
+        manifest_path = self.bundle / "release-manifest.json"
+        value = json.loads(manifest_path.read_bytes())
+        value["schema"] = 7.0
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        manifest_path.write_bytes(raw)
+        (self.bundle / "release-manifest.sig").write_bytes(base64.b64encode(self.key.sign(raw)))
+        with self.assertRaisesRegex(BundleError, "invalid manifest fields"):
+            verify_bundle(self.bundle, self.trusted)
 
     def test_signs_and_verifies_exact_three_image_vessel_set(self) -> None:
         manifest = self.create()
