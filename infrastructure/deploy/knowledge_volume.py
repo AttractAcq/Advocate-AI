@@ -21,7 +21,9 @@ from infrastructure.deploy.container_runtime import _image_id
 from infrastructure.deploy.postgres_socket import (
     docker, ready, secure_database, verify_login, verify_security,
 )
-from infrastructure.release.bundle import BundleError, verify_bundle
+from infrastructure.release.bundle import (
+    BundleError, require_supported_vessel_compatibility, verify_bundle,
+)
 
 
 class KnowledgeVolumeError(ValueError):
@@ -172,8 +174,7 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
             not _INSTALL.fullmatch(restore_attempt)):
         raise KnowledgeVolumeError("invalid Knowledge restore attempt")
     manifest = verify_bundle(bundle, trusted_key)
-    if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
-        raise BundleError("Knowledge runtime requires a signed vessel bundle")
+    require_supported_vessel_compatibility(manifest)
     image_id = _image_id(bundle, "knowledge", manifest["images"]["knowledge"], crane)
     data_name = f"sovereign-{installation_id}-knowledge-data"
     run_name = f"sovereign-knowledge-{uuid.uuid4().hex[:12]}"

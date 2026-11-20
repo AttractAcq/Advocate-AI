@@ -43,7 +43,9 @@ from infrastructure.deploy.vessel_release_switch import (
     discard_stopped_vessel_stage, rollback_stopped_vessel_release,
     switch_stopped_vessel_release,
 )
-from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
+from infrastructure.release.bundle import (
+    SUPPORTED_VESSEL_COMPATIBILITY, create_knowledge_bundle, verify_bundle,
+)
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
@@ -836,10 +838,13 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 bundle = root / "signed-three-image-trial"
                 created = create_knowledge_bundle(payload, bundle, private,
                                                   "synthetic-three-image-trial",
-                                                  descriptors, crane=crane)
+                                                  descriptors,
+                                                  SUPPORTED_VESSEL_COMPATIBILITY,
+                                                  crane=crane)
                 verified = verify_bundle(bundle, trusted)
                 if (verified != created or verified.get("schema") != 6 or
                         verified.get("target") != "vessel" or
+                        verified.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY or
                         set(verified.get("images", {})) != set(ROLES)):
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
@@ -868,16 +873,20 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 update_bundle = root / "signed-three-image-trial-v2"
                 create_knowledge_bundle(update_payload, update_bundle, private,
                                         "synthetic-three-image-trial-v2",
-                                        update_descriptors, crane=crane)
+                                        update_descriptors,
+                                        SUPPORTED_VESSEL_COMPATIBILITY,
+                                        crane=crane)
                 update_verified = verify_bundle(update_bundle, trusted)
                 if (update_verified.get("schema") != 6 or
                         update_verified.get("target") != "vessel" or
+                        update_verified.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY or
                         set(update_verified.get("images", {})) != set(ROLES)):
                     raise AssertionError("second signed vessel bundle verification failed")
                 if (_image_id(update_bundle, "core", update_verified["images"]["core"], crane)
                         == _image_id(bundle, "core", verified["images"]["core"], crane)):
                     raise AssertionError("signed Core image identity did not change")
                 result["bundle_manifest_sha256"] = _sha256(bundle / "release-manifest.json")
+                result["vessel_compatibility"] = SUPPORTED_VESSEL_COMPATIBILITY
                 ids = {role: _image_id(bundle, role, verified["images"][role], crane)
                        for role in ROLES}
                 runtime = _rehearse_verified_images(ids["knowledge"], ids["core"],

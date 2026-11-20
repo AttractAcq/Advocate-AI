@@ -14,6 +14,7 @@ from infrastructure.deploy.vessel_release_switch import (
     discard_stopped_vessel_stage, rollback_stopped_vessel_release,
     switch_stopped_vessel_release,
 )
+from infrastructure.release.bundle import BundleError, SUPPORTED_VESSEL_COMPATIBILITY
 
 
 class VesselReleaseSwitchTests(unittest.TestCase):
@@ -43,7 +44,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
         config.write_text("{}")
         config.chmod(0o644)
         with patch("infrastructure.deploy.vessel_installer.verify_bundle",
-                   return_value={"schema": 6, "target": "vessel"}), \
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
              patch("infrastructure.deploy.vessel_installer._release_id",
                    side_effect=["1" * 24, "2" * 24, "2" * 24]), \
@@ -67,7 +69,8 @@ class VesselReleaseSwitchTests(unittest.TestCase):
         candidate.mkdir(parents=True)
         candidate.parent.chmod(0o700)
         with patch("infrastructure.deploy.vessel_installer.verify_bundle",
-                   return_value={"schema": 6, "target": "vessel"}), \
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
              patch("infrastructure.deploy.vessel_installer._release_id",
                    return_value="2" * 24), \
@@ -88,6 +91,26 @@ class VesselReleaseSwitchTests(unittest.TestCase):
                     self.root, self.key, self.crane,
                     self.parent / "bundle", self.parent / "config")
             stage.assert_not_called()
+        self.assertEqual(_read_state(self.root), self.current)
+
+    def test_future_signed_contract_denies_switch_before_candidate_stage(self) -> None:
+        with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
+             patch("infrastructure.deploy.vessel_release_switch._state_options"), \
+             patch("infrastructure.deploy.vessel_release_switch._recovery_inventory"), \
+             patch("infrastructure.deploy.vessel_release_switch._release_id",
+                   return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": {"knowledge_schema": 2,
+                                                   "core_state_schema": 1}}), \
+             patch("infrastructure.deploy.vessel_installer._validate_console_config"), \
+             patch("infrastructure.deploy.vessel_release_switch.start_signed_knowledge") as start:
+            with self.assertRaisesRegex(BundleError, "unsupported vessel compatibility"):
+                switch_stopped_vessel_release(
+                    self.root, self.key, self.crane,
+                    self.parent / "bundle", self.parent / "config")
+            start.assert_not_called()
+        self.assertFalse((self.root / "vessel-releases" / ("2" * 24)).exists())
         self.assertEqual(_read_state(self.root), self.current)
 
     def test_rollback_requires_recorded_predecessor(self) -> None:

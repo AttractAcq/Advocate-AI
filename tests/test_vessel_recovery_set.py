@@ -20,6 +20,7 @@ from infrastructure.deploy.vessel_recovery_set import (
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import _write_intent, _write_private_record
+from infrastructure.release.bundle import BundleError, SUPPORTED_VESSEL_COMPATIBILITY
 from scripts.synthetic_pg_fixture import fixture, put
 from services.policy.audit import AuditLog
 
@@ -99,7 +100,8 @@ class VesselRecoverySetTests(unittest.TestCase):
         with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
                    return_value=payload), \
              patch("infrastructure.deploy.vessel_recovery_set.verify_bundle",
-                   return_value={"schema": 6, "target": "vessel"}), \
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_recovery_set._release_id",
                    return_value="b" * 24), \
              patch("infrastructure.deploy.vessel_recovery_set._assert_missing",
@@ -114,6 +116,26 @@ class VesselRecoverySetTests(unittest.TestCase):
                     self.root / "lab-password", staging)
         self.assertFalse((self.root / "new-install").exists())
         cleanup.assert_not_called()
+
+    def test_clean_activation_rejects_future_contract_before_restore(self) -> None:
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value={"release": "b" * 24}), \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": {"knowledge_schema": 2,
+                                                   "core_state_schema": 1}}), \
+             patch("infrastructure.deploy.vessel_recovery_set.restore_vessel_recovery_files") as restore:
+            with self.assertRaisesRegex(BundleError, "unsupported vessel compatibility"):
+                activate_vessel_recovery_set(
+                    self.root / "bundle", self.root / "key", self.root / "crane",
+                    self.root / "config", self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "c" * 64,
+                    self.root / "new-install", self.root / "new-state",
+                    self.root / "lab-password", staging)
+            restore.assert_not_called()
+        self.assertFalse((self.root / "new-install").exists())
 
     def test_restricted_table_grants_follow_clean_restore(self) -> None:
         def sql(_container: str, statement: str) -> str:

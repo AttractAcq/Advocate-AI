@@ -13,8 +13,10 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from infrastructure.release.bundle import (BundleError, create_knowledge_bundle,
-                                           verify_bundle)
+from infrastructure.release.bundle import (
+    BundleError, SUPPORTED_VESSEL_COMPATIBILITY, create_knowledge_bundle,
+    require_supported_vessel_compatibility, verify_bundle,
+)
 from infrastructure.release.intake import IntakeError
 
 
@@ -39,6 +41,7 @@ class KnowledgeBundleTests(unittest.TestCase):
         self.trusted.write_bytes(self.key.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
         self.bundle = self.root / "bundle"
+        self.compatibility = SUPPORTED_VESSEL_COMPATIBILITY.copy()
         self.images: dict[str, dict[str, str]] = {}
         for role in ("core", "console", "knowledge"):
             archive = self.payload / "images" / f"{role}.tar"
@@ -67,12 +70,14 @@ class KnowledgeBundleTests(unittest.TestCase):
         with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake), \
                 patch("infrastructure.release.bundle.validate_image_archive", side_effect=self.identity):
             return create_knowledge_bundle(self.payload, self.bundle, self.private,
-                                           "0.1.0", self.images, crane=self.root / "crane")
+                                           "0.1.0", self.images, self.compatibility,
+                                           crane=self.root / "crane")
 
     def test_signs_and_verifies_exact_three_image_vessel_set(self) -> None:
         manifest = self.create()
         self.assertEqual(manifest["schema"], 6)
         self.assertEqual(manifest["target"], "vessel")
+        self.assertEqual(manifest["compatibility"], self.compatibility)
         with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
             checked = verify_bundle(self.bundle, self.trusted)
         self.assertEqual(set(checked["images"]), {"core", "console", "knowledge"})
@@ -84,11 +89,13 @@ class KnowledgeBundleTests(unittest.TestCase):
         with self.assertRaises(BundleError):
             create_knowledge_bundle(self.payload, self.bundle, self.private,
                                     "0.1.0", {key: value for key, value in self.images.items()
-                                              if key != "knowledge"}, crane=self.root / "crane")
+                                              if key != "knowledge"}, self.compatibility,
+                                    crane=self.root / "crane")
         (self.payload / "images" / "extra.tar").write_bytes(b"unreviewed")
         with self.assertRaises(BundleError):
             create_knowledge_bundle(self.payload, self.bundle, self.private,
-                                    "0.1.0", self.images, crane=self.root / "crane")
+                                    "0.1.0", self.images, self.compatibility,
+                                    crane=self.root / "crane")
         (self.payload / "images" / "extra.tar").unlink()
 
         def deny_knowledge(scan: Path, *args: object, **kwargs: object) -> dict[str, str]:
@@ -100,8 +107,28 @@ class KnowledgeBundleTests(unittest.TestCase):
                 patch("infrastructure.release.bundle.validate_image_archive", side_effect=self.identity):
             with self.assertRaises(IntakeError):
                 create_knowledge_bundle(self.payload, self.bundle, self.private,
-                                        "0.1.0", self.images, crane=self.root / "crane")
-        self.assertFalse(self.bundle.exists())
+                                        "0.1.0", self.images, self.compatibility,
+                                        crane=self.root / "crane")
+
+    def test_requires_exact_explicit_compatibility_contract(self) -> None:
+        for value in ({"knowledge_schema": True, "core_state_schema": 1},
+                      {"knowledge_schema": 2},
+                      {"knowledge_schema": 1, "core_state_schema": 0},
+                      {"knowledge_schema": 1, "core_state_schema": 1, "extra": 1}):
+            with self.subTest(value=value), self.assertRaisesRegex(BundleError, "compatibility"):
+                create_knowledge_bundle(self.payload, self.bundle, self.private,
+                                        "0.1.0", self.images, value,
+                                        crane=self.root / "crane")
+            self.assertFalse(self.bundle.exists())
+
+    def test_future_signed_contract_is_not_runnable_by_this_installer(self) -> None:
+        self.compatibility = {"knowledge_schema": 2, "core_state_schema": 1}
+        self.create()
+        with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
+            future = verify_bundle(self.bundle, self.trusted)
+        self.assertEqual(future["compatibility"]["knowledge_schema"], 2)
+        with self.assertRaisesRegex(BundleError, "unsupported vessel compatibility"):
+            require_supported_vessel_compatibility(future)
 
     def test_resigned_wrong_target_is_still_rejected(self) -> None:
         self.create()

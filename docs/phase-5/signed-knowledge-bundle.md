@@ -6,10 +6,15 @@ its own OCI archive, generated SBOM, vulnerability scan, archive digest and
 crane verification result. The signer refuses missing or extra archives and
 refuses any image whose intake has unresolved HIGH, CRITICAL or UNKNOWN
 findings. The detached Ed25519 signature binds the complete file inventory,
-three image descriptors and `target=vessel`. The verifier repeats the evidence
-and payload checks after copying; a valid signature with the wrong target is
-still rejected. The earlier two-image vessel and separate Fleet formats
-remain valid.
+three image descriptors, `target=vessel`, and an explicit compatibility
+contract. The contract names the Knowledge schema and external Core state
+format required by the release. The current runtime supports exactly
+`knowledge_schema=1` and `core_state_schema=1`; a correctly signed release
+declaring a different version can be verified for intake but cannot be
+installed or switched by this runtime. The verifier repeats the evidence
+and payload checks after copying; a valid signature with the wrong target or
+malformed contract is rejected. The earlier two-image product and separate
+Fleet formats remain valid.
 
 The CLI accepts a strict descriptor file:
 
@@ -18,6 +23,7 @@ The CLI accepts a strict descriptor file:
   /path/to/payload /path/to/new-bundle \
   --signing-key /path/to/custodian-key.pem --version <version> \
   --images-json /path/to/three-image-descriptors.json \
+  --knowledge-schema 1 --core-state-schema 1 \
   --crane /path/to/verified/crane
 ```
 
@@ -25,11 +31,12 @@ The original digest-pinned pgvector image and the official Trixie comparison
 remain [denied by archive intake](pgvector-image-intake.md). The locally built
 [Alpine Knowledge candidate](alpine-knowledge-image.md) has a resolved SBOM
 and a zero-finding synthetic scan, but distribution provenance, licence review
-and release-signing custody remain open. The current signed installer only
-accepts the schema 4 Core and Console bundle. The next implementation must
-stage and activate the schema 6 database image, carry separate database roles
-and protected credentials, preserve state volumes and coordinate a clean
-restore. Target hardware and independent security review remain open.
+and release-signing custody remain open. The [vessel installer](signed-vessel-first-install.md)
+now stages and activates the schema 6 database image with separate database
+roles and protected credentials. [Stopped release switching](vessel-release-switch.md)
+and [coordinated recovery](vessel-recovery-set.md) have synthetic rehearsals.
+Actual schema migration and rollback compatibility across versions, target
+hardware and independent security review remain open.
 
 The [actual-image rehearsal](actual-three-image-release.md) now tests this
 contract against the locally built Alpine Knowledge candidate alongside Core

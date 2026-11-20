@@ -5,6 +5,9 @@ trusted public key, pinned crane binary, synthetic Console configuration,
 owner-only Core state and a separate lab credential. It requires a new private
 installation root beneath a private parent. It copies and re-verifies the
 complete signed bundle and Console configuration into a release directory.
+Before creating the root, it requires the signed release to declare the
+supported Knowledge schema and Core state format. A future version declaration
+is refused until an explicit migration and runtime support exist.
 
 Installation creates a labelled persistent PostgreSQL volume and private
 administrator, migration, ingestion and reader credentials outside the signed images.

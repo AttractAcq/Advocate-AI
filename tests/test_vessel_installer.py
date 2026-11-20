@@ -19,7 +19,7 @@ from infrastructure.deploy.vessel_installer import (
     reconcile_first_install, reconcile_vessel, recover_vessel,
     reset_first_install, resume_first_install,
 )
-from infrastructure.release.bundle import BundleError
+from infrastructure.release.bundle import BundleError, SUPPORTED_VESSEL_COMPATIBILITY
 
 
 class VesselInstallerTests(unittest.TestCase):
@@ -44,6 +44,19 @@ class VesselInstallerTests(unittest.TestCase):
                    return_value={"schema": 6, "target": "fleet"}), \
              patch("infrastructure.deploy.vessel_installer.start_signed_knowledge") as start:
             with self.assertRaises(BundleError):
+                install_vessel(self.parent, self.parent / "key", self.parent / "crane",
+                               self.parent / "config", self.root,
+                               self.parent / "state", self.parent / "password")
+            self.assertFalse(self.root.exists())
+            start.assert_not_called()
+
+    def test_future_signed_contract_cannot_create_install_root(self) -> None:
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": {"knowledge_schema": 2,
+                                                   "core_state_schema": 1}}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge") as start:
+            with self.assertRaisesRegex(BundleError, "unsupported vessel compatibility"):
                 install_vessel(self.parent, self.parent / "key", self.parent / "crane",
                                self.parent / "config", self.root,
                                self.parent / "state", self.parent / "password")
@@ -90,7 +103,8 @@ class VesselInstallerTests(unittest.TestCase):
     def test_failed_activation_has_no_active_record(self) -> None:
         knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
         with patch("infrastructure.deploy.vessel_installer.verify_bundle",
-                   return_value={"schema": 6, "target": "vessel"}), \
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_installer._stage",
                    return_value=("c" * 24, self.parent)), \
              patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
@@ -113,7 +127,8 @@ class VesselInstallerTests(unittest.TestCase):
     def test_incomplete_cleanup_retains_private_root_and_no_active_record(self) -> None:
         knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
         with patch("infrastructure.deploy.vessel_installer.verify_bundle",
-                   return_value={"schema": 6, "target": "vessel"}), \
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_installer._stage",
                    return_value=("c" * 24, self.parent)), \
              patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
@@ -147,7 +162,8 @@ class VesselInstallerTests(unittest.TestCase):
         with patch("infrastructure.deploy.vessel_installer.secrets.token_hex",
                    return_value=installation_id), \
              patch("infrastructure.deploy.vessel_installer.verify_bundle",
-                   return_value={"schema": 6, "target": "vessel"}), \
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_installer._stage",
                    return_value=("6" * 24, self.parent)), \
              patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",

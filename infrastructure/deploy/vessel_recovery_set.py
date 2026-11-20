@@ -34,7 +34,7 @@ from infrastructure.deploy.vessel_installer import (
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql, verify_security
 from infrastructure.deploy.vessel_runtime import _state_options, start_signed_vessel_services
-from infrastructure.release.bundle import verify_bundle
+from infrastructure.release.bundle import require_supported_vessel_compatibility, verify_bundle
 from infrastructure.restic_repository import create_snapshot, restore_snapshot
 from scripts.phase5_postgres_rehearsal import _dump, _restore
 from services.knowledge.ingestion import _valid_source
@@ -452,8 +452,8 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
     _owner_directory(staging_parent)
     value = verify_vessel_recovery_receipt(receipt, receipt_key)
     manifest = verify_bundle(bundle, trusted_key)
-    if (manifest.get("schema") != 6 or manifest.get("target") != "vessel"
-            or _release_id(bundle, console_config) != value["release"]):
+    require_supported_vessel_compatibility(manifest)
+    if _release_id(bundle, console_config) != value["release"]:
         raise VesselRecoveryError("recovery release differs from signed receipt")
     if (not root.is_absolute() or root.exists() or root.is_symlink()
             or not core_state.is_absolute() or core_state.exists()
