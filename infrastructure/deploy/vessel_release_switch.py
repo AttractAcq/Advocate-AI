@@ -68,6 +68,8 @@ def _verify_preupdate_recovery(current: dict[str, object],
             payload["release"] != current["active"] or
             payload["data_volume"] != current["runtime"]["data_volume"]):
         raise VesselInstallError("pre-update recovery receipt names another installation")
+    if payload["schema"] != 2:
+        raise VesselInstallError("pre-update recovery receipt lacks Knowledge row digest")
     state = Path(current["core_state"])
     repository = Path(payload["repository"])
     _owner_directory(staging_parent)
@@ -143,7 +145,9 @@ def _activate_stopped(root: Path, trusted_key: Path, crane: Path,
             inventory = _verify_database(stage / "bundle", trusted_key, crane,
                                          knowledge, state, root)
             if recovery is not None and (inventory["sources"] != recovery["sources"]
-                                         or inventory["passages"] != recovery["passages"]):
+                                         or inventory["passages"] != recovery["passages"]
+                                         or inventory["knowledge_sha256"] !=
+                                         recovery["knowledge_sha256"]):
                 raise VesselInstallError("live Knowledge differs from pre-update recovery set")
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane,

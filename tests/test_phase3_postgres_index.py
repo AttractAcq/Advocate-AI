@@ -180,6 +180,23 @@ class PostgresKnowledgeTests(unittest.TestCase):
             verify_knowledge_snapshot(self.root, self.manifest, self.dsn,
                                       expected_model=FakeEmbedder.model)
 
+    def test_recovery_digest_detects_same_count_vector_change(self) -> None:
+        build_vectors(self.dsn, FakeEmbedder())
+        before = verify_knowledge_snapshot(
+            self.root, self.manifest, self.dsn,
+            expected_model=FakeEmbedder.model, include_digest=True)
+        self.assertEqual(set(before), {"sources", "passages", "knowledge_sha256"})
+        self.assertEqual(len(before["knowledge_sha256"]), 64)
+        with _connect(self.dsn) as db:
+            db.execute("""UPDATE knowledge_vectors SET embedding='[0.25,0.75]'::vector
+                WHERE document_id='ENG-001' AND ordinal=0""")
+        after = verify_knowledge_snapshot(
+            self.root, self.manifest, self.dsn,
+            expected_model=FakeEmbedder.model, include_digest=True)
+        self.assertEqual((before["sources"], before["passages"]),
+                         (after["sources"], after["passages"]))
+        self.assertNotEqual(before["knowledge_sha256"], after["knowledge_sha256"])
+
     def test_core_search_preview_and_chat_use_postgres(self) -> None:
         app = create_app(Settings(fixture_root=self.root,
                                   lab_password="synthetic-test-passphrase",
