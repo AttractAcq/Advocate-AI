@@ -11,3 +11,7 @@ RUN apk add --no-cache build-base \
 FROM docker.io/library/postgres:17.12-alpine3.24@sha256:e80acae3f1109e8e4533618b594918936f2858c63afc7204c4773148a673add8
 COPY --from=extension /staged/usr/local/ /usr/local/
 COPY --from=extension /tmp/pgvector-0.8.7/LICENSE /usr/share/doc/pgvector/LICENSE
+RUN apk add --no-cache su-exec=0.3-r0 \
+    && rm /usr/local/bin/gosu \
+    && ln -s /sbin/su-exec /usr/local/bin/gosu \
+    && gosu postgres true
