@@ -11,6 +11,25 @@ from scripts.vesselctl import main
 
 
 class VesselCtlTests(unittest.TestCase):
+    def test_stopped_release_commands_route_explicit_paths(self) -> None:
+        output = StringIO()
+        with patch("scripts.vesselctl.switch_stopped_vessel_release",
+                   return_value={"result": "upgraded"}) as switch, \
+             patch("scripts.vesselctl.rollback_stopped_vessel_release",
+                   return_value={"result": "rolled-back"}) as rollback, \
+             redirect_stdout(output):
+            common = ["--root", "/tmp/vessel", "--trusted-key", "/tmp/key",
+                      "--crane", "/tmp/crane"]
+            main(["switch-stopped", *common, "--bundle", "/tmp/bundle",
+                  "--console-config", "/tmp/config"])
+            main(["rollback-stopped", *common])
+        switch.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
+                                       Path("/tmp/crane"), Path("/tmp/bundle"),
+                                       Path("/tmp/config"))
+        rollback.assert_called_once_with(Path("/tmp/vessel"), Path("/tmp/key"),
+                                         Path("/tmp/crane"))
+        self.assertIn('"result": "rolled-back"', output.getvalue())
+
     def test_install_routes_explicit_paths_and_prints_bounded_result(self) -> None:
         output = StringIO()
         with patch("scripts.vesselctl.install_vessel",

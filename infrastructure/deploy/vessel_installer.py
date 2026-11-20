@@ -75,8 +75,12 @@ def _stage(root: Path, bundle: Path, trusted_key: Path,
         raise VesselInstallError("Console configuration is unreadable by the image user")
     identifier = _release_id(bundle, config)
     releases = root / "vessel-releases"
-    releases.mkdir(mode=0o700)
+    releases.mkdir(mode=0o700, exist_ok=True)
+    _owner_directory(releases)
     stage = releases / identifier
+    if stage.exists() or stage.is_symlink():
+        _verify_stage(stage, trusted_key, identifier)
+        return identifier, stage
     stage.mkdir(mode=0o700)
     shutil.copytree(bundle, stage / "bundle", symlinks=True)
     staged_config = stage / "console-config.json"
@@ -159,8 +163,12 @@ print(json.dumps({'indexed':len(result['indexed']),'unchanged':len(result['uncha
 def _state_payload(identifier: str, installation_id: str,
                    core_state: Path, lab_password: Path,
                    services: RuntimeHandle,
-                   knowledge: KnowledgeVolumeHandle) -> dict[str, object]:
-    return {
+                   knowledge: KnowledgeVolumeHandle,
+                   *, previous: str | None = None) -> dict[str, object]:
+    if previous is not None and (not _IDENTIFIER.fullmatch(previous)
+                                 or previous == identifier):
+        raise VesselInstallError("invalid previous vessel release")
+    payload = {
         "schema": 1, "active": identifier, "installation_id": installation_id,
         "core_state": str(core_state.resolve()),
         "lab_password_file": str(lab_password.resolve()),
@@ -172,6 +180,9 @@ def _state_payload(identifier: str, installation_id: str,
                     "socket_volume": knowledge.socket_volume,
                     "data_volume": knowledge.data_volume},
     }
+    if previous is not None:
+        payload["previous"] = previous
+    return payload
 
 
 def _verify_knowledge_schema(knowledge: KnowledgeVolumeHandle) -> None:
@@ -348,8 +359,11 @@ def _read_state(root: Path) -> dict[str, object]:
     except (ValueError, UnicodeError) as exc:
         raise VesselInstallError("invalid vessel active state JSON") from exc
     if (not isinstance(value, dict) or
-            set(value) != {"schema", "active", "installation_id", "core_state",
-                           "lab_password_file", "runtime"} or
+            set(value) not in (
+                {"schema", "active", "installation_id", "core_state",
+                 "lab_password_file", "runtime"},
+                {"schema", "active", "installation_id", "core_state",
+                 "lab_password_file", "runtime", "previous"}) or
             type(value["schema"]) is not int or value["schema"] != 1 or
             not isinstance(value["active"], str) or
             not _IDENTIFIER.fullmatch(value["active"]) or
@@ -358,6 +372,10 @@ def _read_state(root: Path) -> dict[str, object]:
             not isinstance(value["core_state"], str) or
             not isinstance(value["lab_password_file"], str) or
             not isinstance(value["runtime"], dict) or
+            ("previous" in value and
+             (not isinstance(value["previous"], str) or
+              not _IDENTIFIER.fullmatch(value["previous"]) or
+              value["previous"] == value["active"])) or
             set(value["runtime"]) != {"network_id", "core_id", "console_id",
                                       "knowledge_id", "knowledge_run",
                                       "socket_volume", "data_volume"}):
@@ -949,7 +967,8 @@ def recover_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]
             stage / "bundle", trusted_key, crane, stage / "console-config.json",
             state, password, root, knowledge, installation_id)
         payload = _state_payload(identifier, installation_id, state, password,
-                                 services, knowledge)
+                                 services, knowledge,
+                                 previous=value.get("previous"))
         _write_state(root, payload)
         return {"result": "recovered", "active": identifier}
     except Exception as exc:
