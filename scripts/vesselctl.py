@@ -11,6 +11,10 @@ from infrastructure.deploy.vessel_installer import (
     reconcile_vessel, recover_vessel, reset_first_install,
     resume_first_install, status_vessel, stop_vessel,
 )
+from infrastructure.deploy.vessel_recovery_set import (
+    create_vessel_recovery_set, restore_vessel_recovery_files,
+    verify_vessel_recovery_receipt,
+)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -30,6 +34,24 @@ def main(argv: list[str] | None = None) -> None:
         commands.add_parser(command, parents=[shared])
     reset = commands.add_parser("reset-bootstrap", parents=[shared])
     reset.add_argument("--discard-data", action="store_true", required=True)
+    capture = commands.add_parser("capture-recovery-set", parents=[shared])
+    capture.add_argument("--repository", type=Path, required=True)
+    capture.add_argument("--password-file", type=Path, required=True)
+    capture.add_argument("--restic", type=Path, required=True)
+    capture.add_argument("--restic-sha256", required=True)
+    capture.add_argument("--staging-parent", type=Path, required=True)
+    capture.add_argument("--receipt-signing-key", type=Path, required=True)
+    capture.add_argument("--receipt", type=Path, required=True)
+    verify = commands.add_parser("verify-recovery-receipt")
+    verify.add_argument("--receipt", type=Path, required=True)
+    verify.add_argument("--receipt-key", type=Path, required=True)
+    restore = commands.add_parser("restore-recovery-files")
+    restore.add_argument("--receipt", type=Path, required=True)
+    restore.add_argument("--receipt-key", type=Path, required=True)
+    restore.add_argument("--password-file", type=Path, required=True)
+    restore.add_argument("--restic", type=Path, required=True)
+    restore.add_argument("--restic-sha256", required=True)
+    restore.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "install":
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
@@ -49,6 +71,17 @@ def main(argv: list[str] | None = None) -> None:
         result = resume_first_install(args.root, args.trusted_key, args.crane)
     elif args.command == "reset-bootstrap":
         result = reset_first_install(args.root, args.trusted_key, args.crane)
+    elif args.command == "capture-recovery-set":
+        result = create_vessel_recovery_set(
+            args.root, args.trusted_key, args.crane, args.repository,
+            args.password_file, args.restic, args.restic_sha256,
+            args.staging_parent, args.receipt_signing_key, args.receipt)
+    elif args.command == "verify-recovery-receipt":
+        result = verify_vessel_recovery_receipt(args.receipt, args.receipt_key)
+    elif args.command == "restore-recovery-files":
+        result = restore_vessel_recovery_files(
+            args.receipt, args.receipt_key, args.password_file, args.restic,
+            args.restic_sha256, args.destination)
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
     print(json.dumps(result, sort_keys=True))

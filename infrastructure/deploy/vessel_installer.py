@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import fcntl
 import functools
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -445,29 +446,35 @@ def _recovery_inventory(installation_id: str, runtime: dict[str, str]) -> None:
         _assert_missing(kind, identifier)
 
 
+@contextmanager
+def _operation_lock(root: Path):
+    _owner_directory(root)
+    descriptor = os.open(root / ".vessel-operation.lock",
+                         os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600)
+    try:
+        details = os.fstat(descriptor)
+        if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
+                or stat.S_IMODE(details.st_mode) & 0o077
+                or details.st_nlink != 1):
+            raise VesselInstallError("invalid vessel operation lock")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise VesselInstallError("another vessel operation is active") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
 def _serialized(operation):
     @functools.wraps(operation)
     def locked(root: Path, trusted_key: Path, crane: Path):
-        _owner_directory(root)
-        descriptor = os.open(root / ".vessel-operation.lock",
-                             os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
-                             0o600)
-        try:
-            details = os.fstat(descriptor)
-            if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
-                    or stat.S_IMODE(details.st_mode) & 0o077
-                    or details.st_nlink != 1):
-                raise VesselInstallError("invalid vessel operation lock")
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise VesselInstallError("another vessel operation is active") from exc
-            try:
-                return operation(root, trusted_key, crane)
-            finally:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-        finally:
-            os.close(descriptor)
+        with _operation_lock(root):
+            return operation(root, trusted_key, crane)
     return locked
 
 
