@@ -14,6 +14,9 @@ import time
 import uuid
 
 from scripts.synthetic_pg_fixture import fixture as _fixture, put as _put
+from infrastructure.deploy.container_runtime import (
+    RuntimeError as ProductRuntimeError, _health as _product_health,
+)
 
 _IMAGE = re.compile(r"(?:(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}"
                     r"|sovereign-knowledge:synthetic)\Z")
@@ -172,8 +175,15 @@ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) a
 def rehearse(image: str, core_image: str) -> dict[str, object]:
     if not _IMAGE.fullmatch(image) or not _CORE.fullmatch(core_image):
         raise ValueError("socket rehearsal requires a pinned or built Knowledge and named Core image")
+    return _rehearse_verified_images(image, core_image)
+
+
+def _rehearse_verified_images(image: str, core_image: str,
+                             console_image: str | None = None) -> dict[str, object]:
+    """Exercise image IDs already bound to verified signed archives."""
     name = f"sovereign-pg-socket-{uuid.uuid4().hex[:12]}"
     volume = ""
+    network = ""
     created: list[str] = []
     try:
         _STAGING.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -186,6 +196,13 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
             _put(credential, (secrets.token_urlsafe(24) + "\n").encode())
             admin_password, writer_passfile, reader_passfile, writer_secret, reader_secret = \
                 _credentials(root)
+            if console_image is not None:
+                config = root / "console-config.json"
+                config.write_bytes(b'{"schema":1,"oidc_issuer":null}\n')
+                config.chmod(0o644)
+                network = _docker("network", "create", "--internal", name)
+                if _docker("network", "inspect", network, "--format", "{{.Internal}}") != "true":
+                    raise RuntimeError("signed product network is not internal")
             volume = _docker("volume", "create", name + "-socket")
             pg = _docker("run", "-d", "--rm", "--pull", "never", "--name", name + "-postgres",
                          "--network", "none", "--tmpfs", "/var/lib/postgresql/data",
@@ -211,7 +228,10 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
             _sql(pg, "GRANT SELECT ON knowledge_sources, knowledge_passages, "
                  "knowledge_quarantine, knowledge_vectors TO sovereign_read")
             core = _docker("run", "-d", "--rm", "--pull", "never", "--name", name + "-core",
-                           "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                           "--network", name if network else "none",
+                           *(["--network-alias", "core"] if network else []),
+                           "--read-only",
+                           "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                            "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                            "--user", f"{os.getuid()}:{os.getgid()}",
                            "--mount", f"type=volume,source={volume},target=/run/postgresql,readonly",
@@ -226,8 +246,19 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
                            "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                            core_image)
             created.append(core)
+            if console_image is not None:
+                console = _docker("run", "-d", "--rm", "--pull", "never",
+                                  "--name", name + "-console", "--network", name,
+                                  "--network-alias", "console", "--read-only",
+                                  "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                                  "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                                  "--mount", (f"type=bind,source={config.resolve()},"
+                                              "target=/srv/console-config.json,readonly"),
+                                  console_image)
+                created.append(console)
             for identifier in created:
-                if (_docker("inspect", identifier, "--format", "{{.HostConfig.NetworkMode}}") != "none"
+                expected_network = (name if network and identifier in (core, console) else "none")
+                if (_docker("inspect", identifier, "--format", "{{.HostConfig.NetworkMode}}") != expected_network
                         or _docker("inspect", identifier, "--format",
                                    "{{json .HostConfig.PortBindings}}") not in ("null", "{}")):
                     raise RuntimeError("synthetic socket runtime exposed a network route")
@@ -235,20 +266,39 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
                 try:
                     _docker("exec", core, "python", "-c",
                             'import urllib.request; assert urllib.request.urlopen("http://127.0.0.1:18100/health", timeout=2).status==200')
+                    if network:
+                        _product_health(core)
                     break
-                except RuntimeError:
+                except (RuntimeError, ProductRuntimeError) as exc:
                     if attempt == 29:
+                        if network:
+                            probe = subprocess.run(
+                                ["docker", "exec", core, "python", "-c",
+                                 'import urllib.request; urllib.request.urlopen('
+                                 '"http://console:8080/console-config.json", timeout=3)'],
+                                capture_output=True, text=True, timeout=10)
+                            status = _docker("inspect", console, "--format",
+                                             "{{.State.Status}}")
+                            raise RuntimeError(
+                                "signed Console health failed: "
+                                f"container={status}; probe={probe.stderr[-600:]}") from exc
                         raise
                     time.sleep(1)
             result = json.loads(_docker("exec", core, "python", "-c", _API_CHECK))
             return {**result, "pgvector_image": image, "core_image": core_image,
-                    "network_mode": "none", "database_transport": "unix-socket"}
+                    "network_mode": "internal" if network else "none",
+                    "knowledge_network_mode": "none",
+                    "console_runtime": "healthy" if network else "not-started",
+                    "database_transport": "unix-socket"}
     finally:
         for identifier in reversed(created):
             subprocess.run(["docker", "rm", "-f", identifier], capture_output=True,
                            text=True, timeout=30)
         if volume:
             subprocess.run(["docker", "volume", "rm", volume], capture_output=True,
+                           text=True, timeout=30)
+        if network:
+            subprocess.run(["docker", "network", "rm", network], capture_output=True,
                            text=True, timeout=30)
 
 
