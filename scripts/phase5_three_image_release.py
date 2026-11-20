@@ -82,6 +82,48 @@ def _probe_vessel_history(core_id: str, conversation_id: str | None = None) -> d
                            _VESSEL_HISTORY_PROBE, conversation_id or "-"))
 
 
+_VESSEL_PERMISSION_PROBE = """\
+import json
+from pathlib import Path
+import httpx
+with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) as client:
+ password=Path('/run/secrets/lab-password').read_text().strip()
+ def auth(user):
+  reply=client.post('/api/login',json={'user_id':user,'password':password})
+  assert reply.status_code==200,(user,reply.text)
+  return {'Authorization':'Bearer '+reply.json()['access_token']}
+ engineer=auth('engineer')
+ deckhand=auth('deckhand')
+ def sources(headers):
+  reply=client.get('/api/sources',headers=headers)
+  assert reply.status_code==200,reply.text
+  return {row['document_id'] for row in reply.json()['sources']}
+ engineer_sources=sources(engineer)
+ deckhand_sources=sources(deckhand)
+ allowed=client.post('/api/search',headers=engineer,json={'query':'generator inspection'})
+ denied=client.post('/api/search',headers=deckhand,json={'query':'generator inspection'})
+ allowed_preview=client.get('/api/sources/ENG-001/preview',headers=engineer)
+ preview=client.get('/api/sources/ENG-001/preview',headers=deckhand)
+ assert allowed.status_code==200,allowed.text
+ assert denied.status_code==200,denied.text
+ allowed_ids={row['document_id'] for row in allowed.json()['results']}
+ denied_ids={row['document_id'] for row in denied.json()['results']}
+ assert {'ENG-001','DEC-001'}<=engineer_sources,engineer_sources
+ assert 'ENG-001' not in deckhand_sources,deckhand_sources
+ assert 'ENG-001' in allowed_ids,allowed_ids
+ assert 'ENG-001' not in denied_ids,denied_ids
+ assert allowed_preview.status_code==200,allowed_preview.text
+ assert allowed_preview.json()['excerpt']=='generator inspection secret marker',allowed_preview.text
+ assert preview.status_code==404,preview.text
+ print(json.dumps({'engineer':'ENG-001-visible','deckhand':'ENG-001-denied'}))
+"""
+
+
+def _probe_vessel_permissions(core_id: str) -> dict[str, str]:
+    return json.loads(_run("docker", "exec", core_id, "python", "-c",
+                           _VESSEL_PERMISSION_PROBE))
+
+
 def _rehearse_restored_knowledge(bundle: Path, trusted: Path, crane: Path,
                                  restored: Path, sources: int, passages: int) -> None:
     """Verify the recovered dump against recovered files on isolated clean PG."""
@@ -228,6 +270,7 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
             postgres_sql(runtime["knowledge_id"],
                          "UPDATE public.knowledge_schema_version SET version=1")
         first_history = _probe_vessel_history(runtime["core_id"])
+        first_permissions = _probe_vessel_permissions(runtime["core_id"])
         audit_path = state / "audit.jsonl"
         initial_audit = audit_path.read_bytes()
         initial_count, _ = verify_audit(audit_path, require_current_clock=True)
@@ -318,12 +361,15 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
             "--format", "{{.Image}}")
         switched_history = _probe_vessel_history(
             switched_record["runtime"]["core_id"], first_history["conversation_id"])
+        switched_permissions = _probe_vessel_permissions(
+            switched_record["runtime"]["core_id"])
         if (switched["result"] != "upgraded" or
                 switched["previous"] != activated["active"] or
                 switched["active"] == activated["active"] or
                 switched_core_image == base_core_image or
                 switched_status["active"] != switched["active"] or
                 switched_history != first_history or
+                switched_permissions != first_permissions or
                 not audit_path.read_bytes().startswith(final_audit)):
             raise AssertionError("stopped signed vessel release switch failed")
         stop_vessel(install_root, trusted, crane)
@@ -351,12 +397,15 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
             "--format", "{{.Image}}")
         rolled_history = _probe_vessel_history(
             rolled_record["runtime"]["core_id"], first_history["conversation_id"])
+        rolled_permissions = _probe_vessel_permissions(
+            rolled_record["runtime"]["core_id"])
         if (rolled["result"] != "rolled-back" or
                 rolled["active"] != activated["active"] or
                 rolled["previous"] != switched["active"] or
                 rolled_core_image != base_core_image or
                 rolled_status["active"] != activated["active"] or
-                rolled_history != first_history):
+                rolled_history != first_history or
+                rolled_permissions != first_permissions):
             raise AssertionError("stopped signed vessel rollback failed")
         return {"result": "pass", "activation": "signed-and-healthy",
                 "schema_authority": "migration-role-only",
@@ -369,6 +418,7 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 "release_switch": "stopped-signed-and-healthy",
                 "release_rollback": "stopped-signed-and-healthy",
                 "core_image_change": "distinct-and-restored",
+                "document_permissions": "preserved-across-switch-and-rollback",
                 "partial_stage": "rejected-then-discarded",
                 "post_switch_recovery_set": "signed-and-bound-to-updated-release"}
     finally:
@@ -423,6 +473,7 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
         if len(rows) != 1:
             raise AssertionError("clean restore lost conversation history")
         history = _probe_vessel_history(runtime["core_id"], rows[0][0])
+        permissions = _probe_vessel_permissions(runtime["core_id"])
         if (result["result"] != "restored-and-activated" or
                 status["result"] != "healthy" or
                 result["active"] != status["active"] or
@@ -430,11 +481,14 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
                 result["sources"] < 1 or result["passages"] < 1 or
                 running_core != expected_core or
                 history["turns"] != 1 or
+                permissions != {"engineer": "ENG-001-visible",
+                                "deckhand": "ENG-001-denied"} or
                 (state / "postgres.dump").exists() or
                 (install_root / "vessel-intent.json").exists()):
             raise AssertionError("clean secure vessel restore did not activate")
         return {"result": "pass", "runtime": "signed-and-healthy",
                 "database_roles": "scram-restricted",
+                "document_permissions": "checked-after-restore",
                 "history": "readable", "dump_exposure": "absent",
                 "source_release": "post-switch" if updated else "initial"}
     finally:

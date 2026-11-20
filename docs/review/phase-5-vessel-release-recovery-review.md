@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #160](https://github.com/AttractAcq/Advocate-AI/pull/160), including
+through [PR #162](https://github.com/AttractAcq/Advocate-AI/pull/162), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -20,7 +20,7 @@ the reviewer must identify the exact final tree tested. The main paths are:
 | Core state and runtime | `infrastructure/deploy/vessel_runtime.py`, `services/policy/audit.py` | Private mounts, audit chain, conversation history and service health |
 | Encrypted recovery | `infrastructure/deploy/vessel_recovery_set.py` | Frozen snapshot, signed receipt, restic verification, clean activation, interrupted restore abandonment and retry |
 | Operator entry points | `scripts/vesselctl.py`, [switch runbook](../phase-5/vessel-release-switch.md), [recovery runbook](../phase-5/vessel-recovery-set.md) | Required inputs, refusal paths and operator-visible state |
-| Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks |
+| Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks; review the engineer/deckhand API probe in PR #162 |
 
 ## Claims to verify
 
@@ -60,6 +60,7 @@ upgrade compatibility between real software or database versions.
 | Interrupted restore protection | [PR #154–156 runs](https://github.com/AttractAcq/Advocate-AI/actions/runs/44772378731) | Exact partial-volume abandonment and clean-root retry; inspect each PR's CI for its own assertion |
 | Switch, distinct image and stage cleanup | [PR #157 run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44782675989), [PR #158 run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44788271162), [PR #159 run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44792631764) | Signed switch, one-step rollback, different Core image ID and interrupted-stage discard |
 | Post-switch recovery | [PR #160 implementation-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44796531764) | Updated-release receipt, clean second install, audit/history and database-role continuity |
+| Source permissions through release changes | [PR #162](https://github.com/AttractAcq/Advocate-AI/pull/162) | Running Core API must permit the engineer's engineering source and deny it to the deckhand at first install, after switch, rollback and clean restore; actual-image CI result pending |
 
 At the PR #160 implementation head, `make check` passed 375 tests with 12
 expected skips; all 12 CI jobs passed after a targeted retry of an unrelated

@@ -44,8 +44,13 @@ The Linux actual-image rehearsal builds a second Core image with a different
 synthetic release label. It scans and inventories that exact second archive,
 signs it into the update bundle, then checks the running Core image changes
 on switch and returns to the original image on rollback. Console and Knowledge
-images stay the same. This proves image identity and state continuity across
-the release switch; the Core application code and database schema are the same
-in both images. Compatibility across actual application versions and database
-migrations, production rollback timing, protected media, key custody,
-independent assessment, and target hardware remain open.
+images stay the same. At first install, after the switch, and after rollback,
+the rehearsal also asks the running Core API whether the engineer can find the
+fictional engineering document and the deckhand cannot list, search or preview
+it. The clean restore rehearsal repeats that permission check against the
+restored database and policy files. This proves those synthetic role checks
+and image identity across the release switch; the Core application code and
+database schema are the same in both images. Compatibility across actual
+application versions and database migrations, production rollback timing,
+protected media, key custody, independent assessment, and target hardware
+remain open.

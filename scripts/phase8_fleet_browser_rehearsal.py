@@ -248,7 +248,8 @@ def run_browser(chromedriver: str) -> dict[str, str]:
                                 timeout=45)
         assert isinstance(result, dict)
         session = result["sessionId"]
-        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"})
+        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"},
+                       timeout=45)
         until(session, "document.querySelector('button.primary')?.textContent?.includes('Sign in with local identity')")
         driver_request("POST", f"/session/{session}/execute/sync",
                        {"script": "document.querySelector('button.primary').click()", "args": []})
