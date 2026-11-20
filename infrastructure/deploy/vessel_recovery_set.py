@@ -74,6 +74,7 @@ def _private_bytes(path: Path, maximum: int) -> bytes:
     if (not path.is_absolute() or path.is_symlink() or not path.is_file()
             or path.stat().st_uid != os.getuid()
             or stat.S_IMODE(path.stat().st_mode) & 0o077
+            or path.stat().st_nlink != 1
             or not 0 < path.stat().st_size <= maximum):
         raise VesselRecoveryError("unsafe private recovery file")
     descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -81,6 +82,7 @@ def _private_bytes(path: Path, maximum: int) -> bytes:
         details = os.fstat(stream.fileno())
         if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
                 or stat.S_IMODE(details.st_mode) & 0o077
+                or details.st_nlink != 1
                 or not 0 < details.st_size <= maximum):
             raise VesselRecoveryError("unsafe private recovery file")
         payload = stream.read(maximum + 1)
@@ -106,6 +108,8 @@ def _source_inventory(state: Path, listed: set[str]) -> None:
         if item.is_symlink() or not (item.is_dir() or item.is_file()):
             raise VesselRecoveryError("unsafe vessel source inventory")
         if item.is_file():
+            if item.stat().st_nlink != 1:
+                raise VesselRecoveryError("hard-linked vessel source")
             actual.add(item.relative_to(state).as_posix())
     if actual != listed:
         raise VesselRecoveryError("vessel source inventory differs from approved manifest")
@@ -115,6 +119,7 @@ def _history_copy(source: Path, target: Path) -> None:
     if (source.is_symlink() or not source.is_file() or
             source.stat().st_uid != os.getuid() or
             stat.S_IMODE(source.stat().st_mode) & 0o077 or
+            source.stat().st_nlink != 1 or
             not 0 < source.stat().st_size <= _MAX_HISTORY):
         raise VesselRecoveryError("invalid vessel conversation database")
     try:
@@ -129,6 +134,10 @@ def _history_copy(source: Path, target: Path) -> None:
 
 
 def _stage_core(state: Path, frozen: Path) -> tuple[int, tuple[int, str], str]:
+    for name in ("approved.json", "roles.json"):
+        path = state / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+            raise VesselRecoveryError("unsafe linked vessel configuration")
     manifest = load_manifest(state / "approved.json")
     if (not isinstance(manifest, dict) or set(manifest) != {"schema", "sources"}
             or type(manifest["schema"]) is not int or manifest["schema"] != 1
@@ -143,7 +152,6 @@ def _stage_core(state: Path, frozen: Path) -> tuple[int, tuple[int, str], str]:
     if checkpoint[0] < 1:
         raise VesselRecoveryError("vessel audit trail has no checkpoint")
     sources: set[str] = set()
-    frozen.mkdir(mode=0o700)
     for item in manifest["sources"]:
         if not isinstance(item, dict):
             raise VesselRecoveryError("invalid vessel recovery source")
@@ -151,15 +159,18 @@ def _stage_core(state: Path, frozen: Path) -> tuple[int, tuple[int, str], str]:
         if not isinstance(relative, str) or not relative.startswith("sources/") or \
                 relative in sources:
             raise VesselRecoveryError("invalid vessel recovery source path")
-        _, _, payload = _valid_source(state, item)
         sources.add(relative)
+    _source_inventory(state, sources)
+    frozen.mkdir(mode=0o700)
+    for item in manifest["sources"]:
+        _, _, payload = _valid_source(state, item)
+        relative = item["relative_path"]
         destination = frozen / relative
         destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                              os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(payload)
-    _source_inventory(state, sources)
     for name, payload in (("approved.json", approved), ("roles.json", roles),
                           ("audit.jsonl", audit)):
         path = frozen / name

@@ -93,6 +93,7 @@ lab and retain the observed output, resource inventory and timing.
 | Replace source bytes, source index, audit tail, history or PostgreSQL schema version | Check whether status, switch, capture and restore refuse it before Core sees altered data |
 | Substitute a wrong receipt key, restic password, snapshot ID, release ID or old receipt | Check signature, repository and release binding in both switch and rollback; an old receipt from the prior active release must not authorise rollback from the updated release |
 | Change one Knowledge row or vector after capture while preserving source and passage counts | Confirm schema-2 digest mismatch prevents Core and Console startup on switch, rollback and clean restore |
+| Hard-link a managed Core file to an outside path before capture | Confirm configuration, audit, history and approved source aliases are rejected before an encrypted recovery snapshot is made; test host filesystem semantics separately |
 | Add a labelled container, network, extra volume or different restore-attempt label | Check that cleanup and abandonment do not remove ambiguous resources |
 | Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate |
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |
