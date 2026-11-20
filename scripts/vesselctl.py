@@ -45,6 +45,12 @@ def main(argv: list[str] | None = None) -> None:
     switch = commands.add_parser("switch-stopped", parents=[shared])
     switch.add_argument("--bundle", type=Path, required=True)
     switch.add_argument("--console-config", type=Path, required=True)
+    switch.add_argument("--recovery-receipt", type=Path, required=True)
+    switch.add_argument("--receipt-key", type=Path, required=True)
+    switch.add_argument("--password-file", type=Path, required=True)
+    switch.add_argument("--restic", type=Path, required=True)
+    switch.add_argument("--restic-sha256", required=True)
+    switch.add_argument("--staging-parent", type=Path, required=True)
     commands.add_parser("rollback-stopped", parents=[shared])
     discard_stage = commands.add_parser("discard-staged-candidate")
     discard_stage.add_argument("--root", type=Path, required=True)
@@ -148,7 +154,9 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "switch-stopped":
         result = switch_stopped_vessel_release(
             args.root, args.trusted_key, args.crane, args.bundle,
-            args.console_config)
+            args.console_config, args.recovery_receipt, args.receipt_key,
+            args.password_file, args.restic, args.restic_sha256,
+            args.staging_parent)
     elif args.command == "rollback-stopped":
         result = rollback_stopped_vessel_release(
             args.root, args.trusted_key, args.crane)
