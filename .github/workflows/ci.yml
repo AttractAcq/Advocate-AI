@@ -37,6 +37,14 @@ jobs:
           docker pull "$image"
           python3 -m scripts.phase3_pgvector_core_socket \
             --pgvector-image "$image" --core-image sovereign-core:synthetic
+      - name: Build and exercise Alpine Knowledge candidate
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/Knowledge.Dockerfile \
+            -t sovereign-knowledge:synthetic .
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image sovereign-knowledge:synthetic \
+            --core-image sovereign-core:synthetic
       - name: Build and exercise separate Fleet images
         run: |
           docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
@@ -416,6 +424,29 @@ jobs:
         with:
           name: synthetic-knowledge-trixie-comparison
           path: ${{ runner.temp }}/knowledge-trixie-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Build and qualify Alpine Knowledge image candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/Knowledge.Dockerfile \
+            -t sovereign-knowledge:synthetic .
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_alpine_knowledge_image \
+            --output "$RUNNER_TEMP/alpine-knowledge-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Alpine Knowledge image evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-alpine-knowledge-image-evidence
+          path: ${{ runner.temp }}/alpine-knowledge-evidence
           if-no-files-found: ignore
           retention-days: 30
       - name: Bind actual Fleet image archives to release evidence
