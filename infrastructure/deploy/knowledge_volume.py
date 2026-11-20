@@ -185,8 +185,10 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
             verify_security(container)
         verify_login(container, "sovereign_ingest", writer_secret)
         verify_login(container, "sovereign_read", reader_secret)
-        return KnowledgeVolumeHandle(container, socket_name, data_name, run_name,
-                                     installation_id)
+        handle = KnowledgeVolumeHandle(container, socket_name, data_name, run_name,
+                                       installation_id)
+        probe_knowledge(handle)
+        return handle
     except Exception:
         if container:
             try:
@@ -210,6 +212,14 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
 
 def stop_knowledge(handle: KnowledgeVolumeHandle) -> None:
     """Stop one runtime and discard only its socket; retain database data."""
+    probe_knowledge(handle)
+    docker("stop", "-t", "15", handle.container_id, timeout=30)
+    docker("rm", handle.container_id)
+    docker("volume", "rm", handle.socket_volume)
+
+
+def probe_knowledge(handle: KnowledgeVolumeHandle) -> None:
+    """Bind a persisted handle to the expected networkless container and volumes."""
     if (not _DOCKER_ID.fullmatch(handle.container_id)
             or not _INSTALL.fullmatch(handle.installation_id)
             or handle.data_volume !=
@@ -228,6 +238,25 @@ def stop_knowledge(handle: KnowledgeVolumeHandle) -> None:
             create=False, run_name=handle.run_name)
     _volume(handle.data_volume, handle.installation_id, "knowledge-data",
             create=False)
-    docker("stop", "-t", "15", handle.container_id, timeout=30)
-    docker("rm", handle.container_id)
-    docker("volume", "rm", handle.socket_volume)
+    if (docker("inspect", handle.container_id, "--format", "{{.State.Running}}") != "true"
+            or docker("inspect", handle.container_id, "--format",
+                      "{{.HostConfig.NetworkMode}}") != "none"
+            or docker("inspect", handle.container_id, "--format",
+                      "{{json .HostConfig.PortBindings}}") not in ("null", "{}")):
+        raise KnowledgeVolumeError("Knowledge runtime isolation changed")
+    try:
+        mounts = json.loads(docker("inspect", handle.container_id, "--format",
+                                   "{{json .Mounts}}"))
+    except json.JSONDecodeError as exc:
+        raise KnowledgeVolumeError("invalid Knowledge container mount metadata") from exc
+    required = {"/var/lib/postgresql/data": handle.data_volume,
+                "/var/run/postgresql": handle.socket_volume}
+    if (not isinstance(mounts, list) or
+            any(sum(isinstance(item, dict) and
+                    item.get("Destination") == destination and
+                    item.get("Type") == "volume" and
+                    item.get("Name") == volume and
+                    item.get("RW") is True for item in mounts) != 1
+                for destination, volume in required.items())):
+        raise KnowledgeVolumeError("Knowledge runtime volume mount changed")
+    verify_security(handle.container_id)
