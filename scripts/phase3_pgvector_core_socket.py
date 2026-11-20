@@ -198,7 +198,8 @@ def _rehearse_verified_images(image: str, core_image: str,
                 _credentials(root)
             if console_image is not None:
                 config = root / "console-config.json"
-                _put(config, b'{"schema":1,"oidc_issuer":null}\n')
+                config.write_bytes(b'{"schema":1,"oidc_issuer":null}\n')
+                config.chmod(0o644)
                 network = _docker("network", "create", "--internal", name)
                 if _docker("network", "inspect", network, "--format", "{{.Internal}}") != "true":
                     raise RuntimeError("signed product network is not internal")
@@ -268,8 +269,19 @@ def _rehearse_verified_images(image: str, core_image: str,
                     if network:
                         _product_health(core)
                     break
-                except (RuntimeError, ProductRuntimeError):
+                except (RuntimeError, ProductRuntimeError) as exc:
                     if attempt == 29:
+                        if network:
+                            probe = subprocess.run(
+                                ["docker", "exec", core, "python", "-c",
+                                 'import urllib.request; urllib.request.urlopen('
+                                 '"http://console:8080/console-config.json", timeout=3)'],
+                                capture_output=True, text=True, timeout=10)
+                            status = _docker("inspect", console, "--format",
+                                             "{{.State.Status}}")
+                            raise RuntimeError(
+                                "signed Console health failed: "
+                                f"container={status}; probe={probe.stderr[-600:]}") from exc
                         raise
                     time.sleep(1)
             result = json.loads(_docker("exec", core, "python", "-c", _API_CHECK))
