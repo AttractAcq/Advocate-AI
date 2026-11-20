@@ -172,6 +172,11 @@ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) a
 def rehearse(image: str, core_image: str) -> dict[str, object]:
     if not _IMAGE.fullmatch(image) or not _CORE.fullmatch(core_image):
         raise ValueError("socket rehearsal requires a pinned or built Knowledge and named Core image")
+    return _rehearse_verified_images(image, core_image)
+
+
+def _rehearse_verified_images(image: str, core_image: str) -> dict[str, object]:
+    """Exercise image IDs already bound to verified signed archives."""
     name = f"sovereign-pg-socket-{uuid.uuid4().hex[:12]}"
     volume = ""
     created: list[str] = []

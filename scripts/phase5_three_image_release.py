@@ -14,10 +14,12 @@ import tempfile
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from infrastructure.deploy.container_runtime import _image_id
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
+from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
 
 ROLES = ("core", "console", "knowledge")
 
@@ -132,6 +134,19 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
                 result["bundle_manifest_sha256"] = _sha256(bundle / "release-manifest.json")
+                ids = {role: _image_id(bundle, role, verified["images"][role], crane)
+                       for role in ROLES}
+                runtime = _rehearse_verified_images(ids["knowledge"], ids["core"])
+                if runtime.get("result") != "pass" or runtime.get("database_role") != "sovereign_read":
+                    raise AssertionError("signed Core and Knowledge socket runtime failed")
+                result["signed_core_knowledge_runtime"] = {
+                    "result": "pass", "transport": runtime["database_transport"],
+                    "network_mode": runtime["network_mode"],
+                    "database_role": runtime["database_role"],
+                    "database_write": runtime["database_write"],
+                    "writer_auth": runtime["writer_auth"],
+                    "revocation": runtime["revocation"],
+                }
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:
