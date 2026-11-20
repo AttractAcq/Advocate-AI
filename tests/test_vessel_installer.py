@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -212,6 +214,21 @@ class VesselInstallerTests(unittest.TestCase):
                                         new_knowledge, old_knowledge.data_volume,
                                         retain_data=True)
         self.assertEqual(_read_state(self.root), initial)
+
+    def test_recovery_rejects_concurrent_operator_command(self) -> None:
+        self.root.mkdir(mode=0o700)
+        descriptor = os.open(self.root / ".vessel-operation.lock",
+                             os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch("infrastructure.deploy.vessel_installer._read_state") as read:
+                with self.assertRaisesRegex(VesselInstallError, "another vessel operation"):
+                    recover_vessel(self.root, self.parent / "key",
+                                   self.parent / "crane")
+                read.assert_not_called()
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
 
 
 if __name__ == "__main__":

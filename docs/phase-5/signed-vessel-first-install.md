@@ -55,6 +55,7 @@ for the synthetic candidate. Every command requires explicit absolute paths
 for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
 requires `--bundle`, `--console-config`, `--core-state` and
 `--lab-password-file`. It prints a small JSON result after success; errors
-exit nonzero. `recover` requires a clean stop and refuses residual old Docker
-resources. The command is not yet a vessel service unit or a production
-commissioning workflow.
+exit nonzero. Stop and recover take an exclusive owner-only installation lock
+and reject a competing operator command. `recover` requires a clean stop and
+refuses residual old Docker resources. The command is not yet a vessel service
+unit or a production commissioning workflow.
