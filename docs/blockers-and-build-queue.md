@@ -183,6 +183,8 @@ from independent product security review.
 
 | W-124 | Paired encrypted synthetic vessel recovery set (T-025/T-028) | [PR #152](https://github.com/AttractAcq/Advocate-AI/pull/152) and the [recovery design](phase-5/vessel-recovery-set.md) capture frozen Core files and a checked PostgreSQL custom dump in one restic snapshot, bind the snapshot and audit checkpoint to an Ed25519 receipt, and rehearse a clean, networkless Knowledge restore against the signed Core image. The [Linux actual-image rehearsal and all twelve CI jobs pass](https://github.com/AttractAcq/Advocate-AI/actions/runs/44760453636). Local `make check` passes 361 tests with 12 skips. Production role/credential restoration, activation, rollback, target hardware, key custody and independent review remain open. | Actual-image rehearsal and all CI jobs passed; review pending; T-025/T-028/G3 open |
 
+| W-125 | Clean synthetic vessel activation from signed recovery set (T-025/T-028) | The [recovery design](phase-5/vessel-recovery-set.md) now includes clean-host activation with fresh restricted SCRAM roles, exact table grants, signed Core index verification, Core/Console health checks and activation only after success. An actual-image Linux rehearsal is being added. The existing recovery repository stays outside Core state. In-place replacement, rollback, target hardware, key custody and independent review remain open. | Local implementation in progress; actual-image CI and review pending; T-025/T-028/G3 open |
+
 When a row is completed, link its commit, CI result and evidence; then change
 its state to **locally complete**. Do not remove it until its external gate is
 closed. Phase-specific gate records: [G0A](phase-1/gate.md), [G1](phase-2/gate.md),

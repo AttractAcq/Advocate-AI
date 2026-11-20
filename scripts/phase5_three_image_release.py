@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import uuid
@@ -24,7 +26,7 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_recovery_set import (
-    create_vessel_recovery_set, restore_vessel_recovery_files,
+    activate_vessel_recovery_set, create_vessel_recovery_set, restore_vessel_recovery_files,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import (
@@ -310,6 +312,54 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                            capture_output=True, text=True, timeout=30)
 
 
+def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
+                                    root: Path, restic: Path,
+                                    restic_sha256: str) -> dict[str, str]:
+    """Activate the signed recovery set on clean, restricted synthetic data."""
+    recovery = root / "vessel-recovery"
+    install_root = root / "recovered-install"
+    state = root / "recovered-state"
+    try:
+        result = activate_vessel_recovery_set(
+            bundle, trusted, crane, root / "console-config.json",
+            recovery / "receipt.json", recovery / "receipt-public.pem",
+            recovery / "restic-password", restic, restic_sha256,
+            install_root, state, root / "lab-password", recovery / "staging")
+        status = status_vessel(install_root, trusted, crane)
+        record = json.loads((install_root / "vessel-state.json").read_text())
+        runtime = record["runtime"]
+        with closing(sqlite3.connect(state / "history.db")) as database:
+            rows = database.execute("SELECT id FROM conversations").fetchall()
+        if len(rows) != 1:
+            raise AssertionError("clean restore lost conversation history")
+        history = _probe_vessel_history(runtime["core_id"], rows[0][0])
+        if (result["result"] != "restored-and-activated" or
+                status["result"] != "healthy" or
+                result["active"] != status["active"] or
+                result["installation_id"] != record["installation_id"] or
+                result["sources"] < 1 or result["passages"] < 1 or
+                history["turns"] != 1 or
+                (state / "postgres.dump").exists() or
+                (install_root / "vessel-intent.json").exists()):
+            raise AssertionError("clean secure vessel restore did not activate")
+        return {"result": "pass", "runtime": "signed-and-healthy",
+                "database_roles": "scram-restricted",
+                "history": "readable", "dump_exposure": "absent"}
+    finally:
+        path = install_root / "vessel-state.json"
+        if path.exists():
+            record = json.loads(path.read_text())
+            runtime = record["runtime"]
+            stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                       runtime["console_id"]))
+            stop_knowledge(KnowledgeVolumeHandle(
+                runtime["knowledge_id"], runtime["socket_volume"],
+                runtime["data_volume"], runtime["knowledge_run"],
+                record["installation_id"]))
+            subprocess.run(["docker", "volume", "rm", runtime["data_volume"]],
+                           capture_output=True, text=True, timeout=30)
+
+
 def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
                                     root: Path) -> dict[str, str]:
     """Simulate process loss before first activation and resume from intent."""
@@ -560,6 +610,9 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["signed_vessel_first_install"] = \
                     _rehearse_first_install(bundle, trusted, crane, root, restic,
                                             restic_sha256)
+                result["signed_vessel_clean_restore"] = \
+                    _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
+                                                    restic, restic_sha256)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
                 result["bootstrap_reset"] = \
