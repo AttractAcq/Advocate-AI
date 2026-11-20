@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -91,6 +92,22 @@ class VesselReleaseSwitchTests(unittest.TestCase):
             with self.assertRaisesRegex(VesselInstallError, "invalid staged"):
                 _stage(self.root, bundle, self.key, config)
         self.assertEqual(list(candidate.iterdir()), [])
+
+    def test_new_stage_refuses_insufficient_space_before_copy(self) -> None:
+        bundle = self.parent / "large-bundle"
+        (bundle / "model").mkdir(parents=True)
+        (bundle / "model" / "weights.bin").write_bytes(b"fictional weights")
+        config = self.parent / "config"
+        config.write_text("{}")
+        with patch("infrastructure.deploy.vessel_installer._candidate_release_id",
+                   return_value="2" * 24), \
+             patch("infrastructure.deploy.vessel_installer.shutil.disk_usage",
+                   return_value=SimpleNamespace(free=128 * 1024 * 1024)), \
+             patch("infrastructure.deploy.vessel_installer.shutil.copytree") as copy:
+            with self.assertRaisesRegex(VesselInstallError, "insufficient space"):
+                _stage(self.root, bundle, self.key, config)
+            copy.assert_not_called()
+        self.assertFalse((self.root / "vessel-releases" / ("2" * 24)).exists())
 
     def test_switch_requires_clean_stopped_inventory_before_stage(self) -> None:
         with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \

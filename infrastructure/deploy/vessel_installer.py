@@ -44,6 +44,7 @@ class VesselInstallError(ValueError):
 _IDENTIFIER = re.compile(r"[0-9a-f]{24}\Z")
 _INSTALL = re.compile(r"[0-9a-f]{32}\Z")
 _DOCKER_ID = re.compile(r"[0-9a-f]{64}\Z")
+_STAGE_RESERVE = 128 * 1024 * 1024
 
 
 def _owner_directory(path: Path) -> None:
@@ -76,6 +77,20 @@ def _candidate_release_id(bundle: Path, trusted_key: Path, config: Path) -> str:
     return _release_id(bundle, config)
 
 
+def _check_stage_capacity(bundle: Path, config: Path, releases: Path) -> None:
+    """Leave room for one full signed bundle copy before creating its stage."""
+    total = config.stat().st_size
+    for item in bundle.rglob("*"):
+        details = item.lstat()
+        if stat.S_ISREG(details.st_mode):
+            total += details.st_size
+        elif not stat.S_ISDIR(details.st_mode):
+            raise VesselInstallError("unsafe vessel bundle entry during staging")
+    required = total + max(_STAGE_RESERVE, total // 20)
+    if shutil.disk_usage(releases).free < required:
+        raise VesselInstallError("insufficient space for signed vessel release stage")
+
+
 def _stage(root: Path, bundle: Path, trusted_key: Path,
            config: Path) -> tuple[str, Path]:
     identifier = _candidate_release_id(bundle, trusted_key, config)
@@ -86,6 +101,7 @@ def _stage(root: Path, bundle: Path, trusted_key: Path,
     if stage.exists() or stage.is_symlink():
         _verify_stage(stage, trusted_key, identifier)
         return identifier, stage
+    _check_stage_capacity(bundle, config, releases)
     stage.mkdir(mode=0o700)
     shutil.copytree(bundle, stage / "bundle", symlinks=True)
     staged_config = stage / "console-config.json"
