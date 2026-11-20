@@ -17,7 +17,12 @@ from scripts.synthetic_pg_fixture import fixture as _fixture, put as _put
 
 _IMAGE = re.compile(r"(?:docker.io/)?pgvector/pgvector@sha256:[0-9a-f]{64}\Z")
 _CORE = re.compile(r"sovereign-core:[a-z0-9-]{1,40}\Z")
-_DSN = "postgresql://sovereign@/postgres?host=/run/postgresql"
+_WRITER_DSN = "postgresql://sovereign_ingest@/postgres?host=/run/postgresql"
+_READER_DSN = "postgresql://sovereign_read@/postgres?host=/run/postgresql"
+_HBA = ("local all postgres peer\n"
+        "local all all scram-sha-256\n"
+        "host all all 0.0.0.0/0 reject\n"
+        "host all all ::/0 reject\n")
 _STAGING = Path(__file__).resolve().parents[1] / "infrastructure/lab/runtime"
 
 
@@ -45,6 +50,54 @@ def _sql(identifier: str, statement: str) -> str:
     return _docker("exec", "-u", "postgres", identifier, "psql", "-X",
                    "-v", "ON_ERROR_STOP=1", "-d", "postgres", "-Atqc", statement)
 
+
+def _pg_input(identifier: str, program: str, payload: str) -> str:
+    """Send generated secrets through stdin, never Docker's process arguments."""
+    try:
+        result = subprocess.run(["docker", "exec", "-i", "-u", "postgres",
+                                 identifier, "sh", "-c", program],
+                                input=payload, capture_output=True, text=True,
+                                check=True, timeout=30)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("synthetic PostgreSQL configuration failed") from exc
+    return result.stdout.strip()
+
+
+def _credentials(root: Path) -> tuple[Path, Path, Path, str, str]:
+    admin = root / "postgres-admin-password"
+    writer = root / "postgres-writer.pgpass"
+    reader = root / "postgres-reader.pgpass"
+    admin_secret = secrets.token_hex(32)
+    writer_secret = secrets.token_hex(32)
+    reader_secret = secrets.token_hex(32)
+    _put(admin, (admin_secret + "\n").encode())
+    _put(writer, (f"/run/postgresql:5432:postgres:sovereign_ingest:{writer_secret}\n").encode())
+    _put(reader, (f"/run/postgresql:5432:postgres:sovereign_read:{reader_secret}\n").encode())
+    return admin, writer, reader, writer_secret, reader_secret
+
+
+def _secure_database(identifier: str, writer_secret: str, reader_secret: str) -> None:
+    """Create distinct roles and replace bootstrap trust with local SCRAM auth."""
+    if not all(re.fullmatch(r"[0-9a-f]{64}", value)
+               for value in (writer_secret, reader_secret)):
+        raise ValueError("invalid synthetic PostgreSQL role secret")
+    _sql(identifier, "CREATE EXTENSION vector")
+    _pg_input(identifier, "psql -X -v ON_ERROR_STOP=1 -d postgres",
+              "SET password_encryption='scram-sha-256';\n"
+              f"CREATE ROLE sovereign_ingest LOGIN PASSWORD '{writer_secret}';\n"
+              f"CREATE ROLE sovereign_read LOGIN PASSWORD '{reader_secret}';\n"
+              "REVOKE ALL ON SCHEMA public FROM PUBLIC;\n"
+              "GRANT USAGE, CREATE ON SCHEMA public TO sovereign_ingest;\n"
+              "GRANT USAGE ON SCHEMA public TO sovereign_read;\n")
+    _pg_input(identifier, "cat > /var/lib/postgresql/data/pg_hba.conf", _HBA)
+    if _sql(identifier, "SELECT pg_reload_conf()") != "t":
+        raise RuntimeError("synthetic PostgreSQL authentication reload failed")
+    if _sql(identifier, "SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL") != "0":
+        raise RuntimeError("synthetic PostgreSQL authentication rules are invalid")
+    if _docker("exec", "-u", "postgres", identifier, "cat",
+               "/var/lib/postgresql/data/pg_hba.conf") + "\n" != _HBA:
+        raise RuntimeError("synthetic PostgreSQL authentication rules changed")
+
 _BOOTSTRAP = """\
 import os
 from pathlib import Path
@@ -65,11 +118,30 @@ assert [r['document_id'] for r in vector_search(root,root/'approved.json',dsn,'e
 """
 
 _API_CHECK = """\
-import json
+import json, os, psycopg
 from pathlib import Path
 import httpx
+from services.knowledge.postgres_index import _connect
 root=Path('/var/lib/sovereign')
 password=Path('/run/secrets/lab-password').read_text().strip()
+dsn=os.environ['SOVEREIGN_KNOWLEDGE_DB']
+with _connect(dsn) as db:
+ assert db.execute('SELECT current_user').fetchone()['current_user']=='sovereign_read'
+def denied(statement):
+ try:
+  with _connect(dsn) as db:
+   db.execute(statement)
+ except psycopg.errors.InsufficientPrivilege:
+  return
+ raise AssertionError('Core database role acquired write or schema permission')
+denied("INSERT INTO knowledge_quarantine VALUES ('FORBIDDEN','core-write')")
+denied('CREATE TABLE core_must_not_create (id integer)')
+try:
+ psycopg.connect('postgresql://sovereign_ingest@/postgres?host=/run/postgresql',connect_timeout=3)
+except psycopg.OperationalError:
+ pass
+else:
+ raise AssertionError('Core could authenticate as ingestion writer')
 with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) as client:
  def auth(user):
   response=client.post('/api/login',json={'user_id':user,'password':password})
@@ -90,7 +162,9 @@ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=5) a
  (root/'roles.json').write_text(json.dumps(policy))
  revoked=client.post('/api/search',headers=engineer,json={'query':'generator inspection'})
  assert revoked.status_code==200 and revoked.json()['results']==[],revoked.text
- print(json.dumps({'result':'pass','sources':2,'denied_role':'deckhand','revocation':'denied'}))
+ print(json.dumps({'result':'pass','sources':2,'denied_role':'deckhand','revocation':'denied',
+                   'database_role':'sovereign_read','database_write':'denied',
+                   'writer_auth':'denied'}))
 """
 
 
@@ -109,16 +183,32 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
             _fixture(state)
             credential = root / "lab-password"
             _put(credential, (secrets.token_urlsafe(24) + "\n").encode())
+            admin_password, writer_passfile, reader_passfile, writer_secret, reader_secret = \
+                _credentials(root)
             volume = _docker("volume", "create", name + "-socket")
             pg = _docker("run", "-d", "--rm", "--pull", "never", "--name", name + "-postgres",
                          "--network", "none", "--tmpfs", "/var/lib/postgresql/data",
                          "--mount", f"type=volume,source={volume},target=/var/run/postgresql",
-                         "-e", "POSTGRES_HOST_AUTH_METHOD=trust", image)
+                         "--mount", (f"type=bind,source={admin_password.resolve()},"
+                                     "target=/run/secrets/postgres-password,readonly"),
+                         "-e", "POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password", image)
             created.append(pg)
             _ready(pg)
-            _sql(pg, "CREATE EXTENSION vector")
-            _sql(pg, "CREATE ROLE sovereign LOGIN")
-            _sql(pg, "GRANT CREATE ON SCHEMA public TO sovereign")
+            _secure_database(pg, writer_secret, reader_secret)
+            _docker("run", "--rm", "--pull", "never", "--name", name + "-ingest",
+                    "--network", "none", "--read-only",
+                    "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                    "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                    "--user", f"{os.getuid()}:{os.getgid()}",
+                    "--mount", f"type=volume,source={volume},target=/run/postgresql,readonly",
+                    "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign,readonly",
+                    "--mount", (f"type=bind,source={writer_passfile.resolve()},"
+                                "target=/run/secrets/pgpass,readonly"),
+                    "-e", f"SOVEREIGN_KNOWLEDGE_DB={_WRITER_DSN}",
+                    "-e", "PGPASSFILE=/run/secrets/pgpass",
+                    core_image, "python", "-c", _BOOTSTRAP)
+            _sql(pg, "GRANT SELECT ON knowledge_sources, knowledge_passages, "
+                 "knowledge_quarantine, knowledge_vectors TO sovereign_read")
             core = _docker("run", "-d", "--rm", "--pull", "never", "--name", name + "-core",
                            "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
                            "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
@@ -126,9 +216,12 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
                            "--mount", f"type=volume,source={volume},target=/run/postgresql,readonly",
                            "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign",
                            "--mount", f"type=bind,source={credential.resolve()},target=/run/secrets/lab-password,readonly",
+                           "--mount", (f"type=bind,source={reader_passfile.resolve()},"
+                                       "target=/run/secrets/pgpass,readonly"),
                            "-e", "SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
                            "-e", "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
-                           "-e", f"SOVEREIGN_KNOWLEDGE_DB={_DSN}",
+                           "-e", f"SOVEREIGN_KNOWLEDGE_DB={_READER_DSN}",
+                           "-e", "PGPASSFILE=/run/secrets/pgpass",
                            "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                            core_image)
             created.append(core)
@@ -137,7 +230,6 @@ def rehearse(image: str, core_image: str) -> dict[str, object]:
                         or _docker("inspect", identifier, "--format",
                                    "{{json .HostConfig.PortBindings}}") not in ("null", "{}")):
                     raise RuntimeError("synthetic socket runtime exposed a network route")
-            _docker("exec", core, "python", "-c", _BOOTSTRAP)
             for attempt in range(30):
                 try:
                     _docker("exec", core, "python", "-c",
