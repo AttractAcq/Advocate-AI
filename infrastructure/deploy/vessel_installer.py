@@ -577,24 +577,9 @@ def finish_vessel_stop(root: Path, trusted_key: Path, crane: Path) -> dict[str, 
     return {"result": "stopped", "active": identifier}
 
 
-@_serialized
-def reconcile_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, int | str]:
-    """Remove checked orphan runtime resources after interrupted recovery."""
-    value = _read_state(root)
-    identifier = value["active"]
-    _verify_stage(root / "vessel-releases" / identifier, trusted_key, identifier)
-    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
-    _state_options(state, password, root)
-    installation_id = value["installation_id"]
-    runtime = value["runtime"]
-    for kind, old_id in (("container", runtime["core_id"]),
-                         ("container", runtime["console_id"]),
-                         ("container", runtime["knowledge_id"]),
-                         ("network", runtime["network_id"]),
-                         ("volume", runtime["socket_volume"])):
-        _assert_missing(kind, old_id)
-    data_volume = runtime["data_volume"]
-    _volume(data_volume, installation_id, "knowledge-data", create=False)
+def _remove_scoped_orphans(installation_id: str, data_volume: str,
+                           unchanged) -> dict[str, int | str]:
+    """Verify the complete scoped inventory before deleting orphan runtime."""
     scope = f"label=sovereign.synthetic.install={installation_id}"
     containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
     networks = _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
@@ -662,17 +647,182 @@ def reconcile_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, in
         if key in seen:
             raise VesselInstallError("duplicate orphan vessel container role")
         seen.add(key)
-    if _read_state(root) != value:
-        raise VesselInstallError("vessel active state changed during reconciliation")
+    if not unchanged():
+        raise VesselInstallError("vessel record changed during reconciliation")
     for container_id in containers:
         _docker("rm", "-f", container_id)
     for network_id in networks:
         _docker("network", "rm", network_id)
     for name in sockets:
         _docker("volume", "rm", name)
-    _recovery_inventory(installation_id, runtime)
     return {"result": "reconciled", "containers": len(containers),
             "networks": len(networks), "sockets": len(sockets)}
+
+
+def _intent_stage(root: Path, trusted_key: Path,
+                  intent: dict[str, object]) -> Path:
+    identifier = intent["release"]
+    stage = root / "vessel-releases" / identifier
+    _verify_stage(stage, trusted_key, identifier)
+    if (root / "vessel-state.json").exists() or \
+            (root / "vessel-state.json").is_symlink():
+        raise VesselInstallError("first-install intent has an active record")
+    return stage
+
+
+def _clear_unbound_secrets(root: Path) -> None:
+    directory = root / "knowledge-secrets"
+    if not directory.exists() and not directory.is_symlink():
+        return
+    _owner_directory(directory)
+    if not {item.name for item in directory.iterdir()} <= {
+            "admin-password", "writer.pgpass", "reader.pgpass"}:
+        raise VesselInstallError("unexpected first-install credential file")
+    for item in directory.iterdir():
+        if (item.is_symlink() or not item.is_file() or
+                item.stat().st_uid != os.getuid() or
+                stat.S_IMODE(item.stat().st_mode) & 0o077):
+            raise VesselInstallError("invalid first-install credential file")
+    shutil.rmtree(directory)
+
+
+@_serialized
+def reconcile_first_install(root: Path, trusted_key: Path,
+                            crane: Path) -> dict[str, int | str]:
+    """Remove a checked orphan runtime or reset bootstrap before first activation."""
+    intent = _read_intent(root)
+    _intent_stage(root, trusted_key, intent)
+    installation_id = intent["installation_id"]
+    data_volume = intent["data_volume"]
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                           volume=True)
+    if data_volume not in volumes:
+        if (_scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
+                _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                             "--quiet") or volumes):
+            raise VesselInstallError("first-install resources lack the data volume")
+        _assert_missing("volume", data_volume)
+        if _read_intent(root) != intent:
+            raise VesselInstallError("first-install intent changed")
+        _clear_unbound_secrets(root)
+        return {"result": "reconciled", "containers": 0,
+                "networks": 0, "sockets": 0}
+    _volume(data_volume, installation_id, "knowledge-data", create=False)
+    result = _remove_scoped_orphans(
+        installation_id, data_volume,
+        lambda: _read_intent(root) == intent and
+        not (root / "vessel-state.json").exists() and
+        not (root / "vessel-state.json").is_symlink())
+    if (_docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
+            _docker("network", "ls", "--no-trunc", "--filter", scope, "--quiet") or
+            _docker("volume", "ls", "--filter", scope, "--quiet") != data_volume):
+        raise VesselInstallError("first-install reconciliation is incomplete")
+    return result
+
+
+@_serialized
+def resume_first_install(root: Path, trusted_key: Path,
+                         crane: Path) -> dict[str, int | str]:
+    """Resume a clean signed first install identified by its durable intent."""
+    intent = _read_intent(root)
+    active_path = root / "vessel-state.json"
+    if active_path.exists() or active_path.is_symlink():
+        healthy = status_vessel(root, trusted_key, crane)
+        recorded = _read_state(root)
+        if (healthy.get("result") != "healthy" or
+                recorded["active"] != intent["release"] or
+                recorded["installation_id"] != intent["installation_id"] or
+                recorded["core_state"] != intent["core_state"] or
+                recorded["lab_password_file"] != intent["lab_password_file"] or
+                recorded["runtime"]["data_volume"] != intent["data_volume"]):
+            raise VesselInstallError("active vessel does not match first-install intent")
+        (root / "vessel-intent.json").unlink()
+        return {"result": "already-activated", "active": intent["release"]}
+    stage = _intent_stage(root, trusted_key, intent)
+    state = Path(intent["core_state"])
+    password = Path(intent["lab_password_file"])
+    if (state.resolve().is_relative_to(root.resolve()) or
+            password.resolve().is_relative_to(root.resolve())):
+        raise VesselInstallError("first-install state and credential must be external")
+    installation_id = intent["installation_id"]
+    data_volume = intent["data_volume"]
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope,
+                              "--quiet")
+    networks = _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                            "--quiet")
+    volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                           volume=True)
+    if containers or networks or volumes not in ([], [data_volume]):
+        raise VesselInstallError("first-install resources require reconciliation")
+    initialize = not volumes
+    if initialize:
+        _assert_missing("volume", data_volume)
+        if (root / "knowledge-secrets").exists() or \
+                (root / "knowledge-secrets").is_symlink():
+            raise VesselInstallError("bootstrap credentials require reconciliation")
+    else:
+        _volume(data_volume, installation_id, "knowledge-data", create=False)
+    if _read_intent(root) != intent:
+        raise VesselInstallError("first-install intent changed")
+    knowledge = None
+    services = None
+    try:
+        knowledge = start_signed_knowledge(stage / "bundle", trusted_key, crane,
+                                           root, installation_id,
+                                           initialize=initialize)
+        _state_options(state, password, root)
+        ingestion = _ingest(stage / "bundle", trusted_key, crane, state,
+                            root, knowledge)
+        services = start_signed_vessel_services(
+            stage / "bundle", trusted_key, crane, stage / "console-config.json",
+            state, password, root, knowledge, installation_id)
+        payload = _state_payload(intent["release"], installation_id, state,
+                                 password, services, knowledge)
+        _write_state(root, payload)
+        try:
+            (root / "vessel-intent.json").unlink(missing_ok=True)
+        except OSError:
+            pass
+        return {"result": "activated", "active": intent["release"],
+                "indexed": ingestion["indexed"], "unchanged": ingestion["unchanged"]}
+    except Exception as exc:
+        if (root / "vessel-state.json").exists() or \
+                (root / "vessel-state.json").is_symlink():
+            raise VesselInstallError(
+                "first-install state may have changed; retain runtime for reconciliation"
+            ) from exc
+        if not _cleanup_failed_install(installation_id, services, knowledge,
+                                       data_volume, retain_data=not initialize):
+            raise VesselInstallError(
+                "first-install resume failed; cleanup incomplete and data retained"
+            ) from exc
+        raise
+
+
+@_serialized
+def reconcile_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, int | str]:
+    """Remove checked orphan runtime resources after interrupted recovery."""
+    value = _read_state(root)
+    identifier = value["active"]
+    _verify_stage(root / "vessel-releases" / identifier, trusted_key, identifier)
+    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
+    _state_options(state, password, root)
+    installation_id = value["installation_id"]
+    runtime = value["runtime"]
+    for kind, old_id in (("container", runtime["core_id"]),
+                         ("container", runtime["console_id"]),
+                         ("container", runtime["knowledge_id"]),
+                         ("network", runtime["network_id"]),
+                         ("volume", runtime["socket_volume"])):
+        _assert_missing(kind, old_id)
+    data_volume = runtime["data_volume"]
+    _volume(data_volume, installation_id, "knowledge-data", create=False)
+    counts = _remove_scoped_orphans(
+        installation_id, data_volume, lambda: _read_state(root) == value)
+    _recovery_inventory(installation_id, runtime)
+    return counts
 
 
 @_serialized

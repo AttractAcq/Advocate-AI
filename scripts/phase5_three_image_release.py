@@ -23,8 +23,9 @@ from infrastructure.deploy.knowledge_volume import (
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_installer import (
-    finish_vessel_stop, install_vessel, reconcile_vessel, recover_vessel,
-    status_vessel,
+    _ingest, _stage, _write_intent, finish_vessel_stop, install_vessel,
+    reconcile_first_install, reconcile_vessel, recover_vessel,
+    resume_first_install, status_vessel,
 )
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -176,6 +177,75 @@ def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
                            capture_output=True, text=True, timeout=30)
 
 
+def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
+                                    root: Path) -> dict[str, str]:
+    """Simulate process loss before first activation and resume from intent."""
+    install_root = root / "interrupted-first-install"
+    install_root.mkdir(mode=0o700)
+    installation_id = uuid.uuid4().hex
+    data_volume = f"sovereign-{installation_id}-knowledge-data"
+    state = root / "vessel-state"
+    lab_password = root / "lab-password"
+    orphan_knowledge = None
+    orphan_services = None
+    try:
+        identifier, stage = _stage(install_root, bundle, trusted,
+                                   root / "console-config.json")
+        _write_intent(install_root, identifier, installation_id, state,
+                      lab_password)
+        orphan_knowledge = start_signed_knowledge(
+            stage / "bundle", trusted, crane, install_root, installation_id,
+            initialize=True)
+        _ingest(stage / "bundle", trusted, crane, state, install_root,
+                orphan_knowledge)
+        orphan_services = start_signed_vessel_services(
+            stage / "bundle", trusted, crane, stage / "console-config.json",
+            state, lab_password, install_root, orphan_knowledge,
+            installation_id)
+        if (install_root / "vessel-state.json").exists():
+            raise AssertionError("interrupted first install wrote active state")
+        reconciled = reconcile_first_install(install_root, trusted, crane)
+        resumed = resume_first_install(install_root, trusted, crane)
+        healthy = status_vessel(install_root, trusted, crane)
+        _write_intent(install_root, identifier, installation_id, state,
+                      lab_password)
+        completed = resume_first_install(install_root, trusted, crane)
+        if (reconciled != {"result": "reconciled", "containers": 3,
+                           "networks": 1, "sockets": 1} or
+                resumed.get("result") != "activated" or
+                healthy.get("result") != "healthy" or
+                healthy.get("active") != identifier or
+                completed != {"result": "already-activated", "active": identifier} or
+                (install_root / "vessel-intent.json").exists()):
+            raise AssertionError("interrupted first install did not resume safely")
+        return {"result": "pass", "reconciled": "three-service-orphan",
+                "activation": "resumed-and-healthy", "data_volume": "preserved",
+                "committed_intent": "healthy-active-reconciled"}
+    finally:
+        if orphan_services is not None:
+            stop_runtime(orphan_services)
+        if orphan_knowledge is not None:
+            try:
+                stop_knowledge(orphan_knowledge)
+            except Exception:
+                pass
+        active = install_root / "vessel-state.json"
+        if active.exists():
+            record = json.loads(active.read_text())
+            runtime = record["runtime"]
+            stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                       runtime["console_id"]))
+            try:
+                stop_knowledge(KnowledgeVolumeHandle(
+                    runtime["knowledge_id"], runtime["socket_volume"],
+                    runtime["data_volume"], runtime["knowledge_run"],
+                    record["installation_id"]))
+            except Exception:
+                pass
+        subprocess.run(["docker", "volume", "rm", data_volume],
+                       capture_output=True, text=True, timeout=30)
+
+
 def _run(*argv: str) -> str:
     complete = subprocess.run(argv, check=True, capture_output=True,
                               text=True, timeout=300)
@@ -311,6 +381,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                                   ids["core"])
                 result["signed_vessel_first_install"] = \
                     _rehearse_first_install(bundle, trusted, crane, root)
+                result["interrupted_first_install"] = \
+                    _rehearse_first_install_resume(bundle, trusted, crane, root)
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:

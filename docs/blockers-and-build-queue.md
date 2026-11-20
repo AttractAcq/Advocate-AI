@@ -171,6 +171,8 @@ from independent product security review.
 
 | W-118 | Durable first-install intent before resource creation (T-028) | [PR #146](https://github.com/AttractAcq/Advocate-AI/pull/146) stores the installation ID, signed release ID and external state paths in a private, fsynced record before Knowledge volume creation. Incomplete cleanup retains it; successful activation removes it after the active record is written. Strict parsing rejects duplicate fields. `make check` passes 343 tests with 12 skips. Resume and cleanup after process termination, target hardware and independent review remain open. | Local tests passed; actual-image CI and review pending; T-028/G3 open |
 
+| W-119 | Reconcile and resume interrupted first installation (T-028) | [PR #147](https://github.com/AttractAcq/Advocate-AI/pull/147) validates durable intent and the signed stage, removes only checked orphan runtime resources, retains the persistent database volume, reruns idempotent ingestion and activates signed services after health. It also clears a stale intent only when the committed installation is healthy and matches. The actual-image rehearsal simulates interruption before active-state recording and after it. `make check` passes 348 tests with 12 skips. Interrupted PostgreSQL bootstrap with an unsecured existing volume, target hardware and independent review remain open. | Local tests passed; actual-image CI and review pending; T-028/G3 open |
+
 When a row is completed, link its commit, CI result and evidence; then change
 its state to **locally complete**. Do not remove it until its external gate is
 closed. Phase-specific gate records: [G0A](phase-1/gate.md), [G1](phase-2/gate.md),

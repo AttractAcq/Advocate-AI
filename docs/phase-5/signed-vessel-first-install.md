@@ -51,7 +51,7 @@ open.
 ## Operator command
 
 `python -m scripts.vesselctl` exposes `install`, `status`, `stop`,
-`finish-stop`, `reconcile` and `recover`
+`finish-stop`, `reconcile`, `recover`, `reconcile-install` and `resume-install`
 for the synthetic candidate. Every command requires explicit absolute paths
 for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
 requires `--bundle`, `--console-config`, `--core-state` and
@@ -90,5 +90,26 @@ external Core state path and credential path. A failed install with incomplete
 Docker cleanup retains this record alongside the private credentials. A
 successful activation writes the active state and removes the intent; the
 actual-image rehearsal checks its absence. The intent is strictly parsed with
-duplicate-key and field checks. A separate resume or cleanup command is still
-needed for process termination before the active record is written.
+duplicate-key and field checks.
+
+`reconcile-install` uses that intent to validate the signed stage and the
+installation's scoped Docker inventory. If the data volume exists, it checks
+all orphan containers, networks and socket volumes before removing them, while
+retaining the data and credentials. If no data volume or scoped runtime exists,
+it verifies the volume is truly absent and clears only private bootstrap
+credentials so initialization can safely start again. It refuses an active
+record or any unexpected resource.
+
+`resume-install` requires the same signed stage and a clean scoped inventory.
+It initializes a new Knowledge volume only if none exists, or reattaches the
+checked persistent volume with its external credentials. It reruns idempotent
+approved-source ingestion, starts signed Core and Console, and writes the
+active record only after health. The intent is then removed. The actual-image
+CI rehearsal creates an unrecorded three-service first install, reconciles it,
+resumes it against the same database volume and checks the final healthy state.
+If the active record was already committed but the intent remains, `resume-install`
+checks the complete running signed installation and requires the active release,
+installation ID, external paths and data volume to match the intent. It then
+clears only the stale intent and reports `already-activated`.
+Interrupted PostgreSQL bootstrap with an existing but not yet secured data
+volume still requires explicit operator investigation.
