@@ -40,4 +40,10 @@ correctly returned `denied-findings`. The `su-exec` replacement requires a
 fresh build, functional rehearsal and scan before its result can be used.
 The second scan still reported those 28 Go findings from `gosu` in an
 inherited layer, despite the working `su-exec` replacement. The final
-filesystem stage is the next candidate; its scan has not yet passed.
+filesystem stage was [built and scanned in CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44650896847).
+It starts PostgreSQL, passes the Core socket and role checks, and its exact
+saved archive has 868 SBOM components with zero unresolved HIGH, CRITICAL or
+UNKNOWN findings. Release intake returns `preflight-pass`. This is evidence
+for a candidate image, not approval to distribute it or a signed vessel
+bundle. The Core and Console archives in that run also pass release intake;
+the three-image signature and installer remain separate work.
