@@ -16,12 +16,13 @@ import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from infrastructure.deploy.container_runtime import _image_id, stop_runtime
+from infrastructure.deploy.container_runtime import RuntimeHandle, _image_id, stop_runtime
 from infrastructure.deploy.knowledge_volume import (
-    start_signed_knowledge, stop_knowledge,
+    KnowledgeVolumeHandle, start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
+from infrastructure.deploy.vessel_installer import install_vessel, status_vessel
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
@@ -100,6 +101,38 @@ def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
             stop_knowledge(active)
         subprocess.run(["docker", "volume", "rm", data_volume],
                        capture_output=True, text=True, timeout=30)
+
+
+def _rehearse_first_install(bundle: Path, trusted: Path, crane: Path,
+                            root: Path) -> dict[str, str]:
+    """Activate from signed media and check the recorded three-image state."""
+    state = root / "vessel-state"
+    lab_password = root / "lab-password"
+    config = root / "console-config.json"
+    install_root = root / "installed-vessel"
+    try:
+        activated = install_vessel(bundle, trusted, crane, config, install_root,
+                                   state, lab_password)
+        status = status_vessel(install_root, trusted, crane)
+        if (activated.get("result") != "activated" or
+                status.get("result") != "healthy" or
+                activated.get("active") != status.get("active")):
+            raise AssertionError("signed first installation did not become healthy")
+        return {"result": "pass", "activation": "signed-and-healthy",
+                "state": "recorded-after-health"}
+    finally:
+        path = install_root / "vessel-state.json"
+        if path.exists():
+            record = json.loads(path.read_text())
+            runtime = record["runtime"]
+            stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                       runtime["console_id"]))
+            stop_knowledge(KnowledgeVolumeHandle(
+                runtime["knowledge_id"], runtime["socket_volume"],
+                runtime["data_volume"], runtime["knowledge_run"],
+                record["installation_id"]))
+            subprocess.run(["docker", "volume", "rm", runtime["data_volume"]],
+                           capture_output=True, text=True, timeout=30)
 
 
 def _run(*argv: str) -> str:
@@ -235,6 +268,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["persistent_knowledge_restart"] = \
                     _rehearse_persistent_knowledge(bundle, trusted, crane, root,
                                                   ids["core"])
+                result["signed_vessel_first_install"] = \
+                    _rehearse_first_install(bundle, trusted, crane, root)
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:

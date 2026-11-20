@@ -29,12 +29,18 @@ def docker(*args: str, timeout: int = 120) -> str:
 def ready(identifier: str) -> None:
     for _ in range(40):
         try:
+            process = subprocess.run(["docker", "exec", identifier, "cat",
+                                      "/proc/1/comm"], capture_output=True,
+                                     text=True, timeout=10)
             completed = subprocess.run(["docker", "exec", "-u", "postgres",
                                         identifier, "pg_isready", "-q", "-d", "postgres"],
                                        capture_output=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise PostgresSocketError("PostgreSQL readiness check failed") from exc
-        if completed.returncode == 0:
+        # The official entrypoint starts a temporary local server during init.
+        # Only PID 1's final postgres process is safe for persistent setup.
+        if (process.returncode == 0 and process.stdout.strip() == "postgres"
+                and completed.returncode == 0):
             return
         time.sleep(1)
     raise PostgresSocketError("PostgreSQL server did not become ready")
