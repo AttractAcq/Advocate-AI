@@ -107,5 +107,9 @@ approved-source ingestion, starts signed Core and Console, and writes the
 active record only after health. The intent is then removed. The actual-image
 CI rehearsal creates an unrecorded three-service first install, reconciles it,
 resumes it against the same database volume and checks the final healthy state.
+If the active record was already committed but the intent remains, `resume-install`
+checks the complete running signed installation and requires the active release,
+installation ID, external paths and data volume to match the intent. It then
+clears only the stale intent and reports `already-activated`.
 Interrupted PostgreSQL bootstrap with an existing but not yet secured data
 volume still requires explicit operator investigation.

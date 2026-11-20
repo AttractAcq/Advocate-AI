@@ -726,6 +726,19 @@ def resume_first_install(root: Path, trusted_key: Path,
                          crane: Path) -> dict[str, int | str]:
     """Resume a clean signed first install identified by its durable intent."""
     intent = _read_intent(root)
+    active_path = root / "vessel-state.json"
+    if active_path.exists() or active_path.is_symlink():
+        healthy = status_vessel(root, trusted_key, crane)
+        recorded = _read_state(root)
+        if (healthy.get("result") != "healthy" or
+                recorded["active"] != intent["release"] or
+                recorded["installation_id"] != intent["installation_id"] or
+                recorded["core_state"] != intent["core_state"] or
+                recorded["lab_password_file"] != intent["lab_password_file"] or
+                recorded["runtime"]["data_volume"] != intent["data_volume"]):
+            raise VesselInstallError("active vessel does not match first-install intent")
+        (root / "vessel-intent.json").unlink()
+        return {"result": "already-activated", "active": intent["release"]}
     stage = _intent_stage(root, trusted_key, intent)
     state = Path(intent["core_state"])
     password = Path(intent["lab_password_file"])

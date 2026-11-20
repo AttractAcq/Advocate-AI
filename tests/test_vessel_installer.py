@@ -174,6 +174,47 @@ class VesselInstallerTests(unittest.TestCase):
         self.assertFalse((self.root / "vessel-intent.json").exists())
         self.assertEqual(_read_state(self.root)["installation_id"], installation_id)
 
+    def test_resume_clears_stale_intent_only_for_matching_healthy_state(self) -> None:
+        self.root.mkdir(mode=0o700)
+        installation_id = "f" * 32
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                          f"sovereign-{installation_id}-knowledge-data",
+                                          "sovereign-knowledge-" + "e" * 12,
+                                          installation_id)
+        _write_intent(self.root, "6" * 24, installation_id,
+                      self.parent / "state", self.parent / "password")
+        _write_state(self.root, _state_payload("6" * 24, installation_id,
+                                               self.parent / "state",
+                                               self.parent / "password",
+                                               services, knowledge))
+        with patch("infrastructure.deploy.vessel_installer.status_vessel",
+                   return_value={"result": "healthy", "active": "6" * 24}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge") as start:
+            result = resume_first_install(self.root, self.parent / "key",
+                                          self.parent / "crane")
+        self.assertEqual(result["result"], "already-activated")
+        self.assertFalse((self.root / "vessel-intent.json").exists())
+        start.assert_not_called()
+
+    def test_resume_preserves_intent_when_active_state_differs(self) -> None:
+        self.root.mkdir(mode=0o700)
+        _write_intent(self.root, "6" * 24, "f" * 32,
+                      self.parent / "state", self.parent / "password")
+        (self.root / "vessel-state.json").write_text("synthetic")
+        with patch("infrastructure.deploy.vessel_installer.status_vessel",
+                   return_value={"result": "healthy"}), \
+             patch("infrastructure.deploy.vessel_installer._read_state",
+                   return_value={"active": "7" * 24, "installation_id": "f" * 32,
+                                 "core_state": str(self.parent / "state"),
+                                 "lab_password_file": str(self.parent / "password"),
+                                 "runtime": {"data_volume": "unmatched"}}):
+            with self.assertRaisesRegex(VesselInstallError, "does not match"):
+                resume_first_install(self.root, self.parent / "key",
+                                     self.parent / "crane")
+        self.assertTrue((self.root / "vessel-intent.json").exists())
+
     def test_cleanup_requires_empty_scoped_inventory_after_volume_removal(self) -> None:
         installation_id = "b" * 32
         data_volume = f"sovereign-{installation_id}-knowledge-data"

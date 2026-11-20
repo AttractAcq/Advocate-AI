@@ -207,15 +207,20 @@ def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
         reconciled = reconcile_first_install(install_root, trusted, crane)
         resumed = resume_first_install(install_root, trusted, crane)
         healthy = status_vessel(install_root, trusted, crane)
+        _write_intent(install_root, identifier, installation_id, state,
+                      lab_password)
+        completed = resume_first_install(install_root, trusted, crane)
         if (reconciled != {"result": "reconciled", "containers": 3,
                            "networks": 1, "sockets": 1} or
                 resumed.get("result") != "activated" or
                 healthy.get("result") != "healthy" or
                 healthy.get("active") != identifier or
+                completed != {"result": "already-activated", "active": identifier} or
                 (install_root / "vessel-intent.json").exists()):
             raise AssertionError("interrupted first install did not resume safely")
         return {"result": "pass", "reconciled": "three-service-orphan",
-                "activation": "resumed-and-healthy", "data_volume": "preserved"}
+                "activation": "resumed-and-healthy", "data_volume": "preserved",
+                "committed_intent": "healthy-active-reconciled"}
     finally:
         if orphan_services is not None:
             stop_runtime(orphan_services)
