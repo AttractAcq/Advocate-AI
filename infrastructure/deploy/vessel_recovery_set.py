@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import sqlite3
 import stat
@@ -475,6 +476,7 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
     knowledge: KnowledgeVolumeHandle | None = None
     installation_id = value["installation_id"]
     data_volume = value["data_volume"]
+    restore_attempt = secrets.token_hex(16)
     _assert_missing("volume", data_volume)
     scope = f"label=sovereign.synthetic.install={installation_id}"
     if (_docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
@@ -496,12 +498,14 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
             for name in ("roles.json", "approved.json", "audit.jsonl", "history.db"):
                 shutil.copy2(restored / name, core_state / name, follow_symlinks=False)
             _write_private_record(root, "vessel-restore-intent.json", {
-                "schema": 1, "snapshot_id": value["snapshot_id"],
-                "release": release, "installation_id": installation_id})
+                "schema": 2, "snapshot_id": value["snapshot_id"],
+                "release": release, "installation_id": installation_id,
+                "restore_attempt": restore_attempt})
             _write_intent(root, release, installation_id, core_state, lab_password)
             knowledge = start_signed_knowledge(stage / "bundle", trusted_key,
                                                crane, root, installation_id,
-                                               initialize=True)
+                                               initialize=True,
+                                               restore_attempt=restore_attempt)
             _state_options(core_state, lab_password, root)
             _restore(knowledge.container_id, restored / "postgres.dump")
             _grant_restored_knowledge(knowledge.container_id)
@@ -553,14 +557,17 @@ def _read_restore_intent(root: Path) -> dict[str, object]:
     except (ValueError, UnicodeError) as exc:
         raise VesselRecoveryError("invalid vessel restore intent") from exc
     if (not isinstance(value, dict) or
-            set(value) != {"schema", "snapshot_id", "release", "installation_id"} or
-            type(value["schema"]) is not int or value["schema"] != 1 or
+            set(value) != {"schema", "snapshot_id", "release", "installation_id",
+                           "restore_attempt"} or
+            type(value["schema"]) is not int or value["schema"] != 2 or
             not isinstance(value["snapshot_id"], str) or
             not _ID.fullmatch(value["snapshot_id"]) or
             not isinstance(value["release"], str) or
             not _RELEASE.fullmatch(value["release"]) or
             not isinstance(value["installation_id"], str) or
-            not _INSTALL.fullmatch(value["installation_id"])):
+            not _INSTALL.fullmatch(value["installation_id"]) or
+            not isinstance(value["restore_attempt"], str) or
+            not _INSTALL.fullmatch(value["restore_attempt"])):
         raise VesselRecoveryError("invalid vessel restore intent fields")
     return value
 
@@ -587,6 +594,9 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
         active = root / "vessel-state.json"
         if active.exists() or active.is_symlink():
             raise VesselRecoveryError("active vessel cannot be abandoned")
+        abandoned = root / "vessel-restore-abandoned.json"
+        if abandoned.exists() or abandoned.is_symlink():
+            raise VesselRecoveryError("restore was already abandoned")
         state = Path(intent["core_state"])
         _owner_directory(state)
         if state.resolve().is_relative_to(root.resolve()):
@@ -604,7 +614,8 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
             raise VesselRecoveryError("partial restore intent changed")
         if volumes:
             _volume(value["data_volume"], value["installation_id"],
-                    "knowledge-data", create=False)
+                    "knowledge-data", create=False,
+                    restore_attempt=marker["restore_attempt"])
             _docker("volume", "rm", value["data_volume"])
         _assert_missing("volume", value["data_volume"])
         if (_scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
@@ -616,6 +627,7 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
         _write_private_record(root, "vessel-restore-abandoned.json", {
             "schema": 1, "snapshot_id": value["snapshot_id"],
             "installation_id": value["installation_id"],
+            "restore_attempt": marker["restore_attempt"],
             "discarded_utc": datetime.now(timezone.utc).isoformat()})
         return {"result": "abandoned", "data_volume": "removed",
                 "snapshot_id": value["snapshot_id"]}

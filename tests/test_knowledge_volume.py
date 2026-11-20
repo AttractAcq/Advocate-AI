@@ -127,6 +127,20 @@ class KnowledgeVolumeTests(unittest.TestCase):
                 _volume(name, installation, "knowledge-data", create=True)
             docker.assert_not_called()
 
+    def test_restore_attempt_must_match_exact_volume_label(self) -> None:
+        name, installation = "sovereign-test-volume", "a" * 32
+        metadata = {"Name": name, "Driver": "local",
+                    "Labels": {"sovereign.synthetic.install": installation,
+                               "sovereign.synthetic.role": "knowledge-data",
+                               "sovereign.synthetic.restore_attempt": "b" * 32}}
+        with patch("infrastructure.deploy.knowledge_volume.docker",
+                   return_value=json.dumps(metadata)):
+            _volume(name, installation, "knowledge-data", create=False,
+                    restore_attempt="b" * 32)
+            with self.assertRaisesRegex(KnowledgeVolumeError, "identity mismatch"):
+                _volume(name, installation, "knowledge-data", create=False,
+                        restore_attempt="c" * 32)
+
 
 if __name__ == "__main__":
     unittest.main()

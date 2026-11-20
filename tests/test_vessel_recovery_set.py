@@ -140,12 +140,14 @@ class VesselRecoverySetTests(unittest.TestCase):
         identifier = "a" * 32
         release = "b" * 24
         snapshot = "c" * 64
+        restore_attempt = "d" * 32
         data_volume = f"sovereign-{identifier}-knowledge-data"
         _write_intent(install, release, identifier, self.state,
                       self.root / "lab-password")
         _write_private_record(install, "vessel-restore-intent.json", {
-            "schema": 1, "snapshot_id": snapshot, "release": release,
-            "installation_id": identifier})
+            "schema": 2, "snapshot_id": snapshot, "release": release,
+            "installation_id": identifier,
+            "restore_attempt": restore_attempt})
         receipt = {"snapshot_id": snapshot, "release": release,
                    "installation_id": identifier, "data_volume": data_volume}
         with self.assertRaisesRegex(VesselRecoveryError, "explicit flag"):
@@ -156,6 +158,19 @@ class VesselRecoverySetTests(unittest.TestCase):
                    return_value={**receipt, "snapshot_id": "d" * 64}), \
              patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
             with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+                abandon_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "receipt",
+                    self.root / "receipt-key", discard_partial_data=True)
+        docker.assert_not_called()
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_stage"), \
+             patch("infrastructure.deploy.vessel_recovery_set._scoped_list",
+                   side_effect=[[], [], [data_volume]]), \
+             patch("infrastructure.deploy.vessel_recovery_set._volume",
+                   side_effect=VesselRecoveryError("attempt label mismatch")), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            with self.assertRaisesRegex(VesselRecoveryError, "attempt label"):
                 abandon_incomplete_vessel_restore(
                     install, self.root / "key", self.root / "receipt",
                     self.root / "receipt-key", discard_partial_data=True)
@@ -176,6 +191,15 @@ class VesselRecoverySetTests(unittest.TestCase):
         self.assertTrue((install / "vessel-restore-intent.json").exists())
         self.assertTrue((install / "vessel-restore-abandoned.json").exists())
         self.assertTrue(self.state.exists())
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_stage"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            with self.assertRaisesRegex(VesselRecoveryError, "already abandoned"):
+                abandon_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "receipt",
+                    self.root / "receipt-key", discard_partial_data=True)
+        docker.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -123,7 +123,11 @@ def _migration_credential(root: Path, *, initialize: bool = False) -> tuple[Path
 
 
 def _volume(name: str, installation_id: str, role: str, *, create: bool,
-            run_name: str | None = None) -> None:
+            run_name: str | None = None,
+            restore_attempt: str | None = None) -> None:
+    if restore_attempt is not None and (role != "knowledge-data" or
+            not _INSTALL.fullmatch(restore_attempt)):
+        raise KnowledgeVolumeError("invalid Knowledge restore attempt")
     if create:
         probe = subprocess.run(["docker", "volume", "inspect", name],
                                capture_output=True, timeout=10)
@@ -135,6 +139,8 @@ def _volume(name: str, installation_id: str, role: str, *, create: bool,
                   "--label", f"sovereign.synthetic.role={role}"]
         if run_name is not None:
             labels += ["--label", f"sovereign.synthetic.run={run_name}"]
+        if restore_attempt is not None:
+            labels += ["--label", f"sovereign.synthetic.restore_attempt={restore_attempt}"]
         docker("volume", "create", *labels, name)
     raw = docker("volume", "inspect", name, "--format", "{{json .}}")
     try:
@@ -145,6 +151,8 @@ def _volume(name: str, installation_id: str, role: str, *, create: bool,
                 "sovereign.synthetic.role": role}
     if run_name is not None:
         expected["sovereign.synthetic.run"] = run_name
+    if restore_attempt is not None:
+        expected["sovereign.synthetic.restore_attempt"] = restore_attempt
     if (not isinstance(value, dict) or value.get("Name") != name
             or value.get("Driver") != "local"
             or not isinstance(value.get("Labels"), dict)
@@ -154,11 +162,15 @@ def _volume(name: str, installation_id: str, role: str, *, create: bool,
 
 def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
                            root: Path, installation_id: str, *,
-                           initialize: bool) -> KnowledgeVolumeHandle:
+                           initialize: bool,
+                           restore_attempt: str | None = None) -> KnowledgeVolumeHandle:
     """Start the exact signed Knowledge archive with durable data and private socket."""
     _private_root(root)
     if not _INSTALL.fullmatch(installation_id):
         raise KnowledgeVolumeError("invalid Knowledge installation identifier")
+    if restore_attempt is not None and (not initialize or
+            not _INSTALL.fullmatch(restore_attempt)):
+        raise KnowledgeVolumeError("invalid Knowledge restore attempt")
     manifest = verify_bundle(bundle, trusted_key)
     if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
         raise BundleError("Knowledge runtime requires a signed vessel bundle")
@@ -172,7 +184,8 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
         admin, _, _, writer_secret, reader_secret = _credentials(
             root, initialize=initialize)
         _, migration_secret = _migration_credential(root)
-        _volume(data_name, installation_id, "knowledge-data", create=initialize)
+        _volume(data_name, installation_id, "knowledge-data", create=initialize,
+                restore_attempt=restore_attempt)
         created_data = initialize
         _volume(socket_name, installation_id, "knowledge-socket", create=True,
                 run_name=run_name)
