@@ -18,14 +18,14 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.container_runtime import RuntimeHandle, _image_id, stop_runtime
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeHandle, start_signed_knowledge, stop_knowledge,
+    KnowledgeVolumeHandle, _volume, start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_installer import (
     _ingest, _stage, _write_intent, finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
-    resume_first_install, status_vessel,
+    reset_first_install, resume_first_install, status_vessel,
 )
 from infrastructure.release.bundle import create_knowledge_bundle, verify_bundle
 from infrastructure.release.intake import IntakeError, verify_intake
@@ -246,6 +246,52 @@ def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
                        capture_output=True, text=True, timeout=30)
 
 
+def _rehearse_bootstrap_reset(bundle: Path, trusted: Path, crane: Path,
+                              root: Path) -> dict[str, str]:
+    """Discard a labelled synthetic bootstrap volume, then install afresh."""
+    install_root = root / "bootstrap-reset-install"
+    install_root.mkdir(mode=0o700)
+    installation_id = uuid.uuid4().hex
+    data_volume = f"sovereign-{installation_id}-knowledge-data"
+    try:
+        identifier, _ = _stage(install_root, bundle, trusted,
+                                root / "console-config.json")
+        _write_intent(install_root, identifier, installation_id,
+                      root / "vessel-state", root / "lab-password")
+        credentials = install_root / "knowledge-secrets"
+        credentials.mkdir(mode=0o700)
+        partial = credentials / "admin-password"
+        partial.write_text("synthetic-incomplete-bootstrap\n")
+        partial.chmod(0o600)
+        _volume(data_volume, installation_id, "knowledge-data", create=True)
+        reset = reset_first_install(install_root, trusted, crane)
+        resumed = resume_first_install(install_root, trusted, crane)
+        healthy = status_vessel(install_root, trusted, crane)
+        if (reset != {"result": "bootstrap-reset", "data_volume": "removed"} or
+                resumed.get("result") != "activated" or
+                healthy.get("result") != "healthy" or
+                healthy.get("active") != identifier or credentials.is_symlink()):
+            raise AssertionError("synthetic bootstrap reset did not reinitialize")
+        return {"result": "pass", "discard": "labelled-data-volume",
+                "activation": "fresh-signed"}
+    finally:
+        active = install_root / "vessel-state.json"
+        if active.exists():
+            record = json.loads(active.read_text())
+            runtime = record["runtime"]
+            stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                       runtime["console_id"]))
+            try:
+                stop_knowledge(KnowledgeVolumeHandle(
+                    runtime["knowledge_id"], runtime["socket_volume"],
+                    runtime["data_volume"], runtime["knowledge_run"],
+                    record["installation_id"]))
+            except Exception:
+                pass
+        subprocess.run(["docker", "volume", "rm", data_volume],
+                       capture_output=True, text=True, timeout=30)
+
+
 def _run(*argv: str) -> str:
     complete = subprocess.run(argv, check=True, capture_output=True,
                               text=True, timeout=300)
@@ -383,6 +429,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     _rehearse_first_install(bundle, trusted, crane, root)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
+                result["bootstrap_reset"] = \
+                    _rehearse_bootstrap_reset(bundle, trusted, crane, root)
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:

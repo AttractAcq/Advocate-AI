@@ -8,8 +8,8 @@ from pathlib import Path
 
 from infrastructure.deploy.vessel_installer import (
     finish_vessel_stop, install_vessel, reconcile_first_install,
-    reconcile_vessel, recover_vessel, resume_first_install, status_vessel,
-    stop_vessel,
+    reconcile_vessel, recover_vessel, reset_first_install,
+    resume_first_install, status_vessel, stop_vessel,
 )
 
 
@@ -28,6 +28,8 @@ def main(argv: list[str] | None = None) -> None:
     for command in ("status", "stop", "finish-stop", "reconcile", "recover",
                     "reconcile-install", "resume-install"):
         commands.add_parser(command, parents=[shared])
+    reset = commands.add_parser("reset-bootstrap", parents=[shared])
+    reset.add_argument("--discard-data", action="store_true", required=True)
     args = parser.parse_args(argv)
     if args.command == "install":
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
@@ -45,6 +47,8 @@ def main(argv: list[str] | None = None) -> None:
         result = reconcile_first_install(args.root, args.trusted_key, args.crane)
     elif args.command == "resume-install":
         result = resume_first_install(args.root, args.trusted_key, args.crane)
+    elif args.command == "reset-bootstrap":
+        result = reset_first_install(args.root, args.trusted_key, args.crane)
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
     print(json.dumps(result, sort_keys=True))
