@@ -32,7 +32,9 @@ from infrastructure.deploy.postgres_socket import PostgresSocketError, sql as po
 from infrastructure.deploy.vessel_runtime import (
     _state_options, probe_signed_vessel_services, start_signed_vessel_services,
 )
-from infrastructure.release.bundle import BundleError, verify_bundle
+from infrastructure.release.bundle import (
+    BundleError, require_supported_vessel_compatibility, verify_bundle,
+)
 
 
 class VesselInstallError(ValueError):
@@ -67,8 +69,7 @@ def _release_id(bundle: Path, config: Path) -> str:
 
 def _candidate_release_id(bundle: Path, trusted_key: Path, config: Path) -> str:
     manifest = verify_bundle(bundle, trusted_key)
-    if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
-        raise BundleError("vessel installer requires a signed three-image bundle")
+    require_supported_vessel_compatibility(manifest)
     _validate_console_config(config)
     if not stat.S_IMODE(config.stat().st_mode) & 0o004:
         raise VesselInstallError("Console configuration is unreadable by the image user")
@@ -100,8 +101,7 @@ def _verify_stage(stage: Path, trusted_key: Path, identifier: str) -> None:
             {item.name for item in stage.iterdir()} != {"bundle", "console-config.json"}):
         raise VesselInstallError("invalid staged vessel release")
     manifest = verify_bundle(stage / "bundle", trusted_key)
-    if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
-        raise VesselInstallError("staged release is not a vessel bundle")
+    require_supported_vessel_compatibility(manifest)
     config = stage / "console-config.json"
     _validate_console_config(config)
     if _release_id(stage / "bundle", config) != identifier:
@@ -301,8 +301,7 @@ def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
         raise VesselInstallError("first vessel installation requires a new absolute root")
     _owner_directory(root.parent)
     manifest = verify_bundle(bundle, trusted_key)
-    if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
-        raise BundleError("vessel installer requires a signed three-image bundle")
+    require_supported_vessel_compatibility(manifest)
     root.mkdir(mode=0o700)
     services = None
     knowledge = None

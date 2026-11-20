@@ -24,6 +24,7 @@ from infrastructure.release.upstream import UpstreamError, validate_image_archiv
 MANIFEST = "release-manifest.json"
 SIGNATURE = "release-manifest.sig"
 MAX_MANIFEST_BYTES = 1024 * 1024
+SUPPORTED_VESSEL_COMPATIBILITY = {"knowledge_schema": 1, "core_state_schema": 1}
 
 
 class BundleError(ValueError):
@@ -87,7 +88,8 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
                    *, evidence: dict[str, str] | None = None,
                    images: dict[str, dict[str, str]] | None = None,
-                   fleet: bool = False, knowledge: bool = False) -> dict[str, object]:
+                   fleet: bool = False, knowledge: bool = False,
+                   vessel_compatibility: dict[str, int] | None = None) -> dict[str, object]:
     """Copy an approved payload and sign its exact manifest bytes."""
     if not isinstance(version, str) or not version or len(version) > 80 or any(c.isspace() for c in version):
         raise BundleError("invalid release version")
@@ -96,6 +98,10 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
         raise BundleError("ambiguous release evidence")
     if fleet and knowledge:
         raise BundleError("ambiguous image bundle target")
+    if knowledge:
+        _validate_vessel_compatibility(vessel_compatibility)
+    elif vessel_compatibility is not None:
+        raise BundleError("vessel compatibility applies only to vessel bundles")
     if evidence is not None:
         _validate_evidence(evidence, {name for name, _ in source_files})
     if images is not None:
@@ -132,6 +138,8 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
             manifest["images"] = images
             if fleet or knowledge:
                 manifest["target"] = "fleet" if fleet else "vessel"
+            if knowledge:
+                manifest["compatibility"] = vessel_compatibility
         raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
         (output / MANIFEST).write_bytes(raw)
         (output / SIGNATURE).write_bytes(base64.b64encode(key.sign(raw)))
@@ -201,6 +209,21 @@ def _validate_product_images(images: object, files: set[str]) -> None:
     _validate_image_set(images, files, ("core", "console"))
 
 
+def _validate_vessel_compatibility(value: object) -> None:
+    if (not isinstance(value, dict) or
+            set(value) != {"knowledge_schema", "core_state_schema"} or
+            any(type(item) is not int or not 1 <= item <= 65535
+                for item in value.values())):
+        raise BundleError("invalid vessel compatibility contract")
+
+
+def require_supported_vessel_compatibility(manifest: dict[str, object]) -> None:
+    """Refuse a signed vessel release this installed software cannot run."""
+    if (manifest.get("schema") != 6 or manifest.get("target") != "vessel" or
+            manifest.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY):
+        raise BundleError("unsupported vessel compatibility contract")
+
+
 def _preflight_image(payload: Path, evidence: dict[str, str], crane: Path) -> None:
     result = verify_intake(payload / evidence["scan_path"], payload / evidence["sbom_path"],
                            evidence["image_ref"], evidence["scan_sha256"], evidence["sbom_sha256"])
@@ -237,14 +260,16 @@ def create_product_bundle(payload: Path, output: Path, signing_key: Path,
 
 def create_knowledge_bundle(payload: Path, output: Path, signing_key: Path,
                             version: str, images: dict[str, dict[str, str]],
-                            *, crane: Path) -> dict[str, object]:
+                            compatibility: dict[str, int], *, crane: Path) -> dict[str, object]:
     """Sign Core, Console and Knowledge only after all three archives pass intake."""
+    _validate_vessel_compatibility(compatibility)
     roles = ("core", "console", "knowledge")
     _validate_image_set(images, {name for name, _ in _files(payload)}, roles)
     for role in roles:
         _preflight_image(payload, images[role], crane)
     manifest = _create_bundle(payload, output, signing_key, version,
-                              images=images, knowledge=True)
+                              images=images, knowledge=True,
+                              vessel_compatibility=compatibility)
     try:
         for role in roles:
             item = images[role]
@@ -342,6 +367,8 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
         required |= {"signed_at", "images"}
         if manifest["schema"] in (5, 6):
             required.add("target")
+        if manifest["schema"] == 6:
+            required.add("compatibility")
     if set(manifest) != required:
         raise BundleError("invalid manifest fields")
     if manifest["key_id"] != _key_id(key):
@@ -409,6 +436,8 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
             raise BundleError("signed Fleet bundle target is invalid")
         if manifest["schema"] == 6 and manifest["target"] != "vessel":
             raise BundleError("signed knowledge bundle target is invalid")
+        if manifest["schema"] == 6:
+            _validate_vessel_compatibility(manifest["compatibility"])
         _validate_image_set(images, expected, roles)
         for role in roles:
             item = images[role]
@@ -459,6 +488,8 @@ def main() -> None:
     knowledge.add_argument("--signing-key", required=True, type=Path)
     knowledge.add_argument("--version", required=True)
     knowledge.add_argument("--images-json", required=True, type=Path)
+    knowledge.add_argument("--knowledge-schema", required=True, type=int)
+    knowledge.add_argument("--core-state-schema", required=True, type=int)
     knowledge.add_argument("--crane", required=True, type=Path)
     fleet = commands.add_parser("pack-fleet")
     fleet.add_argument("payload", type=Path)
@@ -497,7 +528,10 @@ def main() -> None:
                 raise BundleError("invalid knowledge image descriptor")
             images = json.loads(args.images_json.read_text(), object_pairs_hook=_unique_object)
             result = create_knowledge_bundle(args.payload, args.output, args.signing_key,
-                                             args.version, images, crane=args.crane)
+                                             args.version, images,
+                                             {"knowledge_schema": args.knowledge_schema,
+                                              "core_state_schema": args.core_state_schema},
+                                             crane=args.crane)
         elif args.command == "pack-fleet":
             if args.images_json.is_symlink() or not args.images_json.is_file() or \
                     args.images_json.stat().st_size > MAX_MANIFEST_BYTES:

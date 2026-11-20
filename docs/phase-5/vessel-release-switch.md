@@ -22,7 +22,10 @@ bundle. They reuse the checked persistent Knowledge volume and Core state.
 
 The switch requires a clean stopped runtime with exactly the recorded,
 labelled Knowledge data volume. It verifies both the existing signed stage and
-new signed bundle, checks the Knowledge schema and full approved source index
+new signed bundle. Both must declare the supported Knowledge schema and Core
+state format in their signed compatibility contract. An unsupported candidate
+is rejected before its stage is created. The switch checks the live Knowledge
+schema and full approved source index
 before starting Core and Console, and writes the active release record only
 after service health checks. A failed candidate retains the old active record
 and data volume. If cleanup is interrupted, reconcile the labelled candidate
@@ -44,7 +47,8 @@ The Linux actual-image rehearsal builds a second Core image with a different
 synthetic release label. It scans and inventories that exact second archive,
 signs it into the update bundle, then checks the running Core image changes
 on switch and returns to the original image on rollback. Console and Knowledge
-images stay the same. At first install, after the switch, and after rollback,
+images stay the same. Both signed releases declare schema 1 compatibility.
+At first install, after the switch, and after rollback,
 the rehearsal also asks the running Core API whether the engineer can find the
 fictional engineering document and the deckhand cannot list, search or preview
 it. The clean restore rehearsal repeats that permission check against the

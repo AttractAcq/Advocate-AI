@@ -23,7 +23,9 @@ from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, _credentials, probe_knowledge,
 )
 from infrastructure.deploy.postgres_socket import verify_login
-from infrastructure.release.bundle import BundleError, verify_bundle
+from infrastructure.release.bundle import (
+    BundleError, require_supported_vessel_compatibility, verify_bundle,
+)
 from services.knowledge.manifest_io import load_manifest
 from services.policy.audit import verify as verify_audit
 from services.policy.policy_file import load_policy
@@ -130,8 +132,7 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
             knowledge.installation_id != installation_id:
         raise VesselRuntimeError("vessel installation identity mismatch")
     manifest = verify_bundle(bundle, trusted_key)
-    if manifest.get("schema") != 6 or manifest.get("target") != "vessel":
-        raise BundleError("vessel runtime requires the signed three-image bundle")
+    require_supported_vessel_compatibility(manifest)
     _validate_console_config(console_config)
     if not stat.S_IMODE(console_config.stat().st_mode) & 0o004:
         raise VesselRuntimeError("Console configuration is unreadable by the image user")
