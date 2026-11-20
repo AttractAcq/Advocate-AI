@@ -453,11 +453,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          docker build -f infrastructure/containers/Core.Dockerfile \
+            --build-arg SOVEREIGN_SYNTHETIC_RELEASE=second \
+            -t sovereign-core:synthetic-v2 .
           crane="$RUNNER_TEMP/upstream/crane/crane"
           syft="$RUNNER_TEMP/upstream/syft/syft"
           trivy="$RUNNER_TEMP/upstream/trivy/trivy"
           .venv/bin/python -m scripts.phase5_three_image_release \
             --output "$RUNNER_TEMP/three-image-release-evidence" \
+            --update-core-image sovereign-core:synthetic-v2 \
             --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
             --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
             --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
