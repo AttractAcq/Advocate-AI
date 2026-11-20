@@ -569,11 +569,16 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
         expected_core = _image_id(bundle, "core", manifest["images"]["core"], crane)
         running_core = _run("docker", "inspect", runtime["core_id"],
                             "--format", "{{.Image}}")
+        with closing(sqlite3.connect(recovery_root / "restored" / "history.db")) as database:
+            expected_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
         with closing(sqlite3.connect(state / "history.db")) as database:
-            rows = database.execute("SELECT id FROM conversations").fetchall()
-        if len(rows) != 1:
-            raise AssertionError("clean restore lost conversation history")
-        history = _probe_vessel_history(runtime["core_id"], rows[0][0])
+            actual_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
+        if len(expected_ids) < 2 or actual_ids != expected_ids:
+            raise AssertionError("clean restore changed conversation history")
+        histories = [_probe_vessel_history(runtime["core_id"], identifier)
+                     for identifier in expected_ids]
         permissions = _probe_vessel_permissions(runtime["core_id"])
         if (result["result"] != "restored-and-activated" or
                 status["result"] != "healthy" or
@@ -581,7 +586,7 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
                 result["installation_id"] != record["installation_id"] or
                 result["sources"] < 1 or result["passages"] < 1 or
                 running_core != expected_core or
-                history["turns"] != 1 or
+                any(history["turns"] != 1 for history in histories) or
                 permissions != {"engineer": "ENG-001-visible",
                                 "deckhand": "ENG-001-denied"} or
                 (state / "postgres.dump").exists() or

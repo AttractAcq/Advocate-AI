@@ -74,6 +74,11 @@ result must be identified from its retained artifact before a reviewer treats
 any older CI badge as actual-image evidence. The [build queue](../blockers-and-build-queue.md)
 tracks the [Knowledge image fix and CI exit gate](https://github.com/AttractAcq/Advocate-AI/pull/180)
 for skipped rehearsals.
+The first fixed-image [Linux run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44838868647)
+reached signed clean restore, then failed a stale assertion that counted only
+one conversation after the model route probe had created another. The candidate
+now compares every restored conversation ID with the encrypted pre-restore
+snapshot and checks each through Core. A full passing result is still pending.
 
 ## Reproducible evidence
 
