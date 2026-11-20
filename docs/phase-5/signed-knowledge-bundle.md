@@ -23,7 +23,7 @@ The CLI accepts a strict descriptor file:
 
 This establishes the release contract; it does not yet create a releasable
 Knowledge image. The digest-pinned pgvector image used in the synthetic lab
-still needs a resolved SBOM, vulnerability triage, offline archive provenance
+still needs a [resolved SBOM and offline archive intake](pgvector-image-intake.md), vulnerability triage, offline archive provenance
 and licence review. The current signed installer only accepts the schema 4
 Core and Console bundle. The next implementation must stage and activate the
 schema 6 database image, separate migration and runtime identities, protected
