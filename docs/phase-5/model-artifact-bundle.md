@@ -7,8 +7,11 @@ manifest lists every model file with its size and SHA-256 twice: in the full
 payload inventory and in a model descriptor bearing that ID. The signer checks
 the exact model tree, copies it into the private bundle and signs the copied
 bytes. `verify` rejects changed, missing or extra files. The vessel installer
-verifies the bundle before staging it, and stopped release switching checks it
-again before activation.
+verifies the bundle before staging it, checks that the stage filesystem has
+space for one complete bundle copy plus a reserve, and checks the staged copy.
+Stopped release switching repeats that process before activation. The free
+space check is a local filesystem preflight; target quotas and actual peak
+usage still require a hardware rehearsal.
 
 The ID is an operator label, not proof of model publisher, licence, weights
 quality or serving compatibility. The connected preparation process must
