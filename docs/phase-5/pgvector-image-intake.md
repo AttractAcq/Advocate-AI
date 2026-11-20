@@ -27,3 +27,11 @@ UNKNOWN. Trivy attributed 133 package findings to Debian 12.15 and 28 to the
 no fixed version in this report; no finding has been accepted or waived.
 Release owners must choose and qualify a fixed image or review each exception
 before a signed Knowledge bundle can be a release candidate.
+
+The next CI comparison scans the official `pg17-trixie` amd64 image pinned to
+`sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d`.
+This digest came from the [publisher's Docker Hub tag metadata](https://hub.docker.com/v2/repositories/pgvector/pgvector/tags/pg17-trixie)
+on 20 November 2026. The comparison uses the identical archive, SBOM, scanner
+and intake rules, and retains a separate artifact. It does not replace the
+current lab pin or approve a new image until its scan and functional checks
+have been reviewed.
