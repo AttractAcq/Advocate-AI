@@ -47,3 +47,14 @@ installation and rechecks signed image identity and health.
 Interrupted-process reconciliation, automated rollback, schema migration,
 coordinated encrypted recovery, target hardware and independent review remain
 open.
+
+## Operator command
+
+`python -m scripts.vesselctl` exposes `install`, `status`, `stop` and `recover`
+for the synthetic candidate. Every command requires explicit absolute paths
+for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
+requires `--bundle`, `--console-config`, `--core-state` and
+`--lab-password-file`. It prints a small JSON result after success; errors
+exit nonzero. `recover` requires a clean stop and refuses residual old Docker
+resources. The command is not yet a vessel service unit or a production
+commissioning workflow.

@@ -163,6 +163,8 @@ from independent product security review.
 
 | W-114 | Clean stopped-runtime recovery of signed vessel services (T-025/T-028) | [PR #142](https://github.com/AttractAcq/Advocate-AI/pull/142) verifies the signed stage, old resource absence, persistent Knowledge volume and external credentials before restarting all three signed services and replacing the active runtime IDs after health. The actual-image CI rehearsal is extended to stop, recover and recheck the synthetic installation. `make check` passes 331 tests with 12 skips. Interrupted-process reconciliation, update/rollback, coordinated encrypted recovery, target hardware and independent review remain open. | Local tests passed; actual-image CI and review pending; T-028/G3 open |
 
+| W-115 | Explicit operator command for signed vessel candidate (T-024/T-028) | The [operator command](phase-5/signed-vessel-first-install.md) routes `install`, `status`, `stop` and `recover` through the verified installer with explicit root, trusted key and pinned crane paths. It returns bounded JSON and fails on invalid inputs. `make check` passes 335 tests with 12 skips. Service-unit integration, interrupted-process reconciliation, target hardware and independent review remain open. | Local tests passed; CI and PR pending; T-028/G3 open |
+
 When a row is completed, link its commit, CI result and evidence; then change
 its state to **locally complete**. Do not remove it until its external gate is
 closed. Phase-specific gate records: [G0A](phase-1/gate.md), [G1](phase-2/gate.md),
