@@ -60,7 +60,7 @@ upgrade compatibility between real software or database versions.
 | Interrupted restore protection | [PR #154–156 runs](https://github.com/AttractAcq/Advocate-AI/actions/runs/44772378731) | Exact partial-volume abandonment and clean-root retry; inspect each PR's CI for its own assertion |
 | Switch, distinct image and stage cleanup | [PR #157 run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44782675989), [PR #158 run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44788271162), [PR #159 run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44792631764) | Signed switch, one-step rollback, different Core image ID and interrupted-stage discard |
 | Post-switch recovery | [PR #160 implementation-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44796531764) | Updated-release receipt, clean second install, audit/history and database-role continuity |
-| Source permissions through release changes | [PR #162](https://github.com/AttractAcq/Advocate-AI/pull/162) | Running Core API must permit the engineer's engineering source and deny it to the deckhand at first install, after switch, rollback and clean restore; actual-image CI result pending |
+| Source permissions through release changes | [PR #162 final-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44803530310) | The running Core API permitted the engineer's engineering source and denied it to the deckhand at first install, after switch, rollback and clean restore; all 12 CI jobs passed |
 
 At the PR #160 implementation head, `make check` passed 375 tests with 12
 expected skips; all 12 CI jobs passed after a targeted retry of an unrelated
