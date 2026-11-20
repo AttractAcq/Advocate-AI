@@ -85,6 +85,62 @@ def _probe_vessel_history(core_id: str, conversation_id: str | None = None) -> d
                            _VESSEL_HISTORY_PROBE, conversation_id or "-"))
 
 
+_MODEL_ROUTE_PROBE = """\
+import json,sys,threading
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from pathlib import Path
+import httpx
+model_id=sys.argv[1]
+seen=[]
+class Responder(BaseHTTPRequestHandler):
+ def log_message(self,*args):
+  pass
+ def do_POST(self):
+  size=int(self.headers.get('Content-Length','0'))
+  if self.path!='/v1/chat/completions' or not 0<size<=16384:
+   self.send_error(400)
+   return
+  request=json.loads(self.rfile.read(size))
+  seen.append(request.get('model'))
+  body=json.dumps({'choices':[{'message':{'content':'Synthetic local model route confirmed'}}]}).encode()
+  self.send_response(200)
+  self.send_header('Content-Type','application/json')
+  self.send_header('Content-Length',str(len(body)))
+  self.end_headers()
+  self.wfile.write(body)
+server=ThreadingHTTPServer(('127.0.0.1',11434),Responder)
+thread=threading.Thread(target=server.serve_forever,daemon=True)
+thread.start()
+try:
+ with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=10) as client:
+  password=Path('/run/secrets/lab-password').read_text().strip()
+  login=client.post('/api/login',json={'user_id':'engineer','password':password})
+  assert login.status_code==200,login.text
+  headers={'Authorization':'Bearer '+login.json()['access_token']}
+  denied=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':'unapproved-model'})
+  assert denied.status_code==400,denied.text
+  answer=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':model_id})
+  assert answer.status_code==200,answer.text
+  assert answer.json()['answer']=='Synthetic local model route confirmed',answer.text
+  assert answer.json()['model']==model_id,answer.text
+  assert seen==[model_id],seen
+finally:
+ server.shutdown()
+ server.server_close()
+ thread.join(timeout=2)
+with httpx.Client(base_url='http://127.0.0.1:18100',trust_env=False,timeout=10) as client:
+ outage=client.post('/api/chat',headers=headers,json={'mode':'general','message':'route check','model':model_id})
+ assert outage.status_code==503,outage.text
+print(json.dumps({'result':'pass','route':'container-loopback','model':model_id,
+                  'outage':'failed-closed'}))
+"""
+
+
+def _probe_vessel_model_route(core_id: str, model_id: str) -> dict[str, str]:
+    return json.loads(_run("docker", "exec", core_id, "python", "-c",
+                           _MODEL_ROUTE_PROBE, model_id))
+
+
 _VESSEL_PERMISSION_PROBE = """\
 import json
 from pathlib import Path
@@ -231,7 +287,8 @@ def _rehearse_persistent_knowledge(bundle: Path, trusted: Path,
 def _rehearse_first_install(bundle: Path, update_bundle: Path,
                             trusted: Path, crane: Path,
                             root: Path, restic: Path,
-                            restic_sha256: str) -> dict[str, str]:
+                            restic_sha256: str,
+                            model_id: str) -> dict[str, str]:
     """Activate from signed media and check the recorded three-image state."""
     state = root / "vessel-state"
     lab_password = root / "lab-password"
@@ -250,6 +307,10 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
             raise AssertionError("signed first installation did not become healthy")
         record = json.loads((install_root / "vessel-state.json").read_text())
         runtime = record["runtime"]
+        model_route = _probe_vessel_model_route(runtime["core_id"], model_id)
+        if model_route != {"result": "pass", "route": "container-loopback",
+                           "model": model_id, "outage": "failed-closed"}:
+            raise AssertionError("signed Core model request route failed")
         base_core_image = _run("docker", "inspect", runtime["core_id"],
                                "--format", "{{.Image}}")
         schema_rights = postgres_sql(
@@ -435,6 +496,8 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
                 "release_switch": "stopped-signed-and-healthy",
                 "release_rollback": "stopped-signed-and-healthy",
                 "core_image_change": "distinct-and-restored",
+                "model_request_route": "signed-name-over-container-loopback",
+                "model_outage": "failed-closed",
                 "document_permissions": "preserved-across-switch-and-rollback",
                 "partial_stage": "rejected-then-discarded",
                 "post_switch_recovery_set": "signed-and-bound-to-updated-release"}
@@ -956,7 +1019,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                 result["signed_vessel_first_install"] = \
                     _rehearse_first_install(bundle, update_bundle, trusted, crane,
                                             root, restic,
-                                            restic_sha256)
+                                            restic_sha256,
+                                            verified["model"]["id"])
                 result["signed_vessel_clean_restore"] = \
                     _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
                                                     restic, restic_sha256)
