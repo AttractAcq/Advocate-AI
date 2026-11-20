@@ -161,6 +161,8 @@ from independent product security review.
 
 | W-113 | Failed first-install cleanup and credential preservation (T-028) | [PR #141](https://github.com/AttractAcq/Advocate-AI/pull/141) clears any active record and checks all Docker resources scoped to the new installation before deleting its private root. If cleanup is incomplete or Docker cannot confirm absence, it retains the root and database credentials for recovery. `make check` passes 328 tests with 12 skips. Partial-start orphan cleanup, interrupted-process reconciliation and target-host failure rehearsal remain open. | Local tests passed; CI and review pending; T-028/G3 open |
 
+| W-114 | Clean stopped-runtime recovery of signed vessel services (T-025/T-028) | The [recovery candidate](phase-5/signed-vessel-first-install.md) verifies the signed stage, old resource absence, persistent Knowledge volume and external credentials before restarting all three signed services and replacing the active runtime IDs after health. The actual-image CI rehearsal is extended to stop, recover and recheck the synthetic installation. `make check` passes 330 tests with 12 skips. Interrupted-process reconciliation, update/rollback, coordinated encrypted recovery, target hardware and independent review remain open. | Local tests passed; actual-image CI and PR pending; T-028/G3 open |
+
 When a row is completed, link its commit, CI result and evidence; then change
 its state to **locally complete**. Do not remove it until its external gate is
 closed. Phase-specific gate records: [G0A](phase-1/gate.md), [G1](phase-2/gate.md),

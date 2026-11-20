@@ -22,7 +22,7 @@ from infrastructure.deploy.container_runtime import (
     RuntimeHandle, _docker, _image_id, _validate_console_config, stop_runtime,
 )
 from infrastructure.deploy.knowledge_volume import (
-    KnowledgeVolumeHandle, _credentials, probe_knowledge,
+    KnowledgeVolumeHandle, _credentials, _volume, probe_knowledge,
     start_signed_knowledge, stop_knowledge,
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql
@@ -182,7 +182,7 @@ def _write_state(root: Path, payload: dict[str, object]) -> None:
 
 def _cleanup_failed_install(installation_id: str, services: RuntimeHandle | None,
                             knowledge: KnowledgeVolumeHandle | None,
-                            data_volume: str) -> bool:
+                            data_volume: str, *, retain_data: bool = False) -> bool:
     """Discard a failed candidate only after its labelled resources are absent."""
     try:
         if services is not None:
@@ -198,6 +198,11 @@ def _cleanup_failed_install(installation_id: str, services: RuntimeHandle | None
         volumes = _docker("volume", "ls", "--filter", scope, "--quiet").splitlines()
         if any(volume != data_volume for volume in volumes):
             return False
+        if retain_data:
+            if volumes != [data_volume]:
+                return False
+            _volume(data_volume, installation_id, "knowledge-data", create=False)
+            return True
         if volumes:
             _docker("volume", "rm", data_volume)
         return not _docker("volume", "ls", "--filter", scope, "--quiet")
@@ -338,3 +343,97 @@ def status_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
             raise VesselInstallError("installed image differs from signed archive")
     return {"result": "healthy", "active": identifier,
             "installation_id": value["installation_id"]}
+
+
+def _assert_missing(kind: str, identifier: str) -> None:
+    try:
+        result = subprocess.run(["docker", kind, "inspect", identifier],
+                                capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise VesselInstallError("cannot confirm old vessel resource absence") from exc
+    if result.returncode == 0 or not re.search(r"no such|not found", result.stderr.lower()):
+        raise VesselInstallError("old vessel resource remains or cannot be inspected")
+
+
+def _recovery_inventory(installation_id: str, runtime: dict[str, str]) -> None:
+    data_volume = runtime["data_volume"]
+    scope = f"label=sovereign.synthetic.install={installation_id}"
+    if (_docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
+            _docker("network", "ls", "--no-trunc", "--filter", scope, "--quiet") or
+            _docker("volume", "ls", "--filter", scope, "--quiet") != data_volume):
+        raise VesselInstallError("stopped recovery requires only the persistent data volume")
+    _volume(data_volume, installation_id, "knowledge-data", create=False)
+    for kind, identifier in (("container", runtime["core_id"]),
+                             ("container", runtime["console_id"]),
+                             ("container", runtime["knowledge_id"]),
+                             ("network", runtime["network_id"]),
+                             ("volume", runtime["socket_volume"])):
+        _assert_missing(kind, identifier)
+
+
+def stop_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]:
+    """Stop a verified synthetic vessel runtime while retaining Knowledge data."""
+    healthy = status_vessel(root, trusted_key, crane)
+    value = _read_state(root)
+    runtime = value["runtime"]
+    services = RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                             runtime["console_id"])
+    knowledge = KnowledgeVolumeHandle(runtime["knowledge_id"],
+                                      runtime["socket_volume"],
+                                      runtime["data_volume"],
+                                      runtime["knowledge_run"],
+                                      value["installation_id"])
+    stop_runtime(services)
+    scope = f"label=sovereign.synthetic.install={value['installation_id']}"
+    remaining = _docker("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
+    if set(remaining.splitlines()) != {knowledge.container_id}:
+        raise VesselInstallError("Core or Console stop is incomplete")
+    if _docker("network", "ls", "--no-trunc", "--filter", scope, "--quiet"):
+        raise VesselInstallError("vessel network stop is incomplete")
+    stop_knowledge(knowledge)
+    _recovery_inventory(value["installation_id"], runtime)
+    return {"result": "stopped", "active": healthy["active"]}
+
+
+def recover_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]:
+    """Restart a cleanly stopped vessel from its signed stage and data volume."""
+    value = _read_state(root)
+    identifier = value["active"]
+    stage = root / "vessel-releases" / identifier
+    _verify_stage(stage, trusted_key, identifier)
+    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
+    if (state.resolve().is_relative_to(root.resolve()) or
+            password.resolve().is_relative_to(root.resolve())):
+        raise VesselInstallError("Core state and lab credential must be external")
+    _state_options(state, password, root)
+    installation_id = value["installation_id"]
+    data_volume = value["runtime"]["data_volume"]
+    _recovery_inventory(installation_id, value["runtime"])
+    knowledge = None
+    services = None
+    payload = None
+    try:
+        knowledge = start_signed_knowledge(stage / "bundle", trusted_key, crane,
+                                           root, installation_id, initialize=False)
+        services = start_signed_vessel_services(
+            stage / "bundle", trusted_key, crane, stage / "console-config.json",
+            state, password, root, knowledge, installation_id)
+        payload = _state_payload(identifier, installation_id, state, password,
+                                 services, knowledge)
+        _write_state(root, payload)
+        return {"result": "recovered", "active": identifier}
+    except Exception as exc:
+        try:
+            recorded = _read_state(root)
+        except Exception:
+            recorded = None
+        if payload is not None and recorded != value:
+            raise VesselInstallError(
+                "recovery state may have changed; retain runtime for reconciliation"
+            ) from exc
+        if not _cleanup_failed_install(installation_id, services, knowledge,
+                                       data_volume, retain_data=True):
+            raise VesselInstallError(
+                "recovery failed; cleanup incomplete and data retained"
+            ) from exc
+        raise
