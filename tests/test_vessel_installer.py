@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from infrastructure.deploy.container_runtime import RuntimeHandle
+from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
+from infrastructure.deploy.vessel_installer import (
+    VesselInstallError, _read_state, _state_payload, _write_state, install_vessel,
+)
+from infrastructure.release.bundle import BundleError
+
+
+class VesselInstallerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.parent = Path(temporary.name)
+        self.parent.chmod(0o700)
+        self.root = self.parent / "new-install"
+
+    def test_wrong_release_target_cannot_create_install_root(self) -> None:
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "fleet"}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge") as start:
+            with self.assertRaises(BundleError):
+                install_vessel(self.parent, self.parent / "key", self.parent / "crane",
+                               self.parent / "config", self.root,
+                               self.parent / "state", self.parent / "password")
+            self.assertFalse(self.root.exists())
+            start.assert_not_called()
+
+    def test_failed_activation_has_no_active_record(self) -> None:
+        knowledge = KnowledgeVolumeHandle("a" * 64, "socket", "data", "run", "b" * 32)
+        with patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel"}), \
+             patch("infrastructure.deploy.vessel_installer._stage",
+                   return_value=("c" * 24, self.parent)), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
+                   return_value=knowledge), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._ingest",
+                   return_value={"indexed": 1, "unchanged": 0}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
+                   side_effect=VesselInstallError("unhealthy")), \
+             patch("infrastructure.deploy.vessel_installer.stop_knowledge") as stopped, \
+             patch("infrastructure.deploy.vessel_installer.subprocess.run"):
+            with self.assertRaises(VesselInstallError):
+                install_vessel(self.parent, self.parent / "key", self.parent / "crane",
+                               self.parent / "config", self.root,
+                               self.parent / "state", self.parent / "password")
+            self.assertFalse((self.root / "vessel-state.json").exists())
+            self.assertFalse(self.root.exists())
+            stopped.assert_called_once_with(knowledge)
+
+    def test_active_state_rejects_duplicate_and_tampered_runtime(self) -> None:
+        self.root.mkdir(mode=0o700)
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "e" * 12 + "-socket",
+                                          "sovereign-" + "f" * 32 + "-knowledge-data",
+                                          "sovereign-knowledge-" + "e" * 12, "f" * 32)
+        payload = _state_payload("1" * 24, "f" * 32,
+                                 self.parent / "state", self.parent / "password",
+                                 services, knowledge)
+        _write_state(self.root, payload)
+        self.assertEqual(_read_state(self.root)["active"], "1" * 24)
+        path = self.root / "vessel-state.json"
+        path.write_text(path.read_text().replace('"schema":1', '"schema":1,"schema":1'))
+        with self.assertRaises(VesselInstallError):
+            _read_state(self.root)
+        path.write_text(json.dumps({**payload, "runtime": {**payload["runtime"],
+                                                       "data_volume": "other"}}))
+        with self.assertRaises(VesselInstallError):
+            _read_state(self.root)
+
+
+if __name__ == "__main__":
+    unittest.main()
