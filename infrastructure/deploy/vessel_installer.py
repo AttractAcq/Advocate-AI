@@ -30,7 +30,8 @@ from infrastructure.deploy.knowledge_volume import (
 )
 from infrastructure.deploy.postgres_socket import PostgresSocketError, sql as postgres_sql
 from infrastructure.deploy.vessel_runtime import (
-    _state_options, probe_signed_vessel_services, start_signed_vessel_services,
+    _signed_model_id, _state_options, probe_signed_vessel_services,
+    start_signed_vessel_services,
 )
 from infrastructure.release.bundle import (
     BundleError, require_supported_vessel_compatibility, verify_bundle,
@@ -434,7 +435,8 @@ def status_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
     _, reader = _state_options(state, password, root)
     probe_knowledge(knowledge)
     _verify_knowledge_schema(knowledge)
-    probe_signed_vessel_services(services, knowledge, state, password, reader)
+    probe_signed_vessel_services(services, knowledge, state, password, reader,
+                                 model_id=_signed_model_id(manifest))
     try:
         console_mounts = json.loads(_docker("inspect", services.console_id,
                                             "--format", "{{json .Mounts}}"))
