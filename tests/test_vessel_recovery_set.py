@@ -25,14 +25,14 @@ from infrastructure.deploy.vessel_recovery_set import (
     _match_restored_core, _receipt_payload, _stage_core, _sign_receipt,
     _verify_activation_identity_pair,
     abandon_incomplete_vessel_restore,
-    activate_vessel_recovery_set, create_vessel_recovery_set,
-    finish_incomplete_vessel_restore,
+    activate_vessel_recovery_set, finish_incomplete_vessel_restore,
     retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_identity import VesselIdentity
+from infrastructure.deploy.vessel_runtime import ThreatFeedMount, VesselRuntimeError
 from infrastructure.deploy.vessel_installer import (
     _read_state, _write_intent, _write_private_record,
 )
@@ -63,19 +63,62 @@ class VesselRecoverySetTests(unittest.TestCase):
             database.commit()
         (self.state / "history.db").chmod(0o600)
 
-    def test_feed_backed_capture_requires_signed_feed_binding(self) -> None:
-        install = self.root / "install"
-        install.mkdir(mode=0o700)
+    def test_feed_receipt_requires_exact_signed_binding(self) -> None:
+        feed = {"key_sha256": "1" * 64, "snapshot_sha256": "2" * 64,
+                "feed_id": "synthetic-feed", "publisher": "synthetic-lab",
+                "issued_at": datetime.now(timezone.utc).isoformat()}
+        payload = {
+            "schema": 4, "installation_id": "a" * 32, "release": "b" * 24,
+            "data_volume": "sovereign-" + "a" * 32 + "-knowledge-data",
+            "snapshot_id": "c" * 64, "repository": str(self.root),
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+            "schema_version": 1, "audit_count": 1, "audit_tail_hash": "d" * 64,
+            "manifest_sha256": "e" * 64, "dump_sha256": "f" * 64,
+            "knowledge_sha256": "3" * 64, "sources": 2, "passages": 2,
+            "files": 7, "feed": feed,
+        }
+        self.assertEqual(_receipt_payload(payload), payload)
+        with self.assertRaisesRegex(VesselRecoveryError, "feed binding"):
+            _receipt_payload({**payload, "feed": {**feed, "snapshot_sha256": "bad"}})
+        with self.assertRaisesRegex(VesselRecoveryError, "fields"):
+            _receipt_payload({**payload, "schema": 2})
+        oidc = {**payload, "schema": 5, "files": 9,
+                "identity": {"issuer": "https://identity.vessel.example/realms/sovereign",
+                             "ca_sha256": "4" * 64,
+                             "revocations_sha256": "5" * 64}}
+        self.assertEqual(_receipt_payload(oidc), oidc)
+
+    def test_feed_restore_rejects_wrong_snapshot_before_docker(self) -> None:
         staging = self.root / "staging"
         staging.mkdir(mode=0o700)
-        with patch("infrastructure.deploy.vessel_recovery_set._read_state",
-                   return_value={"threat_feed": {"store": "synthetic"}}), \
-             self.assertRaisesRegex(VesselRecoveryError, "feed binding receipt"):
-            create_vessel_recovery_set(
-                install, self.root / "trusted", self.root / "crane",
-                self.root / "repository", self.root / "password",
-                self.root / "restic", "0" * 64, staging,
-                self.root / "signing", self.root / "receipt")
+        password = self.root / "lab-password"
+        put(password, b"synthetic-lab-password\n")
+        value = {"schema": 4, "release": "a" * 24,
+                 "repository": str(self.root / "repository"),
+                 "feed": {"snapshot_sha256": "bad"}}
+        feed = ThreatFeedMount(self.root / "feed", self.root / "feed-key")
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=value), \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_bundle",
+                   return_value={}), \
+             patch("infrastructure.deploy.vessel_recovery_set.require_supported_vessel_compatibility"), \
+             patch("infrastructure.deploy.vessel_recovery_set._release_id",
+                   return_value="a" * 24), \
+             patch("infrastructure.deploy.vessel_recovery_set._validate_console_config",
+                   return_value=None), \
+             patch("infrastructure.deploy.vessel_recovery_set.feed_record",
+                   return_value={}), \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_feed_evidence",
+                   side_effect=VesselRuntimeError("signed feed binding differs")), \
+             patch("infrastructure.deploy.vessel_recovery_set._assert_missing") as docker, \
+             self.assertRaisesRegex(VesselRuntimeError, "signed feed binding differs"):
+            activate_vessel_recovery_set(
+                self.root / "bundle", self.root / "trusted", self.root / "crane",
+                self.root / "config", self.root / "receipt", self.root / "receipt-key",
+                self.root / "password", self.root / "restic", "0" * 64,
+                self.root / "new-install", self.root / "new-core", password,
+                staging, threat_feed=feed)
+        docker.assert_not_called()
 
     def test_oidc_activation_requires_all_pair_artifacts(self) -> None:
         staging = self.root / "staging"

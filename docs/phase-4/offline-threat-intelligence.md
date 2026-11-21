@@ -52,9 +52,10 @@ Core. The signed vessel installer accepts `--threat-feed-store` and
 `--threat-feed-key` together. It pins the host store and key identity in the
 private install intent and active record, then carries that binding through
 status, stopped restart and release switch. A replaced store, key or invalid
-signed snapshot fails closed. The signed recovery receipt does not yet bind
-the external feed; feed-backed recovery capture is refused until that path is
-implemented. This remaining work is W-193 in the
+signed snapshot fails closed. Feed-backed recovery receipts bind the exact
+signed snapshot and key; clean activation and retry require those external
+inputs again, while an interrupted finish uses its pinned intent. A complete
+feed-backed three-image restore rehearsal remains W-193 in the
 [build queue](../blockers-and-build-queue.md).
 
 The focused tests sign and import a fictional package, age it past seven days,

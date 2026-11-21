@@ -24,7 +24,7 @@ from infrastructure.deploy.vessel_recovery_set import (
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_runtime import _state_options, start_signed_vessel_services
-from infrastructure.deploy.vessel_threat_feed import feed_from_record
+from infrastructure.deploy.vessel_threat_feed import feed_from_record, verify_feed_evidence
 from infrastructure.restic_repository import MANIFEST
 from services.policy.policy_file import policy_directory_lock
 
@@ -69,8 +69,15 @@ def _verify_preupdate_recovery(current: dict[str, object],
             payload["release"] != current["active"] or
             payload["data_volume"] != current["runtime"]["data_volume"]):
         raise VesselInstallError("pre-update recovery receipt names another installation")
-    if payload["schema"] != (3 if current["schema"] == 2 else 2):
+    if payload["schema"] != ((5 if current["schema"] == 2 else 4)
+                             if "threat_feed" in current else
+                             (3 if current["schema"] == 2 else 2)):
         raise VesselInstallError("pre-update recovery receipt lacks Knowledge row digest")
+    if "threat_feed" in current:
+        feed = feed_from_record(current["threat_feed"],
+                                Path(current["core_state"]), root)
+        verify_feed_evidence(payload["feed"], feed,
+                             Path(current["core_state"]), root)
     if current["schema"] == 2 and (
             payload["identity"]["issuer"] != current["identity"]["issuer"] or
             payload["identity"]["ca_sha256"] != current["identity"]["ca_sha256"]):

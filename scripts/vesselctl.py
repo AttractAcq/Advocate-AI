@@ -149,6 +149,8 @@ def main(argv: list[str] | None = None) -> None:
     activate_identity.add_argument("--lab-password-file", type=Path)
     activate_identity.add_argument("--identity-network")
     activate.add_argument("--staging-parent", type=Path, required=True)
+    activate.add_argument("--threat-feed-store", type=Path)
+    activate.add_argument("--threat-feed-key", type=Path)
     _identity_pair_arguments(activate)
     finish_restore = commands.add_parser("finish-incomplete-restore")
     finish_restore.add_argument("--root", type=Path, required=True)
@@ -184,22 +186,26 @@ def main(argv: list[str] | None = None) -> None:
     retry_identity.add_argument("--lab-password-file", type=Path)
     retry_identity.add_argument("--identity-network")
     retry.add_argument("--staging-parent", type=Path, required=True)
+    retry.add_argument("--threat-feed-store", type=Path)
+    retry.add_argument("--threat-feed-key", type=Path)
     _identity_pair_arguments(retry)
     args = parser.parse_args(argv)
+    feed_store = getattr(args, "threat_feed_store", None)
+    feed_key = getattr(args, "threat_feed_key", None)
+    if bool(feed_store) != bool(feed_key):
+        parser.error("--threat-feed-store and --threat-feed-key must be supplied together")
+    feed_options = ({"threat_feed": ThreatFeedMount(feed_store, feed_key)}
+                    if feed_store is not None else {})
     identity_pair_options = {
         name: value for name in ("identity_pair", "identity_pair_key",
                                  "identity_archive", "identity_archive_key")
         if (value := getattr(args, name, None)) is not None
     }
     if args.command == "install":
-        if bool(args.threat_feed_store) != bool(args.threat_feed_key):
-            parser.error("--threat-feed-store and --threat-feed-key must be supplied together")
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
                                 args.console_config, args.root, args.core_state,
                                 args.lab_password_file,
-                                **({"threat_feed": ThreatFeedMount(args.threat_feed_store,
-                                                                   args.threat_feed_key)}
-                                   if args.threat_feed_store else {}),
+                                **feed_options,
                                 **({"identity_network": args.identity_network}
                                    if args.identity_network is not None else {}))
     elif args.command == "status":
@@ -273,6 +279,7 @@ def main(argv: list[str] | None = None) -> None:
             args.lab_password_file, args.staging_parent,
             **({"identity_network": args.identity_network}
                if args.identity_network is not None else {}),
+            **feed_options,
             **identity_pair_options)
     elif args.command == "finish-incomplete-restore":
         result = finish_incomplete_vessel_restore(
@@ -292,6 +299,7 @@ def main(argv: list[str] | None = None) -> None:
             args.core_state, args.lab_password_file, args.staging_parent,
             **({"identity_network": args.identity_network}
                if args.identity_network is not None else {}),
+            **feed_options,
             **identity_pair_options)
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
