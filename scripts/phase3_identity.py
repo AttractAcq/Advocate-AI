@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -33,9 +34,16 @@ def prepare() -> None:
     realm_path = RUNTIME / "sovereign-lab-realm.json"
     env_path = RUNTIME / "keycloak.env"
     secret_path = RUNTIME / "test-credentials.json"
-    if any(path.exists() for path in (realm_path, env_path, secret_path)):
-        if not all(path.exists() for path in (realm_path, env_path, secret_path)):
+    revocations_path = RUNTIME / "revoked-tokens.jsonl"
+    prepared = (realm_path, env_path, secret_path, revocations_path)
+    if any(path.exists() for path in prepared):
+        if not all(path.exists() for path in prepared):
             raise RuntimeError("partial identity state; inspect before retry")
+        if (revocations_path.is_symlink() or not revocations_path.is_file()
+                or revocations_path.stat().st_uid != os.getuid()
+                or revocations_path.stat().st_nlink != 1
+                or stat.S_IMODE(revocations_path.stat().st_mode) & 0o077):
+            raise RuntimeError("unsafe identity revocation state; inspect before retry")
         print("Synthetic realm already prepared")
         return
     realm = json.loads((ROOT / "infrastructure/lab/keycloak-realm.template.json").read_text())
@@ -54,6 +62,7 @@ def prepare() -> None:
         (realm_path, json.dumps(realm, indent=2) + "\n"),
         (env_path, f"KC_BOOTSTRAP_ADMIN_USERNAME=lab-admin\nKC_BOOTSTRAP_ADMIN_PASSWORD={admin_password}\n"),
         (secret_path, json.dumps({"synthetic_user_password": test_password}, indent=2) + "\n"),
+        (revocations_path, ""),
     ):
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w") as stream:

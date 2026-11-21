@@ -141,11 +141,7 @@ class OidcVerifier:
             try:
                 descriptor = self._open_revocations(os.O_RDONLY | os.O_NONBLOCK)
             except FileNotFoundError:
-                try:
-                    os.close(self._revocation_directory())
-                except (OSError, ValueError):
-                    return True
-                return False
+                return True
             except (OSError, ValueError):
                 return True
             try:

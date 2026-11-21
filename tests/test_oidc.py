@@ -19,6 +19,7 @@ from cryptography.x509.oid import NameOID
 
 from apps.api.oidc import OidcVerifier
 from apps.api.main import Settings, create_app
+from scripts.phase3_identity import prepare as prepare_identity
 
 
 class OidcTests(unittest.TestCase):
@@ -123,6 +124,8 @@ class OidcTests(unittest.TestCase):
 
     def test_logout_revocation_survives_verifier_restart(self) -> None:
         path = Path(self.temporary.name) / "revoked.jsonl"
+        path.write_text("")
+        path.chmod(0o600)
         original = self.verifier
         original.revocations_path = path
         token = self.token()
@@ -133,6 +136,10 @@ class OidcTests(unittest.TestCase):
                                  revocations_path=path)
         self.assertIsNone(restarted.user_for(token))
         self.assertIsNotNone(restarted.user_for(self.token(iat=int(time.time()) - 1)))
+        path.unlink()
+        missing = OidcVerifier(self.issuer, self.roles, transport=original.transport,
+                               revocations_path=path)
+        self.assertIsNone(missing.user_for(self.token()))
         path.write_text('{"sha256":')
         self.assertIsNone(restarted.user_for(self.token()))
 
@@ -183,10 +190,26 @@ class OidcTests(unittest.TestCase):
         token = self.token()
         self.assertIsNone(verifier.user_for(token))
         directory.mkdir(mode=0o700)
+        self.assertIsNone(verifier.user_for(token))
+        log = directory / "revoked.jsonl"
+        log.write_text("")
+        log.chmod(0o600)
         self.assertIsNotNone(verifier.user_for(token))
+        log.unlink()
         directory.rmdir()
         directory.symlink_to(self.roles.parent, target_is_directory=True)
         self.assertIsNone(verifier.user_for(token))
+
+    def test_lab_identity_prepare_requires_revocation_log(self) -> None:
+        runtime = Path(self.temporary.name) / "phase3-runtime"
+        with patch("scripts.phase3_identity.RUNTIME", runtime):
+            prepare_identity()
+            log = runtime / "revoked-tokens.jsonl"
+            self.assertEqual(log.read_bytes(), b"")
+            self.assertEqual(log.stat().st_mode & 0o077, 0)
+            log.unlink()
+            with self.assertRaisesRegex(RuntimeError, "partial identity state"):
+                prepare_identity()
 
     def test_logout_reports_unavailable_when_revocation_write_fails(self) -> None:
         with patch("apps.api.main.OidcVerifier", return_value=self.verifier):

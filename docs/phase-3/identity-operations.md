@@ -38,8 +38,8 @@ MFA, persistent identity storage or certificate renewal. Those need a reviewed
 site configuration and target-network tests before vessel use.
 
 The OIDC logout revocation log is opened through a checked local directory
-without following a final symlink. Reads deny authentication if the store is
-missing its directory, redirected, exposed, hard-linked, oversized or contains
+without following a final symlink. Reads deny authentication if the log or its
+directory is missing, redirected, exposed, hard-linked, oversized or contains
 ambiguous or partial records. An append is durable before logout reports
 success; a failed append returns 503. This is a local tamper-detection boundary,
 not an independent revocation authority. The deployment must protect and back
