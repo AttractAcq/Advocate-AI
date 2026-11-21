@@ -26,9 +26,16 @@ internal identity network, imports fictional crew and Console client records,
 and exchanges PKCE authorization codes for engineer and deckhand tokens. The
 built Core image validates those tokens against the Keycloak JWKS and current
 local policy, limits visible source collections, refuses the lab credential
-path and rejects a logged-out token. This is protocol and API evidence only;
-the vessel browser, real accounts, MFA, Keycloak clean recovery, approved PKI
-and target network remain untested.
+path and rejects a logged-out token. [All 12 CI checks passed on PR #201's
+final head](https://github.com/AttractAcq/Advocate-AI/actions/runs/44898304865).
+This is protocol and API evidence only; real accounts, MFA, Keycloak clean
+recovery, approved PKI and target network remain untested.
+
+The next synthetic browser rehearsal drives the built Console through the
+pinned lab Keycloak and built Core over temporary HTTPS loopback ingress. It
+checks the browser PKCE callback, engineer document scope, removal of code and
+state from the browser, and sign-out. Its separate CI result is pending. The
+test-only ingress bridge does not establish vessel TLS or zero egress.
 
 ## Required behavior
 
