@@ -161,6 +161,19 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(summary.json()["answer"].startswith("Opening authorised excerpts only;"))
         self.assertIn("Required action: Isolate the test equipment.", summary.json()["answer"])
         self.assertEqual(len(self.model.questions), model_calls)
+        overview_phrase = await self.client.post("/api/chat", headers=engineer,
+                                                 json={"message": "Give me an overview of this document",
+                                                       "mode": "documents",
+                                                       "selected_documents": ["ENG-002"]})
+        self.assertTrue(overview_phrase.json()["answer"].startswith("Opening authorised excerpts only;"))
+        self.assertEqual([item["document_id"] for item in overview_phrase.json()["citations"]],
+                         ["ENG-002"])
+        self.assertEqual(len(self.model.questions), model_calls)
+        unscoped_overview = await self.client.post("/api/chat", headers=engineer,
+                                                   json={"message": "Give me an overview of this document",
+                                                         "mode": "documents"})
+        self.assertEqual(unscoped_overview.json()["citations"], [])
+        self.assertEqual(len(self.model.questions), model_calls)
         duplicate = await self.client.post("/api/chat", headers=engineer,
                                            json={"message": "Summarize this", "mode": "documents",
                                                  "selected_documents": ["ENG-002", "ENG-002"]})
