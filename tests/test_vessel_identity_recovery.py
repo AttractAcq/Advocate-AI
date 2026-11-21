@@ -153,6 +153,16 @@ class IdentityRecoveryPairTests(unittest.TestCase):
                                  existing)
         self.assertEqual((existing / "keep.txt").read_text(), "do not remove")
 
+    def test_oversized_realm_export_is_denied_before_json_parse(self) -> None:
+        self.realm.write_bytes(b" " * (32 * 1024 * 1024 + 1))
+        oversized = self.root / "oversized.svbk"
+        digest = _backup_realm(self.realm, self.root, oversized, self.archive_key)
+        with self.assertRaisesRegex(IdentityRecoveryError, "too large"):
+            create_identity_recovery_pair(
+                self.core_receipt, self.public_key, oversized,
+                self.archive_key, digest, self.signing_key, self.pair)
+        self.assertFalse(self.pair.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -100,22 +100,27 @@ def checked_realm_restore(archive: Path, key: Path, destination: Path,
     if not realm_name or not realm_name.replace("-", "").replace("_", "").isalnum():
         raise IdentityRecoveryError("invalid identity realm")
     name = realm_name + "-realm.json"
+    restored = False
     try:
         manifest = inspect_backup(archive, key, destination)
+        restored = True
         if [row["name"] for row in manifest["files"]] != [name]:
             raise IdentityRecoveryError("unexpected identity archive inventory")
         realm_file = destination / name
-        realm = json.loads(realm_file.read_bytes(), object_pairs_hook=_unique)
+        if realm_file.stat().st_size > 32 * 1024 * 1024:
+            raise IdentityRecoveryError("identity realm export is too large")
+        raw_realm = realm_file.read_bytes()
+        realm = json.loads(raw_realm, object_pairs_hook=_unique)
         if (not isinstance(realm, dict) or realm.get("realm") != realm_name or
                 not isinstance(realm.get("users"), list) or not realm["users"]):
             raise IdentityRecoveryError("restored identity realm or users are missing")
-        digest = hashlib.sha256(realm_file.read_bytes()).hexdigest()
+        digest = hashlib.sha256(raw_realm).hexdigest()
         if not hmac.compare_digest(_private_digest(archive, maximum=1024**3),
                                    trusted_digest):
             raise IdentityRecoveryError("identity archive changed during restore")
         return digest
     except Exception:
-        if destination.exists():
+        if restored and destination.exists():
             shutil.rmtree(destination)
         raise
 
@@ -176,6 +181,7 @@ def restore_paired_realm(pair: Path, pair_key: Path,
     _safe_parent(destination)
     if os.path.lexists(destination):
         raise IdentityRecoveryError("identity restore requires a new directory")
+    restored = False
     try:
         envelope = json.loads(_private_bytes(pair, 8192), object_pairs_hook=_unique)
         if (not isinstance(envelope, dict) or set(envelope) !=
@@ -204,12 +210,13 @@ def restore_paired_realm(pair: Path, pair_key: Path,
         realm_hash = checked_realm_restore(
             archive, archive_key, destination,
             payload["keycloak_archive_sha256"], realm_name)
+        restored = True
         if not hmac.compare_digest(realm_hash, payload["realm_sha256"]):
             raise IdentityRecoveryError("restored realm differs from identity pair")
         return {"result": "paired-realm-restored", "issuer": payload["issuer"],
                 "installation_id": payload["installation_id"]}
     except (BackupError, VesselRecoveryError, OSError, ValueError, TypeError,
             KeyError, InvalidSignature) as exc:
-        if destination.exists():
+        if restored and destination.exists():
             shutil.rmtree(destination)
         raise IdentityRecoveryError("identity recovery pair verification failed") from exc

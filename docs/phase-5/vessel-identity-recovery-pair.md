@@ -35,7 +35,8 @@ python -m scripts.vesselctl restore-paired-identity \
 
 The restore command requires a new directory, verifies both signatures and
 exact archive bytes, authenticates the encrypted export and admits only one
-realm file matching the Core issuer. It removes partial output on failure.
+realm file matching the Core issuer. The synthetic realm JSON is capped at
+32 MiB before parsing. It removes only output that it created on failure.
 The realm must then be imported through an approved Keycloak recovery process.
 The pair itself does **not** prove a shared capture point, Keycloak database
 consistency, live imported account state or a successful Core/Knowledge
