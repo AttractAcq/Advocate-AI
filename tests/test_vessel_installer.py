@@ -13,6 +13,7 @@ from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _cleanup_failed_install, _ingest, _read_intent, _read_state,
+    _remove_scoped_orphans,
     _verify_knowledge_schema,
     _scoped_list,
     _state_payload, _write_intent, _write_state, finish_vessel_stop, install_vessel,
@@ -29,6 +30,83 @@ class VesselInstallerTests(unittest.TestCase):
         self.parent = Path(temporary.name)
         self.parent.chmod(0o700)
         self.root = self.parent / "new-install"
+
+    def test_restore_orphan_cleanup_requires_attempt_on_every_runtime(self) -> None:
+        installation = "a" * 32
+        attempt = "b" * 32
+        data = f"sovereign-{installation}-knowledge-data"
+        knowledge_run = "sovereign-knowledge-" + "c" * 12
+        socket = knowledge_run + "-socket"
+        service_run = "sovereign-synthetic-" + "d" * 12
+        network = "e" * 64
+        ids = ["f" * 64, "1" * 64, "2" * 64]
+
+        def inspect(*args: str, wrong: str | None = None) -> str:
+            if args[:2] == ("network", "inspect"):
+                field = args[-1]
+                if field == "{{json .Labels}}":
+                    return json.dumps({
+                        "sovereign.synthetic.install": installation,
+                        "sovereign.synthetic.run": service_run,
+                        "sovereign.synthetic.restore_attempt":
+                            "0" * 32 if wrong == "network" else attempt})
+                return {"{{.Name}}": service_run,
+                        "{{.Internal}}": "true"}[field]
+            if args[0] == "inspect":
+                index = ids.index(args[1])
+                field = args[-1]
+                run = knowledge_run if index == 0 else service_run
+                labels = {"sovereign.synthetic.install": installation,
+                          "sovereign.synthetic.run": run,
+                          "sovereign.synthetic.restore_attempt":
+                              "0" * 32 if wrong == "console" and index == 2
+                              else attempt}
+                if index == 0:
+                    labels["sovereign.synthetic.role"] = "knowledge"
+                fields = {
+                    "{{json .Config.Labels}}": json.dumps(labels),
+                    "{{.Name}}": "/" + (run if index == 0 else
+                                         run + ("-core" if index == 1 else "-console")),
+                    "{{.HostConfig.NetworkMode}}": "none" if index == 0 else run,
+                    "{{json .HostConfig.PortBindings}}": "null",
+                    "{{json .Mounts}}": json.dumps([
+                        {"Type": "volume", "Destination": destination,
+                         "Name": volume} for destination, volume in (
+                            ("/var/lib/postgresql/data", data),
+                            ("/var/run/postgresql", socket))]),
+                }
+                return fields[field]
+            if args[0] in ("rm", "network", "volume"):
+                return ""
+            raise AssertionError(args)
+
+        for wrong in ("network", "console", None):
+            with self.subTest(wrong=wrong), \
+                 patch("infrastructure.deploy.vessel_installer._scoped_list",
+                       side_effect=[ids, [network], [data, socket]]), \
+                 patch("infrastructure.deploy.vessel_installer._volume") as volume, \
+                 patch("infrastructure.deploy.vessel_installer._docker",
+                       side_effect=lambda *args: inspect(*args, wrong=wrong)) as docker:
+                if wrong is None:
+                    result = _remove_scoped_orphans(
+                        installation, data, lambda: True,
+                        restore_attempt=attempt)
+                    self.assertEqual(result, {"result": "reconciled",
+                                              "containers": 3, "networks": 1,
+                                              "sockets": 1})
+                    volume.assert_called_once_with(
+                        socket, installation, "knowledge-socket", create=False,
+                        run_name=knowledge_run, restore_attempt=attempt)
+                    self.assertEqual(sum(call.args[0] == "rm" for call in
+                                         docker.call_args_list), 3)
+                else:
+                    with self.assertRaisesRegex(VesselInstallError,
+                                                "identity mismatch"):
+                        _remove_scoped_orphans(
+                            installation, data, lambda: True,
+                            restore_attempt=attempt)
+                    self.assertFalse(any(call.args[0] == "rm" for call in
+                                         docker.call_args_list))
 
     def test_restore_intent_blocks_generic_first_install_recovery(self) -> None:
         self.root.mkdir(mode=0o700)

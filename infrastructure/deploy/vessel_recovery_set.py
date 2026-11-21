@@ -29,6 +29,7 @@ from infrastructure.deploy.knowledge_volume import (
 )
 from infrastructure.deploy.vessel_installer import (
     _assert_missing, _cleanup_failed_install, _operation_lock, _owner_directory,
+    _remove_scoped_orphans,
     _read_intent, _read_state, _recovery_inventory, _release_id, _scoped_list,
     _stage, _state_payload, _verify_knowledge_schema, _verify_stage,
     _write_intent, _write_private_record, _write_state,
@@ -540,7 +541,8 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                 raise VesselRecoveryError("restored Knowledge differs from receipt")
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane, stage / "console-config.json",
-                core_state, lab_password, root, knowledge, installation_id)
+                core_state, lab_password, root, knowledge, installation_id,
+                restore_attempt=restore_attempt)
             _write_state(root, _state_payload(release, installation_id,
                                                core_state, lab_password,
                                                services, knowledge))
@@ -768,7 +770,8 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
         try:
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane, stage / "console-config.json",
-                state, lab_password, root, knowledge, value["installation_id"])
+                state, lab_password, root, knowledge, value["installation_id"],
+                restore_attempt=marker["restore_attempt"])
             _write_state(root, _state_payload(
                 value["release"], value["installation_id"], state, lab_password,
                 services, knowledge))
@@ -835,9 +838,30 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
                                 scope, "--quiet")
         volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
                                volume=True)
-        container = _partial_knowledge_resources(
-            value["installation_id"], value["data_volume"],
-            marker["restore_attempt"], containers, networks, volumes)
+        if networks or len(containers) > 1:
+            if value["data_volume"] not in volumes:
+                raise VesselRecoveryError("partial runtime lacks Knowledge data volume")
+            _volume(value["data_volume"], value["installation_id"],
+                    "knowledge-data", create=False,
+                    restore_attempt=marker["restore_attempt"])
+            _remove_scoped_orphans(
+                value["installation_id"], value["data_volume"],
+                lambda: _read_restore_intent(root) == marker and
+                _read_intent(root) == intent and
+                not active.exists() and not active.is_symlink() and
+                set(_scoped_list("ps", "-a", "--no-trunc", "--filter", scope,
+                                 "--quiet")) == set(containers) and
+                set(_scoped_list("network", "ls", "--no-trunc", "--filter",
+                                 scope, "--quiet")) == set(networks) and
+                set(_scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                                 volume=True)) == set(volumes),
+                restore_attempt=marker["restore_attempt"])
+            volumes = [value["data_volume"]]
+            container = None
+        else:
+            container = _partial_knowledge_resources(
+                value["installation_id"], value["data_volume"],
+                marker["restore_attempt"], containers, networks, volumes)
         if (_read_restore_intent(root) != marker or _read_intent(root) != intent):
             raise VesselRecoveryError("partial restore intent changed")
         if container is not None:

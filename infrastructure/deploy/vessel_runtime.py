@@ -157,11 +157,14 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
                                  console_config: Path, state: Path,
                                  lab_password: Path, knowledge_root: Path,
                                  knowledge: KnowledgeVolumeHandle,
-                                 installation_id: str) -> RuntimeHandle:
+                                 installation_id: str, *,
+                                 restore_attempt: str | None = None) -> RuntimeHandle:
     """Launch verified Core and Console around the checked Knowledge socket."""
     if not _INSTALL.fullmatch(installation_id) or \
             knowledge.installation_id != installation_id:
         raise VesselRuntimeError("vessel installation identity mismatch")
+    if restore_attempt is not None and not _INSTALL.fullmatch(restore_attempt):
+        raise VesselRuntimeError("invalid vessel restore attempt")
     manifest = verify_bundle(bundle, trusted_key)
     require_supported_vessel_compatibility(manifest)
     model_id = _signed_model_id(manifest)
@@ -178,6 +181,8 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
     name = f"sovereign-synthetic-{uuid.uuid4().hex[:12]}"
     labels = ["--label", f"sovereign.synthetic.run={name}",
               "--label", f"sovereign.synthetic.install={installation_id}"]
+    if restore_attempt is not None:
+        labels += ["--label", f"sovereign.synthetic.restore_attempt={restore_attempt}"]
     network_id = _docker("network", "create", "--internal", *labels, name)
     if not _DOCKER_ID.fullmatch(network_id) or \
             _docker("network", "inspect", network_id, "--format", "{{.Internal}}") != "true":

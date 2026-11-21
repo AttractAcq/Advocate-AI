@@ -645,7 +645,8 @@ def finish_vessel_stop(root: Path, trusted_key: Path, crane: Path) -> dict[str, 
 
 
 def _remove_scoped_orphans(installation_id: str, data_volume: str,
-                           unchanged) -> dict[str, int | str]:
+                           unchanged, *,
+                           restore_attempt: str | None = None) -> dict[str, int | str]:
     """Verify the complete scoped inventory before deleting orphan runtime."""
     scope = f"label=sovereign.synthetic.install={installation_id}"
     containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet")
@@ -653,13 +654,17 @@ def _remove_scoped_orphans(installation_id: str, data_volume: str,
                             "--quiet")
     volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
                            volume=True)
+    if restore_attempt is not None and (
+            not _INSTALL.fullmatch(restore_attempt) or len(containers) > 3 or
+            len(networks) > 1 or len(volumes) > 2):
+        raise VesselInstallError("partial restore resource inventory changed")
     if volumes.count(data_volume) != 1:
         raise VesselInstallError("persistent Knowledge volume missing from inventory")
     sockets = [name for name in volumes if name != data_volume]
     for name in sockets:
         run_name = name.removesuffix("-socket")
         _volume(name, installation_id, "knowledge-socket", create=False,
-                run_name=run_name)
+                run_name=run_name, restore_attempt=restore_attempt)
     runs: dict[str, str] = {}
     for network_id in networks:
         labels = json.loads(_docker("network", "inspect", network_id,
@@ -669,6 +674,8 @@ def _remove_scoped_orphans(installation_id: str, data_volume: str,
                 or not isinstance(labels, dict)
                 or labels.get("sovereign.synthetic.install") != installation_id
                 or labels.get("sovereign.synthetic.run") != run_name
+                or (restore_attempt is not None and
+                    labels.get("sovereign.synthetic.restore_attempt") != restore_attempt)
                 or _docker("network", "inspect", network_id,
                            "--format", "{{.Internal}}") != "true"
                 or run_name in runs):
@@ -685,6 +692,8 @@ def _remove_scoped_orphans(installation_id: str, data_volume: str,
                         "--format", "{{json .HostConfig.PortBindings}}")
         if not isinstance(labels, dict) or \
                 labels.get("sovereign.synthetic.install") != installation_id or \
+                (restore_attempt is not None and
+                 labels.get("sovereign.synthetic.restore_attempt") != restore_attempt) or \
                 ports not in ("null", "{}"):
             raise VesselInstallError("orphan vessel container identity mismatch")
         run_name = labels.get("sovereign.synthetic.run")
