@@ -1,6 +1,6 @@
 # Open source integration decisions
 
-Updated 16 November 2026. These are bounded software decisions for the
+Updated 21 November 2026. These are bounded software decisions for the
 synthetic build. No upstream repository was copied into Sovereign; the
 integration uses pinned official binaries and our own small adapters.
 
@@ -11,11 +11,12 @@ integration uses pinned official binaries and our own small adapters.
 | [Trivy v0.76.2](https://github.com/aquasecurity/trivy/releases/tag/v0.76.2) | Scanned the validated synthetic archive using a local vulnerability database; the adapter binds archive, manifest, scanner and database hashes | Integrate for offline release preparation; database source approval, package coverage and production findings remain open |
 | [restic v0.19.1](https://github.com/restic/restic/releases/tag/v0.19.1) | Encrypted local repository, full data check and clean SQLite/configuration restore passed; a scoped dry-run retention plan and exact-ID prune left unrelated snapshots intact | Integrate behind the synthetic snapshot interface; owner-approved retention and target recovery remain open |
 | [Cosign v3.1.4](https://github.com/sigstore/cosign/releases/tag/v3.1.4) | Checksum-pinned local binary signed and verified a synthetic blob offline with an ephemeral key, and rejected a changed blob. Verification required `--insecure-ignore-tlog=true` and warned that transparency and auditability were not checked. The offline signing flags used in this trial are deprecated | Keep as an evaluated option. Do not add a second release signing path before release-key and publisher-trust custody, an approved offline verification policy, and supported offline command flags are established |
-| [OpenFGA v1.22.1](https://github.com/openfga/openfga/releases/tag/v1.22.1) | Isolated, loopback, in-memory prototype matched 25 synthetic role/collection allow-deny cases and denied access after membership revocation | Keep as a prototype. Do not replace the current Policy Engine until direct document denies, NAS ACL change propagation, outage behavior, OIDC integration and independent review are proven |
+| [OpenFGA v1.22.1](https://github.com/openfga/openfga/releases/tag/v1.22.1) | Isolated, loopback, in-memory prototype matched 30 role/collection checks, 48 user/document checks and 15 source listings; direct document denies and user, collection and source revocations took effect with higher-consistency reads | Keep as a prototype. Direct synthetic document denies and revocation now match; NAS ACL change propagation, persistent authenticated deployment, outage behavior, OIDC integration and independent review remain before any replacement |
 
 The [OpenFGA probe](../../scripts/phase5_openfga_probe.py) starts only on
 loopback with authentication and persistence disabled, compares the existing
-fictional role matrix, and stops. It does not serve a vessel or process real
+fictional role matrix plus document-level allow and deny overrides, source listings
+and revocations, and stops. It does not serve a vessel or process real
 documents. CI downloads a checksum-pinned Linux binary and reruns the probe.
 The current Policy Engine remains the enforcement point for search, preview,
 citations, model context and history revocation.
