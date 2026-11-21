@@ -1,6 +1,6 @@
 # Offline maintenance and recovery SOP — synthetic lab
 
-**Owner:** release/recovery engineer. **Second person:** release or recovery witness. This sequence uses the current signed-bundle staging, metadata-only diagnostics and encrypted synthetic backup tool. It does not update live containers, databases, Keycloak, model files or Wazuh. Keep software signing keys, trusted public keys and backup decryption keys in separate custody.
+**Owner:** release/recovery engineer. **Second person:** release or recovery witness. The commands in the first sections below exercise the earlier synthetic software-pointer installer and small encrypted file archive. They do not update running containers or restore PostgreSQL, Keycloak, model files or Wazuh. The current signed vessel image path has separate [stopped release](../phase-5/vessel-release-switch.md), [recovery-set](../phase-5/vessel-recovery-set.md) and [paired identity](../phase-5/vessel-identity-recovery-pair.md) procedures. Keep software signing keys, trusted public keys and backup decryption keys in separate custody.
 
 ## Before an offline update
 
@@ -47,6 +47,29 @@ This pointer rollback does not restart a production stack or reverse a data migr
 
 Inspect restored file inventory and rerun identity, history, permission-filtered retrieval and local service checks before an operator accepts the result. `make recovery-rehearsal` reproduces this on fictional data. If the key is unavailable, the archive cannot be recovered. Escalate key loss, restore failure or uncertain data integrity to the recovery owner; preserve the prior state and evidence.
 
+## Current signed vessel image path
+
+For a synthetic signed Core, Console and Knowledge installation, use
+`python -m scripts.vesselctl --help` and the linked vessel procedures above.
+Stop and finish-stop the source installation before capturing a new encrypted
+Core/Knowledge recovery set. Verify its signed receipt and restic repository,
+then restore into new owner-only installation and Core-state directories.
+The clean activation command checks the signed bundle, image identities,
+Knowledge row digest and Core source bytes before recording an active vessel.
+It does not overwrite a live installation.
+
+For OIDC mode, also stop the local Keycloak writer before capture, export its
+realm from the stopped synthetic volume, encrypt it, and sign the exact
+Keycloak/Core artifact pair. Import only the checked export into a fresh local
+Keycloak before activating the signed vessel recovery set. Pass the pair,
+verification key, archive and archive key to activation, interrupted finish
+or abandoned retry. Those commands recheck the pair against the same signed
+Core receipt; retry also requires the pair recorded by the abandoned attempt.
+The [real Keycloak rehearsal](../phase-5/vessel-keycloak-paired-recovery.md)
+tests this stopped synthetic sequence. It does not prove a production
+database-consistent capture or that an operator imported the exact realm into
+a live identity service.
+
 ## Records and limits
 
-Record who authorised and witnessed the action, versions/hashes, backup and key-custodian references, start/end times, observed results, defects and reviewer decision in the controlled evidence store. A production schedule, retention policy, protected media, key rotation, PostgreSQL/Keycloak/model/Wazuh backups and measured RTO/RPO remain open under [B-07](../blockers-and-build-queue.md). Do not export prompts, documents, raw logs or backup contents to the company portal; use authorised metadata only and no standing strict-mode vessel connection.
+Record who authorised and witnessed the action, versions/hashes, backup and key-custodian references, start/end times, observed results, defects and reviewer decision in the controlled evidence store. A production schedule, retention policy, protected media, key rotation, production-consistent PostgreSQL/Keycloak/model/Wazuh backups and measured RTO/RPO remain open under [B-07](../blockers-and-build-queue.md). Do not export prompts, documents, raw logs or backup contents to the company portal; use authorised metadata only and no standing strict-mode vessel connection.

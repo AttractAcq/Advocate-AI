@@ -21,8 +21,9 @@ administrative role; evaluate WebAuthn or local TOTP against the vessel's
 offline device and recovery constraints. Disable password grant, self-service
 registration and unreviewed role assignment in the deployed realm. Keep
 Keycloak storage, signing keys and local TLS under the deployment's protected
-backup and recovery process. The synthetic realm intentionally keeps direct
-password grant for scripted tests; it must not be copied into production.
+backup and recovery process. The synthetic realm uses browser authorization
+code plus PKCE and disables direct password grants; its fictional users and
+development-mode server configuration must not be copied into production.
 
 Core can now be configured with `SOVEREIGN_OIDC_ISSUER` and a private
 `SOVEREIGN_OIDC_CA_FILE` for a DNS-named HTTPS Keycloak realm on port 443. The
@@ -32,9 +33,14 @@ explicit trust file, a CA file without an
 issuer, or a CA file paired with lab HTTP is refused at startup. The existing
 loopback HTTP realm remains available for fictional lab tests. Token validation
 still requires the Core audience, Console client, current local role and
-active user. This is Core-side trust configuration only: the signed vessel
-installer does not yet mount a site CA or provision Keycloak, TLS ingress,
-MFA, persistent identity storage or certificate renewal. Those need a reviewed
+active user. The signed vessel installer now checks an owner-only Core-state
+CA file, mounts the protected Core state read-write into Core for audit,
+history and revocation persistence, and verifies the
+configured Keycloak JWKS through that CA before OIDC activation. The
+synthetic signed-image
+rehearsals cover fictional TLS JWKS and a pinned local Keycloak. The installer
+does not provision Keycloak, a production TLS ingress, MFA enrollment,
+persistent identity storage or certificate renewal. Those need a reviewed
 site configuration and target-network tests before vessel use. The
 [vessel identity integration contract](vessel-identity-integration.md) defines
 the required installer, network and recovery transition.
@@ -46,7 +52,14 @@ ambiguous or partial records. An append is durable before logout reports
 success; a failed append returns 503. This is a local tamper-detection boundary,
 not an independent revocation authority. The deployment must protect and back
 up the store, keep it across release changes, and test restart and restore
-behavior with real Keycloak tokens.
+behavior with real Keycloak tokens. The synthetic signed recovery set captures
+the CA and revocation log in a schema-3 receipt. A separate encrypted Keycloak
+realm export is [signed as a pair](../phase-5/vessel-identity-recovery-pair.md)
+with that exact receipt; OIDC activation, interrupted finish and abandoned
+retry require the matching pair. The real Keycloak rehearsal restores its
+signing key and checks that an old unrevoked token still works while a logged
+out token remains denied. Production database capture, live import
+attestation and key custody remain open.
 
 ## Policy change workflow
 
