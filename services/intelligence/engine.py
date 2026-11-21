@@ -28,7 +28,7 @@ _UNSAFE_ANALYSIS = re.compile(
     re.I,
 )
 _TIME_MENTION = re.compile(
-    r"(?<![0-9:+-])(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b")
+    r"(?<![0-9:+-])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b")
 
 
 def _text(value: object, *, limit: int = 160) -> str:
@@ -78,6 +78,8 @@ def supported_incident_times(text: str, timestamps: list[str]) -> bool:
         if moment.utcoffset() is None:
             return False
         allowed.update((moment.strftime("%H:%M"), moment.strftime("%H:%M:%S")))
+        allowed.update((f"{moment.hour}:{moment.minute:02d}",
+                        f"{moment.hour}:{moment.minute:02d}:{moment.second:02d}"))
     return all(match in allowed for match in _TIME_MENTION.findall(text))
 
 

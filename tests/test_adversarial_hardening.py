@@ -201,6 +201,12 @@ class AlertBoundaryTests(unittest.TestCase):
             "The firewall reported at 2026-11-15T10:00:00+00:00.", cited))
         self.assertFalse(supported_incident_times(
             "The firewall reported an alert at 11:59 UTC.", cited))
+        self.assertTrue(supported_incident_times(
+            "The firewall reported an alert at 9:15 UTC.",
+            ["2026-11-15T09:15:00+00:00"]))
+        self.assertFalse(supported_incident_times(
+            "The firewall reported an alert at 9:16 UTC.",
+            ["2026-11-15T09:15:00+00:00"]))
         self.assertFalse(supported_incident_times("Reported at 10:00 UTC.",
                                                  ["2026-11-15T10:00:00"]))
 
