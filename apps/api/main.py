@@ -410,7 +410,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             revalidate_identity(identity)
             item = stage_upload(settings.upload_root, identity[1]["id"], x_filename or "", await request.body())
             try:
+                revalidate_identity(identity)
                 record_decision(identity[1]["id"], "stage-upload", str(item["id"]), "pending")
+                revalidate_identity(identity)
             except Exception:
                 discard_upload(settings.upload_root, str(item["id"]))
                 raise
