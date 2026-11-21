@@ -631,7 +631,7 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
     install.mkdir(mode=0o700)
     state = root / "partial-recovery-state"
     state.mkdir(mode=0o700)
-    release, _ = _stage(install, bundle, trusted, root / "console-config.json")
+    release, stage = _stage(install, bundle, trusted, root / "console-config.json")
     if release != value["release"]:
         raise AssertionError("partial recovery signed stage changed")
     restore_attempt = uuid.uuid4().hex
@@ -642,6 +642,7 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
     _write_intent(install, release, value["installation_id"], state,
                   root / "lab-password")
     created = False
+    partial_knowledge: KnowledgeVolumeHandle | None = None
     retry_root = root / "retried-recovery-install"
     retry_state = root / "retried-recovery-state"
     try:
@@ -663,9 +664,10 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
                 restore_attempt=wrong_attempt)
         _run("docker", "volume", "rm", value["data_volume"])
         created = False
-        _volume(value["data_volume"], value["installation_id"],
-                "knowledge-data", create=True,
-                restore_attempt=restore_attempt)
+        partial_knowledge = start_signed_knowledge(
+            stage / "bundle", trusted, crane, install,
+            value["installation_id"], initialize=True,
+            restore_attempt=restore_attempt)
         created = True
         try:
             resume_first_install(install, trusted, crane)
@@ -676,6 +678,7 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
             raise AssertionError("generic first-install resume accepted partial restore")
         result = abandon_incomplete_vessel_restore(
             install, trusted, receipt, receipt_key, discard_partial_data=True)
+        partial_knowledge = None
         created = False
         if (result["result"] != "abandoned" or
                 result["snapshot_id"] != value["snapshot_id"] or
@@ -709,10 +712,16 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
                 (retry_state / "postgres.dump").exists()):
             raise AssertionError("receipt-verified retry did not restore healthy vessel")
         return {"result": "pass", "volume": "checked-and-discarded",
+                "interrupted_container": "checked-and-discarded",
                 "wrong_attempt": "denied",
                 "generic_resume": "denied", "evidence": "retained",
                 "retry": "signed-and-healthy"}
     finally:
+        if partial_knowledge is not None:
+            subprocess.run(["docker", "rm", "-f", partial_knowledge.container_id],
+                           capture_output=True, text=True, timeout=30)
+            subprocess.run(["docker", "volume", "rm", partial_knowledge.socket_volume],
+                           capture_output=True, text=True, timeout=30)
         retry_record = retry_root / "vessel-state.json"
         if retry_record.exists():
             record = json.loads(retry_record.read_text())

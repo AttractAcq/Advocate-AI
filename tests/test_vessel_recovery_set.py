@@ -350,6 +350,12 @@ class VesselRecoverySetTests(unittest.TestCase):
                 _partial_knowledge_resources(
                     identifier, data, "d" * 32, [], ["e" * 64], [data])
             volume.assert_not_called()
+        with patch("infrastructure.deploy.vessel_recovery_set._volume") as volume, \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            self.assertIsNone(_partial_knowledge_resources(
+                identifier, data, "d" * 32, [], [], [data, socket]))
+            self.assertEqual(volume.call_count, 2)
+            docker.assert_not_called()
 
     def test_abandon_removes_only_verified_partial_knowledge_run(self) -> None:
         install = self.root / "crashed-restore"
