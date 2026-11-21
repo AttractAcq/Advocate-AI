@@ -60,6 +60,14 @@ token is denied while a new token retains engineering-only source access.
 Production key custody, rotation cadence, emergency rollover and outage
 policy remain owner decisions.
 
+The synthetic identity-outage rehearsal stops Keycloak after Core has cached
+an engineer's signing key. It checks that the existing, unexpired token keeps
+its restricted access, a logged-out token stays denied and the lab login path
+stays closed. After Core restarts with Keycloak still stopped, the same token
+is denied because its signing key cannot be fetched. This characterizes the
+current five-minute JWKS cache and does not choose an acceptable vessel outage
+window or provide identity service high availability.
+
 ## Required behavior
 
 - A strict vessel release uses one named, local HTTPS Keycloak realm for crew

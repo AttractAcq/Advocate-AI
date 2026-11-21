@@ -171,6 +171,42 @@ def _rehearse_rotation(core: str, password: str) -> dict[str, str]:
             "retired_key": "denied", "source_scope": "role-restricted"}
 
 
+def _rehearse_outage(core: str, keycloak: str, password: str,
+                    revoked_token: str) -> dict[str, str]:
+    token = _flow(core, password, "lab-chief_engineer-1", "chief_engineer")
+    if _api(core, token, "/api/me")[0] != 200:
+        raise AssertionError("valid engineer token was not cached before outage")
+    _run("docker", "stop", keycloak)
+    if _api(core, token, "/api/me")[0] != 200:
+        raise AssertionError("cached valid token failed during short identity outage")
+    if _api(core, revoked_token, "/api/me")[0] != 401:
+        raise AssertionError("revoked token passed during identity outage")
+    sources_status, sources = _api(core, token, "/api/sources")
+    if (sources_status != 200 or
+            {row["collection"] for row in sources["sources"]} !=
+            {"engineering", "deck"}):
+        raise AssertionError("identity outage widened source access")
+    if _api(core, "-", "/api/login", "POST")[0] != 404:
+        raise AssertionError("lab login appeared during identity outage")
+    _run("docker", "restart", core)
+    for _ in range(30):
+        probe = subprocess.run([
+            "docker", "exec", core, "python", "-c",
+            "import httpx; assert httpx.get('http://127.0.0.1:18100/health', "
+            "trust_env=False, timeout=2).status_code == 200",
+        ], capture_output=True, timeout=5)
+        if probe.returncode == 0:
+            break
+        time.sleep(0.5)
+    else:
+        raise AssertionError("Core did not restart during identity outage")
+    if _api(core, token, "/api/me")[0] != 401:
+        raise AssertionError("Core accepted token without a cached Keycloak key")
+    return {"keycloak_outage": "cached-token-accepted-before-core-restart",
+            "revoked_token": "denied", "cold_cache_token": "denied",
+            "source_scope": "role-restricted", "lab_fallback": "denied"}
+
+
 def _backup_realm(source: Path, root: Path, archive: Path, key: Path) -> str:
     spec = root / (archive.stem + "-spec.json")
     spec.write_text(json.dumps({"schema": 1, "files": [{
@@ -284,9 +320,10 @@ def _recover(root: Path, reference: str, keycloak: str, core: str,
             "revoked_core_token": "denied"}
 
 
-def rehearse(*, recovery: bool = False, rotation: bool = False) -> dict[str, str]:
-    if recovery and rotation:
-        raise ValueError("recovery and key rotation use separate synthetic realms")
+def rehearse(*, recovery: bool = False, rotation: bool = False,
+             outage: bool = False) -> dict[str, str]:
+    if sum((recovery, rotation, outage)) > 1:
+        raise ValueError("identity modes use separate synthetic realms")
     suffix = uuid.uuid4().hex[:8]
     network = "vessel-keycloak-" + suffix
     app_network = "vessel-app-" + suffix
@@ -400,6 +437,9 @@ def rehearse(*, recovery: bool = False, rotation: bool = False) -> dict[str, str
                                         backup_key, revoked_token))
             if rotation:
                 outcome.update(_rehearse_rotation(core, password))
+            if outage:
+                outcome.update(_rehearse_outage(core, keycloak, password,
+                                               revoked_token))
             return outcome
         finally:
             subprocess.run(["docker", "rm", "-f", core, keycloak],
@@ -415,6 +455,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--recovery", action="store_true")
     parser.add_argument("--rotation", action="store_true")
+    parser.add_argument("--outage", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(rehearse(recovery=args.recovery, rotation=args.rotation),
+    print(json.dumps(rehearse(recovery=args.recovery, rotation=args.rotation,
+                             outage=args.outage),
                      sort_keys=True))
