@@ -28,6 +28,16 @@ export type SecurityDetail = {
   evidence: { event_id: string; index_name: string; index_id: string; timestamp: string; rule_id: string; location: string }[]
 }
 export type SecurityAnalysis = { analysis: string; notice: string; method: 'local-model' | 'evidence-only'; evidence: SecurityDetail['evidence'] }
+export type RelatedAlertEvidence = {
+  incident_id: string
+  status: 'observed-same-source' | 'unresolved-source'
+  related: { incident_id: string; summary: string; timestamp: string; severity: string; evidence: SecurityDetail['evidence'] }[]
+  examined: number
+  limit: number
+  window_start: string
+  window_end: string
+  notice: string
+}
 
 export async function api<T>(path: string, token: string | null, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {

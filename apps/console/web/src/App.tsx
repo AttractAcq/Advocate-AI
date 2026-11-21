@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api, stageDocument } from './api'
-import type { AdminStatus, ChatResult, Citation, Identity, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, StagedUpload, Turn } from './api'
+import type { AdminStatus, ChatResult, Citation, Identity, RelatedAlertEvidence, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, StagedUpload, Turn } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 
 type View = 'chat' | 'documents' | 'security' | 'administration'
@@ -39,6 +39,8 @@ export default function App() {
   const [securitySince, setSecuritySince] = useState('')
   const [securityUntil, setSecurityUntil] = useState('')
   const [incident, setIncident] = useState<SecurityDetail | null>(null)
+  const [relatedAlerts, setRelatedAlerts] = useState<RelatedAlertEvidence | null>(null)
+  const [relatedError, setRelatedError] = useState('')
   const [analysis, setAnalysis] = useState<SecurityAnalysis | null>(null)
   const [filter, setFilter] = useState('')
   const [preview, setPreview] = useState<{ bearer: string; source: SourcePreview } | null>(null)
@@ -115,6 +117,8 @@ export default function App() {
     setSecuritySince('')
     setSecurityUntil('')
     setIncident(null)
+    setRelatedAlerts(null)
+    setRelatedError('')
     setAnalysis(null)
     setPreview(null)
     setError('')
@@ -191,7 +195,14 @@ export default function App() {
     if (!token) return
     setError('')
     setAnalysis(null)
-    try { setIncident(await api<SecurityDetail>(`/security/incidents/${encodeURIComponent(id)}`, token)) }
+    setRelatedAlerts(null)
+    setRelatedError('')
+    try {
+      const path = `/security/incidents/${encodeURIComponent(id)}`
+      setIncident(await api<SecurityDetail>(path, token))
+      try { setRelatedAlerts(await api<RelatedAlertEvidence>(`${path}/related`, token)) }
+      catch (cause) { setRelatedError(cause instanceof Error ? cause.message : 'Related alert evidence unavailable') }
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Incident unavailable') }
   }
 
@@ -453,6 +464,16 @@ export default function App() {
             <p className="mt-2 text-sm">Related asset mapping: {incident.event.related_asset_status}</p>
             <h4 className="mt-5 text-sm font-semibold">Evidence</h4>
             <ul className="mt-2 list-disc pl-5 text-sm">{incident.evidence.map((entry) => <li key={`${entry.index_name}:${entry.index_id}`}>Wazuh alert {entry.event_id} · index {entry.index_name} / {entry.index_id} · {entry.timestamp} · rule {entry.rule_id} · {entry.location}</li>)}</ul>
+            <h4 className="mt-5 text-sm font-semibold">Related alerts on the same mapped source</h4>
+            {relatedError && <p className="mt-2 text-sm text-[#895534]">{relatedError}</p>}
+            {relatedAlerts && <div className="mt-2 text-sm">
+              {relatedAlerts.status === 'unresolved-source'
+                ? <p>Source mapping is unresolved, so no related device is inferred.</p>
+                : relatedAlerts.related.length === 0
+                  ? <p>No same-source alert was found in the checked sample.</p>
+                  : <ul className="list-disc pl-5">{relatedAlerts.related.map((item) => <li key={item.incident_id}>{item.summary} · {item.severity} · {item.timestamp} · {item.evidence[0].index_name} / {item.evidence[0].index_id}</li>)}</ul>}
+              <p className="mt-2 text-xs text-[#5d7380]">{relatedAlerts.notice} {relatedAlerts.examined} alerts examined; at most 20 related alerts shown.</p>
+            </div>}
             <h4 className="mt-5 text-sm font-semibold">Suggested checks</h4>
             <ul className="mt-2 list-disc pl-5 text-sm">{incident.suggested_checks.map((check) => <li key={check}>{check}</li>)}</ul>
             <p className="mt-4 text-xs text-[#5d7380]">{incident.confidence}</p>
