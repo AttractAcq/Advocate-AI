@@ -452,6 +452,9 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
             self.model.answer = "The firewall reported five alerts within a 30-minute window."
             invented_duration = await client.post(
                 f"/api/security/incidents/{incident_id}/explain", headers=headers)
+            self.model.answer = "The firewall reported an alert at 11:59 UTC."
+            invented_time = await client.post(
+                f"/api/security/incidents/{incident_id}/explain", headers=headers)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["method"], "local-model")
         self.assertIn("Bounded same-source", response.json()["confidence"])
@@ -465,6 +468,8 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(unsupported.json()["evidence"]), 1)
         self.assertEqual(invented_duration.json()["method"], "evidence-only")
         self.assertEqual(len(invented_duration.json()["evidence"]), 1)
+        self.assertEqual(invented_time.json()["method"], "evidence-only")
+        self.assertEqual(len(invented_time.json()["evidence"]), 1)
 
     async def test_explanation_keeps_primary_evidence_when_related_search_fails(self):
         hit = json.loads(ALERTS.read_text())["hits"]["hits"][0]

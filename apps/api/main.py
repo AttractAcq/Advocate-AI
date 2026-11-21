@@ -37,7 +37,8 @@ from services.policy.policy_file import (PolicyUnavailable, load_policy,
 from services.connectors.wazuh import WazuhIndexerReader, WazuhUnavailable, parse_incident_id
 from services.intelligence.assets import AssetRegistry
 from services.intelligence.engine import (load_fixture_incidents, related_alert_evidence,
-                                          safe_incident_analysis, supported_incidents)
+                                          safe_incident_analysis, supported_incident_times,
+                                          supported_incidents)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -560,7 +561,8 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         except ModelUnavailable as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         revalidate_identity(identity)
-        if not safe_incident_analysis(analysis):
+        if (not safe_incident_analysis(analysis) or not supported_incident_times(
+                analysis, [event["timestamp"]] + [item["timestamp"] for item in sampled])):
             record_decision(identity[1]["id"], "explain", incident_id, "format-rejected")
             return {"incident_id": incident_id,
                     "analysis": incident["summary"] + " " + incident["confidence"],

@@ -27,6 +27,8 @@ _UNSAFE_ANALYSIS = re.compile(
     r"\bsame\s+(?:incident|attack)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
     re.I,
 )
+_TIME_MENTION = re.compile(
+    r"(?<![0-9:+-])(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b")
 
 
 def _text(value: object, *, limit: int = 160) -> str:
@@ -63,6 +65,20 @@ def safe_incident_analysis(text: str) -> bool:
             or not text.rstrip().endswith((".", "!", "?"))):
         return False
     return not instruction_like(text) and not _UNSAFE_ANALYSIS.search(text)
+
+
+def supported_incident_times(text: str, timestamps: list[str]) -> bool:
+    """Require every stated clock time to appear in a cited alert timestamp."""
+    allowed = set()
+    for timestamp in timestamps:
+        try:
+            moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            return False
+        if moment.utcoffset() is None:
+            return False
+        allowed.update((moment.strftime("%H:%M"), moment.strftime("%H:%M:%S")))
+    return all(match in allowed for match in _TIME_MENTION.findall(text))
 
 
 def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[str, object]:
