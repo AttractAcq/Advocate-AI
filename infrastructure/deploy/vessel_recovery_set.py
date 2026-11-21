@@ -346,6 +346,9 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
         raise VesselRecoveryError("vessel recovery paths must be separate")
     with _operation_lock(root):
         record = _read_state(root)
+        if "threat_feed" in record:
+            raise VesselRecoveryError(
+                "feed-backed recovery requires a signed feed binding receipt")
         release = record["active"]
         stage = root / "vessel-releases" / release
         _verify_stage(stage, trusted_key, release)
