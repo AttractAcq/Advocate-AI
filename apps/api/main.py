@@ -394,6 +394,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             items = list_uploads(settings.upload_root, identity[1]["id"])
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "upload area unavailable") from exc
+        revalidate_identity(identity)
         return {"uploads": items, "enabled": True}
 
     @app.post("/api/documents/stage", status_code=201)
@@ -586,8 +587,10 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     @app.get("/api/sources")
     def sources(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
         permitted = permitted_sources(identity[1]["id"])
-        return {"sources": [{"document_id": row["document_id"], "collection": row["collection"],
-                             "version": row["version"]} for row in permitted]}
+        result = {"sources": [{"document_id": row["document_id"], "collection": row["collection"],
+                               "version": row["version"]} for row in permitted]}
+        revalidate_identity(identity)
+        return result
 
     @app.get("/api/sources/{document_id}/preview")
     def source_preview(document_id: str, ordinal: int = 0,
@@ -602,6 +605,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if preview is None:
             record_decision(identity[1]["id"], "preview", document_id, "deny")
             raise HTTPException(status.HTTP_404_NOT_FOUND, "source not found")
+        revalidate_identity(identity)
         record_decision(identity[1]["id"], "preview", document_id, "allow")
         return preview
 
@@ -637,6 +641,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         results = [hit for hit in hits if hit["document_id"] in current and
                             hit["sha256"] == current[hit["document_id"]]["sha256"] and
                             hit["version"] == current[hit["document_id"]]["version"]]
+        revalidate_identity(identity)
         if not results:
             record_decision(identity[1]["id"], "search", ",".join(request.selected_documents) or "-", "deny")
         else:
@@ -646,7 +651,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.get("/api/conversations")
     def conversations(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, list[str]]:
-        return {"conversation_ids": sessions.list_conversations(identity[1]["id"])}
+        result = {"conversation_ids": sessions.list_conversations(identity[1]["id"])}
+        revalidate_identity(identity)
+        return result
 
     @app.get("/api/conversations/{conversation_id}")
     def conversation(conversation_id: str, identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, object]:
@@ -665,6 +672,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                               "citations": [], "mode": "redacted"})
             else:
                 turns.append(turn)
+        revalidate_identity(identity)
         return {"conversation_id": conversation_id, "turns": turns}
 
     @app.get("/api/conversations/{conversation_id}/export")
