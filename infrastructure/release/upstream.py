@@ -8,9 +8,12 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tarfile
 import tempfile
+
+from infrastructure.release.intake import MAX_EVIDENCE_BYTES
 
 CRANE_VERSION = "0.22.1"
 SYFT_VERSION = "1.57.1"
@@ -20,6 +23,30 @@ _IMAGE = re.compile(r"[a-z0-9][a-z0-9./_:-]*@sha256:([0-9a-f]{64})\Z")
 
 class UpstreamError(ValueError):
     """The local image or an approved upstream tool failed verification."""
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise UpstreamError("duplicate generated evidence key")
+        result[key] = value
+    return result
+
+
+def _read_generated_json(path: Path) -> object:
+    """Read only one bounded, regular tool output without following links."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise UpstreamError("generated evidence is not a regular file")
+        raw = stream.read(MAX_EVIDENCE_BYTES + 1)
+    if len(raw) > MAX_EVIDENCE_BYTES:
+        raise UpstreamError("generated evidence exceeds size limit")
+    try:
+        return json.loads(raw, object_pairs_hook=_unique_object)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise UpstreamError("invalid generated evidence JSON") from exc
 
 
 def _sha256(path: Path) -> str:
@@ -33,6 +60,8 @@ def _sha256(path: Path) -> str:
 def _write_new_json(path: Path, value: dict[str, object]) -> str:
     """Create one private evidence file without following a replaced path."""
     payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(payload) > MAX_EVIDENCE_BYTES:
+        raise UpstreamError("generated evidence exceeds size limit")
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     identity = os.fstat(fd)
     try:
@@ -163,10 +192,7 @@ def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
         raw_path = Path(directory) / "raw.json"
         _run([str(syft), str(archive), "--from", "docker-archive", "-o",
               f"cyclonedx-json@1.6={raw_path}", "-q"], timeout=300)
-        try:
-            sbom = json.loads(raw_path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise UpstreamError("invalid generated SBOM") from exc
+        sbom = _read_generated_json(raw_path)
     if _sha256(archive) != identity["archive_sha256"]:
         raise UpstreamError("image archive changed during inventory generation")
     if (not isinstance(sbom, dict) or sbom.get("bomFormat") != "CycloneDX" or

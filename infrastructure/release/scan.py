@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 
-from infrastructure.release.upstream import (_binary, _run, _sha256, _write_new_json,
+from infrastructure.release.upstream import (_binary, _read_generated_json, _run, _sha256, _write_new_json,
                                              validate_image_archive)
 
 TRIVY_VERSION = "0.76.2"
@@ -70,10 +70,7 @@ def generate_archive_scan(archive: Path, image_ref: str, output: Path,
               "--format", "json", "--output", str(raw_path), "--cache-dir", str(cache),
               "--skip-db-update", "--skip-java-db-update", "--skip-check-update",
               "--offline-scan", "--quiet"], timeout=600)
-        try:
-            report = json.loads(raw_path.read_text())
-        except (OSError, ValueError) as exc:
-            raise ScanError("invalid Trivy report") from exc
+        report = _read_generated_json(raw_path)
     if (not isinstance(report, dict) or report.get("SchemaVersion") != 2 or
             report.get("ArtifactType") != "container_image" or
             report.get("ArtifactName") != str(archive) or
