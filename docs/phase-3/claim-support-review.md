@@ -111,3 +111,10 @@ deck answer says “retrieve the fictional deck checklist” where the source sa
 would send it to the independent claim-support reviewer. A separate rerun of
 the 50 marker questions retained 40/40 expected answers and citations and
 10/10 denials. These are synthetic, internal checks and do not close AT-09.
+
+The procedure evaluation now refuses to overwrite the retained report when an
+expected source is missing, an extra source appears, or a no-answer denial
+fails. Three focused unit cases cover those outcomes. A repeat local Core/Qwen
+run at source commit `8770984` passed all four exact-source cases and the one
+deckhand denial. Its deck answer still says “retrieve” where the source says
+“use”; the independent reviewer must assess that wording and broader claims.
