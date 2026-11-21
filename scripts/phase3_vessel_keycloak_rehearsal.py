@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -17,7 +16,8 @@ import uuid
 
 import jwt
 
-from infrastructure.backup import BackupError, create_backup, generate_key, inspect_backup
+from infrastructure.backup import BackupError, create_backup, generate_key
+from infrastructure.deploy.vessel_identity_recovery import checked_realm_restore
 from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG
 from scripts.phase8_fleet_keycloak_rehearsal import (
     _ADMIN_ROTATE, _FLOW, _run, _verify_base64_mitigation,
@@ -219,15 +219,8 @@ def _backup_realm(source: Path, root: Path, archive: Path, key: Path) -> str:
 
 def _checked_restore(archive: Path, key: Path, destination: Path,
                      trusted_digest: str) -> None:
-    if not hmac.compare_digest(hashlib.sha256(archive.read_bytes()).hexdigest(),
-                               trusted_digest):
-        raise BackupError("vessel identity archive differs from trusted checkpoint")
-    manifest = inspect_backup(archive, key, destination)
-    if [row["name"] for row in manifest["files"]] != ["sovereign-realm.json"]:
-        raise BackupError("unexpected vessel identity export inventory")
-    realm = json.loads((destination / "sovereign-realm.json").read_text())
-    if realm.get("realm") != "sovereign" or not realm.get("users"):
-        raise BackupError("restored vessel realm or users are missing")
+    checked_realm_restore(archive, key, destination, trusted_digest,
+                          "sovereign")
 
 
 def _recover(root: Path, reference: str, keycloak: str, core: str,
