@@ -1,8 +1,10 @@
 # Signed vessel first-install candidate
 
-The new first-install entry point takes a verified schema-6 vessel bundle,
+The first-install entry point takes a verified signed vessel bundle,
 trusted public key, pinned crane binary, synthetic Console configuration,
-owner-only Core state and a separate lab credential. It requires a new private
+owner-only Core state and either a separate lab credential or a configured
+OIDC identity network. Schema-7 bundles also bind the model files and request
+identity to the signed inventory. It requires a new private
 installation root beneath a private parent. It copies and re-verifies the
 complete signed bundle and Console configuration into a release directory.
 Before creating the root, it requires the signed release to declare the
@@ -34,7 +36,7 @@ This page describes first activation and its interruption handling. The
 [coordinated encrypted recovery set](vessel-recovery-set.md) are implemented
 as separate synthetic paths. Versioned schema migrations and rollback across
 real application versions, database-at-rest encryption, key custody, real
-vessel identity/model/NAS integration, target hardware checks and independent
+approved vessel identity, model weights and NAS integration, target hardware checks and independent
 review remain open.
 
 ## Knowledge schema version boundary
@@ -91,12 +93,15 @@ versioned schema migration, target hardware and independent review remain open.
 and `reset-bootstrap`
 for the synthetic candidate. Every command requires explicit absolute paths
 for `--root`, `--trusted-key` and the pinned `--crane` binary. `install` also
-requires `--bundle`, `--console-config`, `--core-state` and
-`--lab-password-file`. It prints a small JSON result after success; errors
+requires `--bundle`, `--console-config`, `--core-state` and exactly one of
+`--lab-password-file` or `--identity-network`. It prints a small JSON result after success; errors
 exit nonzero. Stop and recover take an exclusive owner-only installation lock
 and reject a competing operator command. `recover` requires a clean stop and
-refuses residual old Docker resources. The command is not yet a vessel service
-unit or a production commissioning workflow.
+refuses residual old Docker resources. A separate
+[synthetic systemd boot unit](vessel-boot-service.md) can call the checked
+finish-stop, recover and status commands for an existing installation; it has
+not been enabled or reboot-tested on target hardware. Production commissioning
+remains open.
 
 `reconcile` addresses an interruption after a clean stop when new signed
 services started but their IDs were never committed to the active record. It
