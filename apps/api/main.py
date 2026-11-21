@@ -473,6 +473,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     @app.get("/api/security/incidents/{incident_id}/related")
     def security_related(incident_id: str,
                          identity: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
+        if not limiter.allow(f"security-related:{identity[0]}", maximum=30):
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                                "related alert rate limit reached")
         primary = next((item for item in security_incidents(incident_id=incident_id)
                         if item["incident_id"] == incident_id), None)
         if primary is None:
@@ -483,11 +486,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         except (ValueError, OverflowError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 "security alert source unavailable") from exc
-        candidates = security_incidents(since=since, until=until, limit=100)
+        candidates = (security_incidents(since=since, until=until, limit=100)
+                      if primary["event"]["asset_status"] == "known" else [])
         revalidate_identity(identity)
         result = related_alert_evidence(primary, candidates)
         result.update({"window_start": since.isoformat(), "window_end": until.isoformat(),
-                       "notice": "Only up to 100 supported alerts in this two-hour window were checked; this is not an exhaustive incident correlation."})
+                       "notice": "Only up to 100 supported alerts in this two-hour window were checked when the source was mapped; this is not an exhaustive incident correlation."})
         return result
 
     @app.post("/api/security/incidents/{incident_id}/explain")

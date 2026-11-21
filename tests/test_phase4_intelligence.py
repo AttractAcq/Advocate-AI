@@ -410,6 +410,11 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
             query = reader_type.return_value.alerts.call_args_list[-1].kwargs
             self.assertEqual(query["limit"], 100)
             self.assertEqual(query["until"] - query["since"], timedelta(hours=2))
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                for _ in range(29):
+                    self.assertEqual((await client.get(path, headers=admin)).status_code, 200)
+                self.assertEqual((await client.get(path, headers=admin)).status_code, 429)
 
     async def test_ambiguous_mapping_never_reaches_model(self):
         payload = json.loads(ASSETS.read_text())
