@@ -24,6 +24,18 @@ Keycloak storage, signing keys and local TLS under the deployment's protected
 backup and recovery process. The synthetic realm intentionally keeps direct
 password grant for scripted tests; it must not be copied into production.
 
+Core can now be configured with `SOVEREIGN_OIDC_ISSUER` and a private
+`SOVEREIGN_OIDC_CA_FILE` for a DNS-named HTTPS Keycloak realm on port 443. The
+CA file must be an absolute, owner-only regular file with one link and at most
+64 KiB. An HTTPS issuer without this explicit trust file, a CA file without an
+issuer, or a CA file paired with lab HTTP is refused at startup. The existing
+loopback HTTP realm remains available for fictional lab tests. Token validation
+still requires the Core audience, Console client, current local role and
+active user. This is Core-side trust configuration only: the signed vessel
+installer does not yet mount a site CA or provision Keycloak, TLS ingress,
+MFA, persistent identity storage or certificate renewal. Those need a reviewed
+site configuration and target-network tests before vessel use.
+
 ## Policy change workflow
 
 1. The owner or delegated management authority approves a vessel-specific

@@ -66,6 +66,20 @@ def _fixture_root_from_env() -> Path:
     return path
 
 
+def _validated_oidc_ca(path: Path) -> Path:
+    if (not path.is_absolute() or path.is_symlink() or not path.is_file()
+            or path.stat().st_uid != os.getuid() or path.stat().st_nlink != 1
+            or stat.S_IMODE(path.stat().st_mode) & 0o077
+            or not 0 < path.stat().st_size <= 64 * 1024):
+        raise ValueError("OIDC CA file must be a private regular file")
+    return path
+
+
+def _oidc_ca_from_env() -> Path | None:
+    value = os.environ.get("SOVEREIGN_OIDC_CA_FILE")
+    return _validated_oidc_ca(Path(value)) if value is not None else None
+
+
 @dataclass(frozen=True)
 class Settings:
     fixture_root: Path = ROOT / "fixtures"
@@ -78,6 +92,7 @@ class Settings:
     upload_root: Path | None = None
     audit_path: Path | None = None
     oidc_issuer: str | None = None
+    oidc_ca_file: Path | None = None
     embedding_endpoint: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma:300m"
     oidc_revocations: Path | None = None
@@ -103,6 +118,7 @@ class Settings:
             upload_root=Path(os.environ["SOVEREIGN_UPLOAD_ROOT"]) if os.environ.get("SOVEREIGN_UPLOAD_ROOT") else None,
             audit_path=Path(os.environ["SOVEREIGN_AUDIT_PATH"]) if os.environ.get("SOVEREIGN_AUDIT_PATH") else None,
             oidc_issuer=os.environ.get("SOVEREIGN_OIDC_ISSUER"),
+            oidc_ca_file=_oidc_ca_from_env(),
             embedding_endpoint=os.environ.get("SOVEREIGN_EMBEDDING_ENDPOINT", cls.embedding_endpoint),
             embedding_model=os.environ.get("SOVEREIGN_EMBEDDING_MODEL", cls.embedding_model),
             oidc_revocations=Path(os.environ["SOVEREIGN_OIDC_REVOCATIONS"]) if os.environ.get("SOVEREIGN_OIDC_REVOCATIONS") else None,
@@ -139,6 +155,10 @@ class SearchRequest(BaseModel):
 
 def create_app(settings: Settings | None = None, model: LocalModel | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    if settings.oidc_ca_file is not None:
+        if settings.oidc_issuer is None:
+            raise ValueError("OIDC CA requires an issuer")
+        _validated_oidc_ca(settings.oidc_ca_file)
     if settings.upload_root is not None:
         if (not settings.upload_root.is_absolute() or settings.upload_root.is_symlink() or
                 settings.upload_root.resolve() == settings.fixture_root.resolve() or
@@ -150,7 +170,9 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                            settings.history_db, settings.emergency_password_file)
     oidc = OidcVerifier(settings.oidc_issuer, settings.fixture_root / "roles.json",
                         revocations_path=settings.oidc_revocations or
-                        ROOT / "infrastructure/lab/runtime/phase3-identity/revoked-tokens.jsonl") if settings.oidc_issuer else None
+                        ROOT / "infrastructure/lab/runtime/phase3-identity/revoked-tokens.jsonl",
+                        allow_https_issuer=settings.oidc_ca_file is not None,
+                        ca_file=settings.oidc_ca_file) if settings.oidc_issuer else None
     limiter = LabRateLimiter()
     app = FastAPI(title="Sovereign Core synthetic lab", docs_url=None, redoc_url=None)
     app.state.sessions = sessions
