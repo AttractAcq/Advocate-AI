@@ -15,9 +15,13 @@ import tempfile
 import time
 import uuid
 
+import jwt
+
 from infrastructure.backup import BackupError, create_backup, generate_key, inspect_backup
 from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG
-from scripts.phase8_fleet_keycloak_rehearsal import _FLOW, _run, _verify_base64_mitigation
+from scripts.phase8_fleet_keycloak_rehearsal import (
+    _ADMIN_ROTATE, _FLOW, _run, _verify_base64_mitigation,
+)
 from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, _identity_material
 
 
@@ -111,6 +115,60 @@ def _flow(core: str, password: str, username: str, role: str) -> str:
             .replace('ca = "/etc/fleet-ca.pem"', 'ca = "/state/ca.pem"'))
     return json.loads(_run("docker", "exec", core, "python", "-c", code,
                            timeout=90))["token"]
+
+
+def _rotate(core: str, password: str, action: str, old_kid: str,
+            old_provider: str = "", new_kid: str = "") -> dict[str, object]:
+    script = (_ADMIN_ROTATE.replace("/realms/fleet", "/realms/sovereign")
+              .replace("/admin/realms/fleet", "/admin/realms/sovereign")
+              .replace("/etc/fleet-ca.pem", "/state/ca.pem")
+              .replace("synthetic-rotator", "synthetic-admin")
+              .replace("__ISSUER__", repr(ISSUER))
+              .replace("__PASSWORD__", repr(password))
+              .replace("__ACTION__", repr(action))
+              .replace("__OLD_KID__", repr(old_kid))
+              .replace("__OLD_PROVIDER__", repr(old_provider))
+              .replace("__NEW_KID__", repr(new_kid)))
+    return json.loads(_run("docker", "exec", core, "python", "-c", script,
+                           timeout=90))
+
+
+def _rehearse_rotation(core: str, password: str) -> dict[str, str]:
+    old_token = _flow(core, password, "lab-chief_engineer-1", "chief_engineer")
+    old_kid = jwt.get_unverified_header(old_token)["kid"]
+    added = _rotate(core, password, "add", old_kid)
+    new_kid = str(added["new_kid"])
+    new_token = _flow(core, password, "lab-chief_engineer-1", "chief_engineer")
+    if jwt.get_unverified_header(new_token)["kid"] != new_kid:
+        raise AssertionError("vessel token was not signed by new Keycloak key")
+    for token in (old_token, new_token):
+        if _api(core, token, "/api/me")[0] != 200:
+            raise AssertionError("Core rejected a token during signing-key overlap")
+    _rotate(core, password, "retire", old_kid,
+            str(added["old_provider"]), new_kid)
+    _run("docker", "restart", core)
+    for _ in range(30):
+        probe = subprocess.run([
+            "docker", "exec", core, "python", "-c",
+            "import httpx; assert httpx.get('http://127.0.0.1:18100/health', "
+            "trust_env=False, timeout=2).status_code == 200",
+        ], capture_output=True, timeout=5)
+        if probe.returncode == 0:
+            break
+        time.sleep(0.5)
+    else:
+        raise AssertionError("Core did not restart after Keycloak key retirement")
+    if _api(core, old_token, "/api/me")[0] != 401:
+        raise AssertionError("Core accepted a retired signing key")
+    if _api(core, new_token, "/api/me")[0] != 200:
+        raise AssertionError("Core rejected the current signing key")
+    sources_status, sources = _api(core, new_token, "/api/sources")
+    if (sources_status != 200 or
+            {row["collection"] for row in sources["sources"]} !=
+            {"engineering", "deck"}):
+        raise AssertionError("signing-key rollover changed source permissions")
+    return {"keycloak_rotation": "overlap-old-key-retired",
+            "retired_key": "denied", "source_scope": "role-restricted"}
 
 
 def _backup_realm(source: Path, root: Path, archive: Path, key: Path) -> str:
@@ -226,7 +284,9 @@ def _recover(root: Path, reference: str, keycloak: str, core: str,
             "revoked_core_token": "denied"}
 
 
-def rehearse(*, recovery: bool = False) -> dict[str, str]:
+def rehearse(*, recovery: bool = False, rotation: bool = False) -> dict[str, str]:
+    if recovery and rotation:
+        raise ValueError("recovery and key rotation use separate synthetic realms")
     suffix = uuid.uuid4().hex[:8]
     network = "vessel-keycloak-" + suffix
     app_network = "vessel-app-" + suffix
@@ -338,6 +398,8 @@ def rehearse(*, recovery: bool = False) -> dict[str, str]:
                 outcome.update(_recover(root, reference, keycloak, core, network,
                                         idp, data_volume, password, stale_archive,
                                         backup_key, revoked_token))
+            if rotation:
+                outcome.update(_rehearse_rotation(core, password))
             return outcome
         finally:
             subprocess.run(["docker", "rm", "-f", core, keycloak],
@@ -352,4 +414,7 @@ def rehearse(*, recovery: bool = False) -> dict[str, str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--recovery", action="store_true")
-    print(json.dumps(rehearse(recovery=parser.parse_args().recovery), sort_keys=True))
+    parser.add_argument("--rotation", action="store_true")
+    args = parser.parse_args()
+    print(json.dumps(rehearse(recovery=args.recovery, rotation=args.rotation),
+                     sort_keys=True))
