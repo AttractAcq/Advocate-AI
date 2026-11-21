@@ -47,8 +47,11 @@ These results do not establish production image approval or independent review.
 The final-head [PR #231](https://github.com/AttractAcq/Advocate-AI/actions/runs/44940070576)
 and [PR #232](https://github.com/AttractAcq/Advocate-AI/actions/runs/44940460173)
 runs also passed all 13 jobs. PR #232 exercised the stale-warning browser path.
-PRs #233–237 are separate stacked candidates; their final-head release and
-review evidence must be checked individually before integration.
+PRs #233–236 each passed 13 final-head CI jobs with retained signed three-image
+results; their exact run IDs and result hashes are in the blocker index. The
+feed-backed actual-image scenario added in PR #237 still needs a passing
+final-head result. All of these stacked candidates need independent review
+before integration.
 
 ## Claims to verify
 
