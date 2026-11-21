@@ -37,6 +37,15 @@ installer does not yet mount a site CA or provision Keycloak, TLS ingress,
 MFA, persistent identity storage or certificate renewal. Those need a reviewed
 site configuration and target-network tests before vessel use.
 
+The OIDC logout revocation log is opened through a checked local directory
+without following a final symlink. Reads deny authentication if the store is
+missing its directory, redirected, exposed, hard-linked, oversized or contains
+ambiguous or partial records. An append is durable before logout reports
+success; a failed append returns 503. This is a local tamper-detection boundary,
+not an independent revocation authority. The deployment must protect and back
+up the store, keep it across release changes, and test restart and restore
+behavior with real Keycloak tokens.
+
 ## Policy change workflow
 
 1. The owner or delegated management authority approves a vessel-specific
