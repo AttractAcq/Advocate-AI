@@ -104,25 +104,39 @@ def identity_record(identity: VesselIdentity) -> dict[str, str]:
     return {
         "mode": "oidc",
         "issuer": identity.issuer,
-        "ca_file": str(identity.ca_file),
+        "ca_file": str(identity.ca_file.parent.resolve() / identity.ca_file.name),
         "ca_sha256": hashlib.sha256(_private_regular(identity.ca_file,
                                                      maximum=64 * 1024)).hexdigest(),
-        "revocations_file": str(identity.revocations_file),
+        "revocations_file": str(identity.revocations_file.parent.resolve() /
+                                identity.revocations_file.name),
         "network_name": identity.network_name,
         "network_id": identity.network_id,
     }
 
 
-def identity_from_record(value: object, config: Path,
-                         state: Path) -> VesselIdentity:
-    """Refuse changed issuer, CA or network before resuming an installation."""
+def validate_identity_record_shape(value: object, state: Path) -> dict[str, str]:
+    """Validate a private identity record without requiring a live network."""
     expected = {"mode", "issuer", "ca_file", "ca_sha256", "revocations_file",
                 "network_name", "network_id"}
     if (not isinstance(value, dict) or set(value) != expected
             or any(not isinstance(item, str) for item in value.values())
             or value["mode"] != "oidc"
-            or not re.fullmatch(r"[0-9a-f]{64}", value["ca_sha256"])):
+            or not re.fullmatch(r"[0-9a-f]{64}", value["ca_sha256"])
+            or not re.fullmatch(r"[0-9a-f]{64}", value["network_id"])
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,63}",
+                                value["network_name"])
+            or value["network_name"].startswith("sovereign-synthetic-")
+            or value["ca_file"] != str(state.resolve() / "oidc-ca.pem")
+            or value["revocations_file"] != str(state.resolve() /
+                                                 "oidc-revocations.jsonl")):
         raise VesselIdentityError("invalid persisted vessel identity record")
+    return value
+
+
+def identity_from_record(value: object, config: Path,
+                         state: Path) -> VesselIdentity:
+    """Refuse changed issuer, CA or network before resuming an installation."""
+    value = validate_identity_record_shape(value, state)
     identity = preflight_vessel_identity(config, state, value["network_name"])
     if identity_record(identity) != value:
         raise VesselIdentityError("persisted vessel identity changed")
