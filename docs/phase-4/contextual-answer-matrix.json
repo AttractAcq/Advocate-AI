@@ -111,6 +111,6 @@
   "model": "qwen3.5:2b",
   "model_digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
   "schema": 1,
-  "source_commit": "0c41a5f82eb2a667c90cf9c070dc773b161fdc02",
-  "timestamp_utc": "2026-11-21T16:43:41.481897+00:00"
+  "source_commit": "011239fe9b530c17d4c955d78880cf9bc8dee136",
+  "timestamp_utc": "2026-11-21T16:48:05.784181+00:00"
 }
