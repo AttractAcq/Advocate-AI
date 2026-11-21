@@ -595,6 +595,59 @@ def _read_restore_intent(root: Path) -> dict[str, object]:
     return value
 
 
+def _partial_knowledge_resources(installation_id: str, data_volume: str,
+                                 restore_attempt: str,
+                                 containers: list[str], networks: list[str],
+                                 volumes: list[str]) -> str | None:
+    """Identify one interrupted Knowledge run before discarding its resources."""
+    if networks or len(containers) > 1:
+        raise VesselRecoveryError("partial restore has unexpected Docker resources")
+    sockets = [name for name in volumes if name != data_volume]
+    if (len(sockets) > 1 or any(not re.fullmatch(
+            r"sovereign-knowledge-[0-9a-f]{12}-socket", name)
+            for name in sockets)):
+        raise VesselRecoveryError("partial restore has unexpected Docker resources")
+    if data_volume in volumes:
+        _volume(data_volume, installation_id, "knowledge-data", create=False,
+                restore_attempt=restore_attempt)
+    run_name = sockets[0].removesuffix("-socket") if sockets else None
+    if run_name is not None:
+        _volume(sockets[0], installation_id, "knowledge-socket", create=False,
+                run_name=run_name)
+    if containers:
+        if run_name is None or data_volume not in volumes:
+            raise VesselRecoveryError("partial Knowledge container lacks its volumes")
+        container = containers[0]
+        try:
+            labels = json.loads(_docker("inspect", container, "--format",
+                                        "{{json .Config.Labels}}"))
+            mounts = json.loads(_docker("inspect", container, "--format",
+                                        "{{json .Mounts}}"))
+        except json.JSONDecodeError as exc:
+            raise VesselRecoveryError("invalid partial Knowledge metadata") from exc
+        if (not isinstance(labels, dict) or
+                labels.get("sovereign.synthetic.install") != installation_id or
+                labels.get("sovereign.synthetic.role") != "knowledge" or
+                labels.get("sovereign.synthetic.run") != run_name or
+                _docker("inspect", container, "--format", "{{.Name}}") !=
+                f"/{run_name}" or
+                _docker("inspect", container, "--format",
+                        "{{.HostConfig.NetworkMode}}") != "none" or
+                _docker("inspect", container, "--format",
+                        "{{json .HostConfig.PortBindings}}") not in ("null", "{}") or
+                not isinstance(mounts, list) or
+                any(sum(isinstance(item, dict) and
+                        item.get("Destination") == destination and
+                        item.get("Type") == "volume" and
+                        item.get("Name") == volume for item in mounts) != 1
+                    for destination, volume in
+                    (("/var/lib/postgresql/data", data_volume),
+                     ("/var/run/postgresql", sockets[0])))):
+            raise VesselRecoveryError("partial Knowledge container identity mismatch")
+        return container
+    return None
+
+
 def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
                                       receipt: Path, receipt_key: Path,
                                       *, discard_partial_data: bool) -> dict[str, str]:
@@ -631,15 +684,24 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
                                 scope, "--quiet")
         volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
                                volume=True)
-        if containers or networks or volumes not in ([], [value["data_volume"]]):
-            raise VesselRecoveryError("partial restore has unexpected Docker resources")
+        container = _partial_knowledge_resources(
+            value["installation_id"], value["data_volume"],
+            marker["restore_attempt"], containers, networks, volumes)
         if (_read_restore_intent(root) != marker or _read_intent(root) != intent):
             raise VesselRecoveryError("partial restore intent changed")
+        if container is not None:
+            _docker("rm", "-f", container)
+        for name in volumes:
+            if name != value["data_volume"]:
+                _volume(name, value["installation_id"], "knowledge-socket",
+                        create=False, run_name=name.removesuffix("-socket"))
+                _docker("volume", "rm", name)
         if volumes:
-            _volume(value["data_volume"], value["installation_id"],
-                    "knowledge-data", create=False,
-                    restore_attempt=marker["restore_attempt"])
-            _docker("volume", "rm", value["data_volume"])
+            if value["data_volume"] in volumes:
+                _volume(value["data_volume"], value["installation_id"],
+                        "knowledge-data", create=False,
+                        restore_attempt=marker["restore_attempt"])
+                _docker("volume", "rm", value["data_volume"])
         _assert_missing("volume", value["data_volume"])
         if (_scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet") or
                 _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
