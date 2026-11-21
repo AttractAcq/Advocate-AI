@@ -35,7 +35,9 @@ still requires the Core audience, Console client, current local role and
 active user. This is Core-side trust configuration only: the signed vessel
 installer does not yet mount a site CA or provision Keycloak, TLS ingress,
 MFA, persistent identity storage or certificate renewal. Those need a reviewed
-site configuration and target-network tests before vessel use.
+site configuration and target-network tests before vessel use. The
+[vessel identity integration contract](vessel-identity-integration.md) defines
+the required installer, network and recovery transition.
 
 The OIDC logout revocation log is opened through a checked local directory
 without following a final symlink. Reads deny authentication if the log or its
