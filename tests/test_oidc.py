@@ -67,6 +67,9 @@ class OidcTests(unittest.TestCase):
         self.assertIsNone(self.verifier.user_for(valid[:-1] + ("A" if valid[-1] != "A" else "B")))
         self.assertIsNone(self.verifier.user_for(self.token(aud="other-service")))
         self.assertIsNone(self.verifier.user_for(self.token(realm_access={"roles": ["deckhand"]})))
+        for invalid in ([], {"roles": "chief_engineer"},
+                        {"roles": ["chief_engineer", 7]}):
+            self.assertIsNone(self.verifier.user_for(self.token(realm_access=invalid)))
         self.assertIsNone(self.verifier.user_for(self.token(exp=int(time.time()) - 1)))
         self.policy["users"][0]["status"] = "revoked"
         self.roles.write_text(json.dumps(self.policy))
@@ -256,6 +259,19 @@ class OidcTests(unittest.TestCase):
         verifier = OidcVerifier(self.issuer, self.roles, transport=httpx.MockTransport(
             lambda request: httpx.Response(200, content=b" " * (256 * 1024 + 1))))
         self.assertIsNone(verifier.user_for(self.token()))
+
+    def test_duplicate_jwks_keys_and_fields_fail_closed(self) -> None:
+        key = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.private.public_key()))
+        key.update(kid="lab-key", alg="RS256", use="sig")
+        for content in (
+            json.dumps({"keys": [key, key]}).encode(),
+            (b'{"keys":[' + json.dumps(key).encode() + b'],"keys":[' +
+             json.dumps(key).encode() + b']}'),
+        ):
+            verifier = OidcVerifier(self.issuer, self.roles,
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, content=content)))
+            self.assertIsNone(verifier.user_for(self.token()))
 
 
 if __name__ == "__main__":

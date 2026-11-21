@@ -33,14 +33,14 @@ explicit trust file, a CA file without an
 issuer, or a CA file paired with lab HTTP is refused at startup. The existing
 loopback HTTP realm remains available for fictional lab tests. Token validation
 still requires the Core audience, Console client, current local role and
-active user. The signed vessel installer now checks an owner-only Core-state
-CA file, mounts the protected Core state read-write into Core for audit,
-history and revocation persistence, and verifies the
-configured Keycloak JWKS through that CA before OIDC activation. The
-synthetic signed-image
-rehearsals cover fictional TLS JWKS and a pinned local Keycloak. The installer
-does not provision Keycloak, a production TLS ingress, MFA enrollment,
-persistent identity storage or certificate renewal. Those need a reviewed
+active user. Malformed signed role claims and ambiguous JWKS key IDs or JSON
+fields deny authentication. The signed vessel installer now checks an
+owner-only Core-state CA file, mounts the protected Core state read-write into
+Core for audit, history and revocation persistence, and verifies the
+configured Keycloak JWKS through that CA before OIDC activation. The synthetic
+signed-image rehearsals cover fictional TLS JWKS and a pinned local Keycloak.
+The installer does not provision Keycloak, a production TLS ingress, MFA
+enrollment, persistent identity storage or certificate renewal. Those need a reviewed
 site configuration and target-network tests before vessel use. The
 [vessel identity integration contract](vessel-identity-integration.md) defines
 the required installer, network and recovery transition.
