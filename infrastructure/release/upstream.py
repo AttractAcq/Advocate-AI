@@ -58,11 +58,14 @@ def validate_image_archive(archive: Path, image_ref: str, crane: Path,
     _binary(crane, crane_sha256)
     if _run([str(crane), "version"]) != CRANE_VERSION:
         raise UpstreamError("unapproved crane version")
+    archive_sha256 = _sha256(archive)
     _run([str(crane), "validate", "--tarball", str(archive)], timeout=300)
     digest = _run([str(crane), "digest", "--tarball", str(archive)], timeout=300)
     if digest != f"sha256:{match.group(1)}":
         raise UpstreamError("saved image manifest does not match scanned digest")
-    return {"image_ref": image_ref, "archive_sha256": _sha256(archive),
+    if _sha256(archive) != archive_sha256:
+        raise UpstreamError("image archive changed during validation")
+    return {"image_ref": image_ref, "archive_sha256": archive_sha256,
             "manifest_digest": digest, "crane_version": CRANE_VERSION}
 
 
@@ -143,6 +146,8 @@ def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
             sbom = json.loads(raw_path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
             raise UpstreamError("invalid generated SBOM") from exc
+    if _sha256(archive) != identity["archive_sha256"]:
+        raise UpstreamError("image archive changed during inventory generation")
     if (not isinstance(sbom, dict) or sbom.get("bomFormat") != "CycloneDX" or
             sbom.get("specVersion") != "1.6" or
             not isinstance(sbom.get("metadata"), dict) or

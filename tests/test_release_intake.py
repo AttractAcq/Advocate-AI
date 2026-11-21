@@ -7,13 +7,64 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from infrastructure.release.intake import IntakeError, verify_intake
+from infrastructure.release.upstream import (UpstreamError, generate_resolved_sbom,
+                                             validate_image_archive)
 
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
 DIGEST = "a" * 64
 IMAGE = f"registry.example.invalid/fictional/identity@sha256:{DIGEST}"
+
+
+class ArchiveStabilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.archive = self.root / "image.tar"
+        self.archive.write_bytes(b"original synthetic archive")
+
+    def test_crane_validation_rejects_archive_changed_during_digest_read(self) -> None:
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return "0.22.1"
+            if argv[1] == "digest":
+                self.archive.write_bytes(b"changed synthetic archive")
+                return f"sha256:{DIGEST}"
+            return ""
+
+        with patch("infrastructure.release.upstream._binary"), \
+             patch("infrastructure.release.upstream._run", side_effect=run):
+            with self.assertRaisesRegex(UpstreamError, "changed during validation"):
+                validate_image_archive(self.archive, IMAGE, Path("/fake/crane"), "0" * 64)
+
+    def test_syft_inventory_rejects_archive_changed_during_catalog(self) -> None:
+        def run(argv, **kwargs):
+            if argv[0] == "/fake/crane":
+                return "0.22.1" if argv[1] == "version" else \
+                    f"sha256:{DIGEST}" if argv[1] == "digest" else ""
+            if argv[1] == "version":
+                return json.dumps({"version": "1.57.1"})
+            output = Path(next(value.split("=", 1)[1] for value in argv
+                               if value.startswith("cyclonedx-json@1.6=")))
+            output.write_text(json.dumps({
+                "bomFormat": "CycloneDX", "specVersion": "1.6",
+                "metadata": {"tools": {"components": [{"name": "syft", "version": "1.57.1"}]}},
+                "components": [{"bom-ref": "fictional", "name": "fictional"}],
+            }))
+            self.archive.write_bytes(b"changed synthetic archive")
+            return ""
+
+        with patch("infrastructure.release.upstream._binary"), \
+             patch("infrastructure.release.upstream._run", side_effect=run):
+            with self.assertRaisesRegex(UpstreamError, "changed during inventory generation"):
+                generate_resolved_sbom(self.archive, IMAGE, self.root / "sbom.json",
+                                       Path("/fake/crane"), "0" * 64,
+                                       Path("/fake/syft"), "0" * 64)
+        self.assertFalse((self.root / "sbom.json").exists())
 
 
 class ReleaseIntakeTests(unittest.TestCase):
