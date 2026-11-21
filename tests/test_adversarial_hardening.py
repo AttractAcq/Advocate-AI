@@ -13,7 +13,8 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from services.knowledge.ingestion import sync_manifest
 from services.intelligence.assets import AssetRegistry
-from services.intelligence.engine import normalize_alert, safe_incident_analysis
+from services.intelligence.engine import (normalize_alert, safe_incident_analysis,
+                                          supported_incident_times)
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "fixtures/phase-4/assets.json"
@@ -183,9 +184,31 @@ class AlertBoundaryTests(unittest.TestCase):
 
     def test_single_sentence_unsafe_model_outputs_rejected(self) -> None:
         self.assertTrue(safe_incident_analysis("The alert reported a synthetic event that requires verification."))
+        self.assertTrue(safe_incident_analysis("The switch reported a failed login at 10:15 UTC."))
+        self.assertFalse(safe_incident_analysis(
+            "The firewall reported five alerts within a 30-minute window."))
+        self.assertFalse(safe_incident_analysis(
+            "The firewall reported five alerts over half an hour."))
         for answer in CASES["unsafe_model_responses"]:
             with self.subTest(answer=answer):
                 self.assertFalse(safe_incident_analysis(answer))
+
+    def test_model_clock_times_must_come_from_cited_alerts(self) -> None:
+        cited = ["2026-11-15T10:00:00+00:00", "2026-11-15T10:35:00+00:00"]
+        self.assertTrue(supported_incident_times(
+            "The firewall reported alerts at 10:00 and 10:35 UTC.", cited))
+        self.assertTrue(supported_incident_times(
+            "The firewall reported at 2026-11-15T10:00:00+00:00.", cited))
+        self.assertFalse(supported_incident_times(
+            "The firewall reported an alert at 11:59 UTC.", cited))
+        self.assertTrue(supported_incident_times(
+            "The firewall reported an alert at 9:15 UTC.",
+            ["2026-11-15T09:15:00+00:00"]))
+        self.assertFalse(supported_incident_times(
+            "The firewall reported an alert at 9:16 UTC.",
+            ["2026-11-15T09:15:00+00:00"]))
+        self.assertFalse(supported_incident_times("Reported at 10:00 UTC.",
+                                                 ["2026-11-15T10:00:00"]))
 
 
 if __name__ == "__main__":
