@@ -592,17 +592,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "model is not available")
         if not request.message.strip():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "message is empty")
-        if request.conversation_id:
-            conversation_id = request.conversation_id
+        conversation_id = request.conversation_id or None
+        if conversation_id:
             stored = sessions.conversation(conversation_id, user_id)
             if not stored:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "conversation not found")
-        else:
-            try:
-                conversation_id, stored = sessions.create_conversation(user_id)
-            except OverflowError as exc:
-                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
-        if len(stored.turns) >= 20:
+        if conversation_id and len(stored.turns) >= 20:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "conversation limit reached")
 
         context: list[dict[str, object]] = []
@@ -651,7 +646,15 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             raise HTTPException(status.HTTP_403_FORBIDDEN, "source access changed")
         turn = {"message": request.message, "answer": answer, "citations": citations,
                 "mode": request.mode, "workspace": request.workspace}
-        sessions.add_turn(conversation_id, user_id, turn)
+        if conversation_id is None:
+            try:
+                conversation_id, _ = sessions.create_conversation(user_id)
+            except OverflowError as exc:
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+        try:
+            sessions.add_turn(conversation_id, user_id, turn)
+        except OverflowError as exc:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
         return {"conversation_id": conversation_id, **turn, "model": settings.model_name,
                 "tool_route": "synthetic_document_search" if request.mode == "documents" else "none"}
 

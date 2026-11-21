@@ -29,6 +29,14 @@ Core has no fallback model route. The responder and its canned answer exist only
 synthetic probe. This confirms local request routing, not inference quality or
 the production model service lifecycle.
 
+The retained PR #175–179 actual-image results report `denied-findings` for the
+Knowledge image, so those runs stopped before this synthetic probe. The image
+must pass the scan and the result must say `signed-and-verified` before treating
+the route as observed CI evidence. The CLI now fails if scan intake skips the
+rehearsal while retaining its scan artifact. The [PR #180 implementation-head
+result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603)
+meets that condition and records the signed model route and outage probe.
+
 An authenticated AV/IT administrator can call `GET /api/admin/model-readiness`
 to check whether the configured loopback service advertises the signed model
 ID at `/v1/models`. The request has a three-second timeout and a 64 KiB response

@@ -284,6 +284,30 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.json()["citations"], [])
         self.assertEqual(self.model.calls, [])
 
+    async def test_failed_local_model_does_not_create_empty_history(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        before = (await self.client.get("/api/conversations", headers=engineer)).json()["conversation_ids"]
+        self.model.fail = True
+        reply = await self.client.post("/api/chat", headers=engineer,
+                                       json={"mode": "general", "message": "synthetic outage"})
+        self.assertEqual(reply.status_code, 503)
+        after = (await self.client.get("/api/conversations", headers=engineer)).json()["conversation_ids"]
+        self.assertEqual(after, before)
+        persistent = create_app(Settings(fixture_root=self.fixtures,
+                                         lab_password="synthetic-test-passphrase",
+                                         history_db=self.fixtures / "persistent/history.db"),
+                                self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=persistent),
+                                     base_url="http://persistent") as client:
+            login = await client.post("/api/login", json={"user_id": "lab-chief_engineer-1",
+                                                      "password": "synthetic-test-passphrase"})
+            headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+            self.assertEqual((await client.post("/api/chat", headers=headers,
+                                                json={"mode": "general",
+                                                      "message": "synthetic outage"})).status_code, 503)
+            self.assertEqual((await client.get("/api/conversations", headers=headers)).json(),
+                             {"conversation_ids": []})
+
 
 class ModelBoundaryTests(unittest.TestCase):
     def test_only_loopback_model_endpoint(self) -> None:

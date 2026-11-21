@@ -328,7 +328,9 @@ def _rehearse_first_install(bundle: Path, update_bundle: Path,
         runtime = record["runtime"]
         model_route = _probe_vessel_model_route(runtime["core_id"], model_id)
         if model_route != {"result": "pass", "route": "container-loopback",
-                           "model": model_id, "outage": "failed-closed"}:
+                           "model": model_id,
+                           "readiness": "advertised-then-unavailable",
+                           "outage": "failed-closed"}:
             raise AssertionError("signed Core model request route failed")
         base_core_image = _run("docker", "inspect", runtime["core_id"],
                                "--format", "{{.Image}}")
@@ -567,11 +569,16 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
         expected_core = _image_id(bundle, "core", manifest["images"]["core"], crane)
         running_core = _run("docker", "inspect", runtime["core_id"],
                             "--format", "{{.Image}}")
+        with closing(sqlite3.connect(recovery_root / "restored" / "history.db")) as database:
+            expected_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
         with closing(sqlite3.connect(state / "history.db")) as database:
-            rows = database.execute("SELECT id FROM conversations").fetchall()
-        if len(rows) != 1:
-            raise AssertionError("clean restore lost conversation history")
-        history = _probe_vessel_history(runtime["core_id"], rows[0][0])
+            actual_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
+        if len(expected_ids) < 2 or actual_ids != expected_ids:
+            raise AssertionError("clean restore changed conversation history")
+        histories = [_probe_vessel_history(runtime["core_id"], identifier)
+                     for identifier in expected_ids]
         permissions = _probe_vessel_permissions(runtime["core_id"])
         if (result["result"] != "restored-and-activated" or
                 status["result"] != "healthy" or
@@ -579,7 +586,7 @@ def _rehearse_secure_vessel_restore(bundle: Path, trusted: Path, crane: Path,
                 result["installation_id"] != record["installation_id"] or
                 result["sources"] < 1 or result["passages"] < 1 or
                 running_core != expected_core or
-                history["turns"] != 1 or
+                any(history["turns"] != 1 for history in histories) or
                 permissions != {"engineer": "ENG-001-visible",
                                 "deckhand": "ENG-001-denied"} or
                 (state / "postgres.dump").exists() or
@@ -678,15 +685,21 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
             recovery / "staging")
         retry_status = status_vessel(retry_root, trusted, crane)
         retry_record = json.loads((retry_root / "vessel-state.json").read_text())
+        with closing(sqlite3.connect(recovery / "restored" / "history.db")) as database:
+            expected_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
         with closing(sqlite3.connect(retry_state / "history.db")) as database:
-            history_ids = database.execute("SELECT id FROM conversations").fetchall()
+            history_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
+        if len(expected_ids) < 2 or history_ids != expected_ids:
+            raise AssertionError("receipt-verified retry changed conversation history")
+        histories = [_probe_vessel_history(retry_record["runtime"]["core_id"], identifier)
+                     for identifier in expected_ids]
         if (retried["result"] != "restored-and-activated" or
                 retried["retry_of_attempt"] != restore_attempt or
                 retry_status["result"] != "healthy" or
                 retry_record["installation_id"] != value["installation_id"] or
-                len(history_ids) != 1 or
-                _probe_vessel_history(retry_record["runtime"]["core_id"],
-                                      history_ids[0][0])["turns"] != 1 or
+                any(history["turns"] != 1 for history in histories) or
                 (retry_state / "postgres.dump").exists()):
             raise AssertionError("receipt-verified retry did not restore healthy vessel")
         return {"result": "pass", "volume": "checked-and-discarded",
@@ -1075,11 +1088,14 @@ def main() -> None:
     parser.add_argument("--restic-sha256", required=True)
     parser.add_argument("--update-core-image", required=True)
     args = parser.parse_args()
-    print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
-                             args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache,
-                             args.restic, args.restic_sha256,
-                             args.update_core_image), sort_keys=True))
+    result = rehearse(args.output, args.crane, args.crane_sha256,
+                      args.syft, args.syft_sha256, args.trivy,
+                      args.trivy_sha256, args.trivy_cache,
+                      args.restic, args.restic_sha256,
+                      args.update_core_image)
+    print(json.dumps(result, sort_keys=True))
+    if result.get("three_image_bundle") != "signed-and-verified":
+        parser.exit(1, "three-image release: signed vessel rehearsal was not run\n")
 
 
 if __name__ == "__main__":
