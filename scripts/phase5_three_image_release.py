@@ -54,6 +54,7 @@ from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
 from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
+from scripts.phase5_vessel_oidc_rehearsal import rehearse as rehearse_vessel_oidc
 from scripts.synthetic_pg_fixture import fixture as synthetic_fixture, put as private_put
 from scripts.phase5_postgres_rehearsal import _restore as restore_postgres_dump
 from infrastructure.deploy.postgres_socket import ready as postgres_ready
@@ -1198,6 +1199,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                             root, restic,
                                             restic_sha256,
                                             verified["model"]["id"])
+                result["signed_vessel_oidc"] = rehearse_vessel_oidc(
+                    bundle, trusted, crane, root, restic, restic_sha256)
                 result["signed_vessel_clean_restore"] = \
                     _rehearse_secure_vessel_restore(bundle, trusted, crane, root,
                                                     restic, restic_sha256)
