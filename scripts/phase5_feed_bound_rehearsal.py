@@ -141,6 +141,9 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
                 captured["feed"]["snapshot_sha256"] != imported["sha256"] or
                 verify_vessel_recovery_receipt(receipt, receipt_public) != captured):
             raise AssertionError("signed feed recovery receipt did not bind snapshot")
+        # Clean activation preserves the installation ID and therefore needs
+        # the stopped source's data volume to be absent on this disposable host.
+        _run("docker", "volume", "rm", first["runtime"]["data_volume"])
         activate_vessel_recovery_set(
             bundle, trusted, crane, root / "console-config.json", receipt,
             receipt_public, password, restic, restic_sha256, restored,
