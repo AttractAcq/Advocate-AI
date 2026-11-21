@@ -18,6 +18,11 @@ then checks it again after Syft cataloging before writing the SBOM. A changed
 archive is rejected. The Trivy adapter likewise checks its archive and
 database hashes after scanning. These comparisons detect a changed artifact
 between the recorded stages; release media custody remains a separate control.
+Trivy writes its raw report inside a private temporary directory. The final
+scan and SBOM files are created exclusively without following a replaced
+output path, with private permissions; their returned hashes cover the bytes
+written. Local regressions insert links during both tool runs and verify that
+an unrelated file is not overwritten.
 
 For an already saved, approved local image archive:
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from infrastructure.release.intake import IntakeError, verify_intake
+from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import (UpstreamError, generate_resolved_sbom,
                                              validate_image_archive)
 
@@ -65,6 +66,71 @@ class ArchiveStabilityTests(unittest.TestCase):
                                        Path("/fake/crane"), "0" * 64,
                                        Path("/fake/syft"), "0" * 64)
         self.assertFalse((self.root / "sbom.json").exists())
+
+    def test_sbom_output_replacement_cannot_overwrite_another_file(self) -> None:
+        output = self.root / "sbom.json"
+        outside = self.root / "outside.txt"
+        outside.write_text("preserve this file")
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return json.dumps({"version": "1.57.1"})
+            raw = Path(next(value.split("=", 1)[1] for value in argv
+                            if value.startswith("cyclonedx-json@1.6=")))
+            raw.write_text(json.dumps({
+                "bomFormat": "CycloneDX", "specVersion": "1.6",
+                "metadata": {"tools": {"components": [{"name": "syft", "version": "1.57.1"}]}},
+                "components": [{"bom-ref": "fictional", "name": "fictional"}],
+            }))
+            output.symlink_to(outside)
+            return ""
+
+        identity = {"archive_sha256": hashlib.sha256(self.archive.read_bytes()).hexdigest()}
+        with patch("infrastructure.release.upstream.validate_image_archive", return_value=identity), \
+             patch("infrastructure.release.upstream._binary"), \
+             patch("infrastructure.release.upstream._run", side_effect=run):
+            with self.assertRaises(FileExistsError):
+                generate_resolved_sbom(self.archive, IMAGE, output, Path("/fake/crane"),
+                                       "0" * 64, Path("/fake/syft"), "0" * 64)
+        self.assertEqual(outside.read_text(), "preserve this file")
+
+    def test_trivy_raw_output_uses_private_directory(self) -> None:
+        output = self.root / "scan.json"
+        outside = self.root / "outside.txt"
+        outside.write_text("preserve this file")
+        cache = self.root / "cache" / "db"
+        cache.mkdir(parents=True)
+        (cache / "trivy.db").write_bytes(b"synthetic scanner database")
+        now = datetime.now(timezone.utc)
+        updated = (now - timedelta(hours=1)).isoformat()
+        next_update = (now + timedelta(days=1)).isoformat()
+        (cache / "metadata.json").write_text(json.dumps({
+            "Version": 2, "UpdatedAt": updated, "NextUpdate": next_update,
+        }))
+        report = {"SchemaVersion": 2, "ArtifactType": "container_image",
+                  "ArtifactName": str(self.archive), "Trivy": {"Version": "0.76.2"},
+                  "Metadata": {}, "Results": [{"Target": "fictional", "Vulnerabilities": []}],
+                  "CreatedAt": now.isoformat()}
+
+        def run(argv, **kwargs):
+            if argv[1] == "--version":
+                return "Version: 0.76.2"
+            raw = Path(argv[argv.index("--output") + 1])
+            self.assertEqual(raw.parent.stat().st_mode & 0o777, 0o700)
+            (self.root / "scan.json.raw.tmp").symlink_to(outside)
+            raw.write_text(json.dumps(report))
+            return ""
+
+        identity = {"archive_sha256": hashlib.sha256(self.archive.read_bytes()).hexdigest(),
+                    "manifest_digest": f"sha256:{DIGEST}"}
+        with patch("infrastructure.release.scan.validate_image_archive", return_value=identity), \
+             patch("infrastructure.release.scan._binary"), \
+             patch("infrastructure.release.scan._run", side_effect=run):
+            generated = generate_archive_scan(
+                self.archive, IMAGE, output, Path("/fake/crane"), "0" * 64,
+                Path("/fake/trivy"), "0" * 64, cache.parent)
+        self.assertEqual(outside.read_text(), "preserve this file")
+        self.assertEqual(generated["scan_sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
 
 
 class ReleaseIntakeTests(unittest.TestCase):

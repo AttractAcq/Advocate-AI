@@ -255,8 +255,20 @@ def rehearse(chromedriver: str, *, mfa: bool = False) -> dict[str, str]:
             if ready.returncode:
                 raise AssertionError("synthetic vessel Keycloak stopped before readiness")
             _verify_base64_mitigation(keycloak)
-            with urlopen("http://127.0.0.1:18080/", timeout=5) as response:
-                assert response.status == 200
+            console_error = "no response"
+            for _ in range(30):
+                try:
+                    with urlopen("http://127.0.0.1:18080/", timeout=2) as response:
+                        if response.status == 200:
+                            break
+                        console_error = f"HTTP {response.status}"
+                except OSError as error:
+                    console_error = str(error)
+                if _run("docker", "inspect", console, "--format", "{{.State.Running}}") != "true":
+                    raise AssertionError("synthetic vessel Console stopped before readiness")
+                time.sleep(0.5)
+            else:
+                raise AssertionError(f"synthetic vessel Console did not become ready: {console_error}")
             proxy = subprocess.Popen([
                 "sudo", "-n", str(Path.cwd() / ".venv/bin/python"), "-m",
                 "scripts.phase8_fleet_https_proxy", "--cert", str(console_cert),
