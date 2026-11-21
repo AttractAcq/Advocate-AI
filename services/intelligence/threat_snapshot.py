@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -183,6 +185,27 @@ def _store_directory(path: Path) -> None:
         raise ThreatSnapshotError("snapshot store must be an owner-only directory")
 
 
+@contextmanager
+def _locked_store(store: Path):
+    """Keep concurrent approved-media imports in issue-time order."""
+    path = store / ".snapshot-import.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                 0o600)
+    try:
+        metadata = os.fstat(fd)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
+                metadata.st_uid != os.getuid() or
+                stat.S_IMODE(metadata.st_mode) & 0o077):
+            raise ThreatSnapshotError("invalid snapshot import lock")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        current = path.lstat()
+        if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise ThreatSnapshotError("snapshot import lock changed")
+        yield
+    finally:
+        os.close(fd)
+
+
 def import_package(package: Path, store: Path, key: Ed25519PublicKey,
                    *, now: datetime | None = None) -> dict[str, object]:
     """Verify local media and replace the current snapshot atomically."""
@@ -192,26 +215,27 @@ def import_package(package: Path, store: Path, key: Ed25519PublicKey,
     payload, issued, _ = verify_package(raw, key)
     if issued > now.astimezone(timezone.utc) + timedelta(minutes=5):
         raise ThreatSnapshotError("snapshot issue time is in the future")
-    target = store / "snapshot.json"
-    if target.exists() or target.is_symlink():
-        prior, prior_issued, _ = verify_package(_read(target, MAX_PACKAGE_BYTES), key)
-        if issued <= prior_issued or payload["feed_id"] != prior["feed_id"]:
-            raise ThreatSnapshotError("snapshot rollback or feed change")
-    fd, temporary = tempfile.mkstemp(prefix=".snapshot-", dir=store)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, target)
-        directory_fd = os.open(store, os.O_RDONLY | os.O_DIRECTORY)
+    with _locked_store(store):
+        target = store / "snapshot.json"
+        if target.exists() or target.is_symlink():
+            prior, prior_issued, _ = verify_package(_read(target, MAX_PACKAGE_BYTES), key)
+            if issued <= prior_issued or payload["feed_id"] != prior["feed_id"]:
+                raise ThreatSnapshotError("snapshot rollback or feed change")
+        fd, temporary = tempfile.mkstemp(prefix=".snapshot-", dir=store)
         try:
-            os.fsync(directory_fd)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+            directory_fd = os.open(store, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         finally:
-            os.close(directory_fd)
-    finally:
-        if os.path.lexists(temporary):
-            os.unlink(temporary)
+            if os.path.lexists(temporary):
+                os.unlink(temporary)
     return {"feed_id": payload["feed_id"], "sha256": hashlib.sha256(raw).hexdigest(),
             "indicator_count": len(payload["indicators"])}
 

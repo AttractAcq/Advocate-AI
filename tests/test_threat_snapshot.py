@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+from unittest.mock import patch
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -92,6 +94,68 @@ class ThreatSnapshotTests(unittest.TestCase):
         source.write_text(json.dumps(bad))
         with self.assertRaises(ThreatSnapshotError):
             sign_payload(source, self.private, self.root / "bad-package.json")
+
+    def test_concurrent_imports_cannot_install_older_snapshot_last(self) -> None:
+        initial = self.package(self.payload(issued=self.now - timedelta(hours=3)), "initial")
+        import_package(initial, self.store, trusted_key(self.public), now=self.now)
+        older_payload = self.payload(issued=self.now - timedelta(hours=2))
+        older_payload["indicators"][0]["id"] = "older"
+        newer_payload = self.payload(issued=self.now - timedelta(hours=1))
+        newer_payload["indicators"][0]["id"] = "newer"
+        older = self.package(older_payload, "older")
+        newer = self.package(newer_payload, "newer")
+        entered = threading.Event()
+        release = threading.Event()
+        newer_done = threading.Event()
+        failures: list[Exception] = []
+        from services.intelligence import threat_snapshot
+        actual_replace = threat_snapshot.os.replace
+
+        def delayed_replace(source: str, destination: Path) -> None:
+            if b'"id":"older"' in Path(source).read_bytes():
+                entered.set()
+                if not release.wait(5):
+                    raise AssertionError("older import was not released")
+            actual_replace(source, destination)
+
+        def run(package: Path, *, signal: threading.Event | None = None) -> None:
+            try:
+                import_package(package, self.store, trusted_key(self.public), now=self.now)
+            except Exception as exc:
+                failures.append(exc)
+            finally:
+                if signal is not None:
+                    signal.set()
+
+        with patch.object(threat_snapshot.os, "replace", side_effect=delayed_replace):
+            first = threading.Thread(target=run, args=(older,))
+            second = threading.Thread(target=run, args=(newer,),
+                                      kwargs={"signal": newer_done})
+            first.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                second.start()
+                self.assertFalse(newer_done.wait(0.5),
+                                 "newer import bypassed the first import lock")
+            finally:
+                release.set()
+                first.join(5)
+                if second.ident is not None:
+                    second.join(5)
+        self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(ThreatSnapshotReader(self.store, self.public).status(now=self.now)["issued_at"],
+                         (self.now - timedelta(hours=1)).isoformat())
+
+    def test_import_refuses_linked_lock_without_touching_target(self) -> None:
+        target = self.root / "unrelated.txt"
+        target.write_text("leave this alone")
+        (self.store / ".snapshot-import.lock").symlink_to(target)
+        package = self.package(self.payload(), "linked-lock")
+        with self.assertRaises(OSError):
+            import_package(package, self.store, trusted_key(self.public), now=self.now)
+        self.assertEqual(target.read_text(), "leave this alone")
+        self.assertFalse((self.store / "snapshot.json").exists())
 
 
 class ThreatSnapshotApiTests(unittest.IsolatedAsyncioTestCase):
