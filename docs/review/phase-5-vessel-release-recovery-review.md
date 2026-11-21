@@ -9,9 +9,10 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #181](https://github.com/AttractAcq/Advocate-AI/pull/181), including
-their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
-the reviewer must identify the exact final tree tested. The main paths are:
+through [PR #192](https://github.com/AttractAcq/Advocate-AI/pull/192), plus this
+review-pack change, at a recorded final commit SHA. These are stacked, unmerged
+PRs; the reviewer must identify the exact final tree tested. A green CI job is
+not a review sign-off. The main paths are:
 
 | Boundary | Implementation | Focus |
 |---|---|---|
@@ -19,11 +20,14 @@ the reviewer must identify the exact final tree tested. The main paths are:
 | Signed compatibility | `infrastructure/release/bundle.py`, `infrastructure/release/upstream.py`, `infrastructure/containers/Core.Dockerfile`, `infrastructure/deploy/vessel_installer.py` | Version declarations in the signed manifest and hash-bound Core image labels; refusal of mismatch or unsupported formats before resource creation; whether Core code actually implements its labels |
 | Knowledge persistence | `infrastructure/deploy/knowledge_volume.py`, `services/knowledge/postgres_index.py` | Schema version, source/index comparison, role grants and data-volume ownership |
 | Core state and runtime | `infrastructure/deploy/vessel_runtime.py`, `services/policy/audit.py` | Private mounts, audit chain, conversation history and service health |
-| Encrypted recovery | `infrastructure/deploy/vessel_recovery_set.py` | Frozen snapshot, signed receipt, restic verification, clean activation, interrupted restore abandonment and retry |
+| Encrypted recovery | `infrastructure/deploy/vessel_recovery_set.py`, `infrastructure/deploy/vessel_installer.py` | Frozen snapshot, signed receipt, restic verification, clean activation, receipt-matched finish after database restore, attempt-labelled orphan runtime abandonment and clean retry |
 | Operator entry points | `scripts/vesselctl.py`, [switch runbook](../phase-5/vessel-release-switch.md), [recovery runbook](../phase-5/vessel-recovery-set.md) | Required inputs, refusal paths and operator-visible state |
 | Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks; review the engineer/deckhand API probe in PR #162 |
 | Signed model artifact and request route | `infrastructure/release/bundle.py`, `infrastructure/deploy/vessel_runtime.py`, `scripts/phase5_three_image_release.py`, [model bundle procedure](../phase-5/model-artifact-bundle.md) | Exact model tree and ID binding, stage capacity preflight, Core runtime configuration, container-loopback request, wrong-name refusal and outage behavior |
 | Model provenance declaration | [PR #181](https://github.com/AttractAcq/Advocate-AI/pull/181), `infrastructure/release/bundle.py`, [model bundle procedure](../phase-5/model-artifact-bundle.md) | Schema-8 strict signed declaration, schema-7 legacy acceptance, malformed source/revision refusal, and the boundary between custodian assertion and publisher or licence verification |
+| Release evidence gates | [PR #182](https://github.com/AttractAcq/Advocate-AI/pull/182), [PR #184](https://github.com/AttractAcq/Advocate-AI/pull/184), `scripts/phase5_product_image_rehearsal.py`, `scripts/phase8_fleet_release_rehearsal.py`, `.github/workflows/ci.yml` | Whether a denied image finding fails the job while retaining scan evidence, rather than reporting a green skipped rehearsal |
+| Boot and identity lab candidates | [PR #185](https://github.com/AttractAcq/Advocate-AI/pull/185), [PR #188](https://github.com/AttractAcq/Advocate-AI/pull/188), `infrastructure/deploy/vessel_boot_service.py`, [Keycloak triage](../phase-5/keycloak-finding-triage.md) | Systemd syntax versus actual boot, JVM mitigation and rebuilt image findings versus production image approval |
+| OpenFGA comparison only | [PR #192](https://github.com/AttractAcq/Advocate-AI/pull/192), `scripts/phase5_openfga_probe.py`, [adoption record](../phase-5/open-source-adoption.md) | Synthetic source-level parity, deny precedence, listing and revocation; OpenFGA is not a vessel enforcement point |
 
 ## Claims to verify
 
@@ -51,15 +55,26 @@ the reviewer must identify the exact final tree tested. The main paths are:
    restricted database credentials, preserves the recorded installation ID,
    audit trail and conversation history, and leaves the dump outside running
    Core state. Interrupted activation must retain inspectable evidence;
-   abandonment may delete only the exact partial volume identified by its
-   unique restore-attempt label. Retry uses a new private root.
-6. A schema-7 bundle binds the exact model file tree and request ID to its
+   abandonment may delete only the exact partial data volume and verified
+   containers, socket and network identified by the private restore-attempt
+   label. A completed database restore may finish only after its Core copy and
+   Knowledge row digest match the signed receipt. Retry uses a new private root.
+6. A schema-7 or schema-8 bundle binds the exact model file tree and request ID to its
    release signature. Before stage creation, the installer checks local free
    space for a complete staged copy plus reserve. Core receives that signed
    model ID and a fixed loopback endpoint; vessel status rejects configuration
    drift. The actual-image probe sends the signed ID through Core to a
    temporary responder, rejects a wrong requested name before that responder,
    and returns 503 after the responder stops.
+7. A crash after Core and Console health but before the active record leaves
+   no authority to treat those services as active. Explicit abandonment must
+   check the attempt label on each scoped resource before discarding it and
+   retain the private evidence. A changed Core policy copy must prevent the
+   separate completed-restore finish path from starting services.
+8. The isolated OpenFGA prototype must agree with the current Policy Engine
+   on fictional collection and document decisions and source listings, including
+   direct denies and revocation. This comparison does not authorise replacing
+   the Policy Engine or prove NAS ACL propagation or outage safety.
 
 These are implementation claims for the reviewer to challenge, not accepted
 security findings. The second Core image in CI has a distinct image identity
@@ -104,9 +119,14 @@ remain open.
 | Authenticated model advertisement | [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), `apps/api/model.py`, `apps/api/main.py`, `tests/test_core_api.py` | Local tests cover AV/IT-only loopback `/v1/models` readiness and 503 for wrong or malformed advertisements. [All 12 implementation-head jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44835630041) after a Fleet browser DNS retry, but the retained vessel result says `denied-findings`; the signed vessel readiness probe did not run. This is a control-plane signal, not a model inference or GPU acceptance test. |
 | Signed three-image vessel path restored | [PR #180](https://github.com/AttractAcq/Advocate-AI/pull/180) and [retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603) | The artifact reports `signed-and-verified`, zero unresolved Core, Console and Knowledge findings, model tamper refusal, signed request and outage behavior, release switch and rollback, initial and updated clean restore, and interrupted-restore retry. All 12 implementation-head CI jobs passed. |
 | Declared model provenance | [PR #181](https://github.com/AttractAcq/Advocate-AI/pull/181) and [implementation-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44847102926) | Local tests cover schema-8 signing and verification, rejection of a re-signed invalid source URL, immutable revision validation, and continued schema-7 acceptance. All 12 CI jobs passed; the retained signed vessel result is `signed-and-verified` with zero unresolved findings and passing install, route and recovery checks. The rehearsal asserts schema 8 and the exact fictional declaration. External source authentication remains open. |
+| Product and Fleet fail-on-skip gates | [PR #182 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850158932), [PR #184 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44851546537) | All 12 jobs passed on each head. The retained product result on #182 says `product_bundle=verified` and `combined_upload_restore=encrypted-snapshot-activated`, with zero unresolved Core and Console findings. The retained Fleet result on #184 says `fleet_bundle=verified`, with zero unresolved API and portal findings. Review the negative-path tests and failure artifact upload separately; a green result alone does not prove every denial path. |
+| Keycloak lab mitigation and rebuilt image | [PR #183 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282), [PR #188 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44856111038), [current scan summary](../phase-5/keycloak-lab-image-scan.json) | All 12 jobs passed on both heads. The rebuilt lab image still has six HIGH findings and zero CRITICAL findings. The interim JVM flag and a rebuilt image do not constitute production finding disposition or target-host qualification. |
+| Guarded boot unit | [PR #185 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44852396331) and [boot-unit procedure](../phase-5/vessel-boot-service.md) | All 12 jobs passed, including `systemd-analyze verify` for the rendered unit. No target boot, Docker socket authority or external model/identity readiness was exercised. |
+| Interrupted recovery windows | [PR #189 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44859199121), [PR #190 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44864540599), [PR #191 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44868689542) | The retained signed vessel results cover an interrupted networkless Knowledge container discarded under the matching attempt, a completed database restore finished only after Core and row-digest verification, and an orphan Core/Console runtime discarded after a post-health crash. Each run passed all 12 jobs. Inspect the retained `result.json` values and the denied wrong-attempt or tampered-Core probes; this does not prove recovery on a purchased host. |
+| OpenFGA source-permission prototype | [PR #192 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44870938985) and [adoption record](../phase-5/open-source-adoption.md) | All 12 jobs passed. The dedicated Linux job logs 30 role/collection checks, 48 user/document checks and 15 source listings, plus deny precedence and membership, collection and source revocation. This isolated in-memory comparison does not replace the current Policy Engine. |
 
-At the PR #181 implementation head, `make check` passed 421 tests with 16
-expected skips. For an independent reproduction, record the commit and
+At the PR #192 implementation head, `make check` passed 433 tests with 16
+expected skips. For an independent reproduction, record the final review-pack commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
 synthetic result artifact. Inspect the artifact and command logs, not only the
@@ -129,9 +149,14 @@ lab and retain the observed output, resource inventory and timing.
 | Name an unapproved model in a chat request, then stop the loopback responder | Confirm Core denies the name before forwarding and returns 503 after the responder stops, without a remote or fallback route |
 | Advertise a different model ID, return malformed or oversized metadata, or remove the model service | Check AV/IT readiness returns 503 while other roles remain denied; separately determine whether an actual prompt can be answered after a cold start |
 | Re-sign a model descriptor with a changed source URL, moving revision, or misleading licence claim | Verify schema-8 structure rejection where applicable; separately authenticate the publisher and assess the licence because a valid release signature only attests to the custodian's declaration |
+| Inject a severe finding into Core, Console, Fleet API or Fleet portal intake | Confirm the relevant release rehearsal fails its CI job, retains its scan and inventory artifacts, and does not report the skipped signed path as a success |
+| Boot a host with the rendered recovery unit | Verify non-root service identity, Docker socket authority, network order, stopped-state handling and external model/identity readiness on the target host; `systemd-analyze verify` alone does not settle these |
 | Add a labelled container, network, extra volume or different restore-attempt label | Check that cleanup and abandonment do not remove ambiguous resources |
-| Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate |
+| Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate. Include the three new restore windows: Knowledge container before database completion, complete database before Core/Console start, and services healthy before active record write |
+| Change the interrupted Core policy copy or a restore-attempt label before cleanup | Confirm `finish-incomplete-restore` refuses changed Core bytes and abandonment refuses a mismatched data, socket, container or network attempt label without deleting that resource |
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |
+| Compare OpenFGA source checks and listings against the current Policy Engine | Try direct document denies, role restrictions, revoked users, invalid classifications, membership and collection changes; record any parity gap without routing vessel access through OpenFGA |
+| Remove OpenFGA or its state during a shadow test | Confirm the production Policy Engine continues to enforce source permissions; separately design and test fail-closed behavior before any proposed enforcement migration |
 | Restore on a constrained or networked host | Measure actual disk, time and traffic behavior; compare with the proposed recovery objective |
 
 Report any test that cannot be run separately from a pass. In particular,
@@ -153,9 +178,11 @@ logs.
 |---|---|---|
 | B-07 signed release and recovery | Open | Approved media and keys, target-host install/rollback, clean recovery of database, configuration, identity and model within approved RTO/RPO |
 | B-08 independent assessment | Open | App, parser, retrieval, release and network testing by an appointed external reviewer, plus finding closure |
+| B-03 identity and document permissions | Open | Target NAS ACL mapping and propagation, offline identity topology, source-level bypass tests and independent review; the OpenFGA comparison remains a prototype |
 | B-09 target hardware | Deferred | Reference server, security host, NAS/UPS and vessel-fit rehearsal |
 | B-10 vessel authority | Open | Owner-approved data, role, retention, key custody and site scope |
-| B-11 distribution | Open | Qualified production image provenance, licence review and release-signing custody |
+| B-11 distribution | Open | Disposition of six HIGH lab Keycloak image findings, qualified production image provenance, licence review and release-signing custody |
+| B-12 company Fleet production | Open | Production OIDC portal login, per-customer scope, offline-import trust, licence/support lifecycle and independent review |
 
 Independent GitHub approval of the stacked PRs is a separate repository
 control. No reviewer identity, finding closure or gate sign-off is recorded by
