@@ -224,11 +224,11 @@ def _run_flow(api: str, flow: str) -> dict[str, object]:
     # Docker's embedded DNS can briefly return EAI_AGAIN while an application
     # network is settling. Retry only that transport error with a fresh PKCE
     # exchange; assertion and authorization failures still fail immediately.
-    for attempt in range(3):
+    for attempt in range(15):
         try:
             return json.loads(_run("docker", "exec", api, "python", "-c", flow))
         except RuntimeError as error:
-            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 2:
+            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 14:
                 raise
             time.sleep(1)
     raise AssertionError("unreachable PKCE retry state")
