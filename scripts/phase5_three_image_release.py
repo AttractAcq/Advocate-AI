@@ -57,6 +57,12 @@ from infrastructure.deploy.postgres_socket import ready as postgres_ready
 from services.policy.audit import verify as verify_audit
 
 ROLES = ("core", "console", "knowledge")
+SYNTHETIC_MODEL_PROVENANCE = {
+    "source_url": "https://example.invalid/synthetic-lab-model",
+    "revision": "0" * 40,
+    "publisher": "synthetic fixture",
+    "license_claim": "Synthetic lab only; no distribution claim",
+}
 
 _VESSEL_HISTORY_PROBE = """\
 import json,sys
@@ -956,13 +962,15 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                                   descriptors,
                                                   SUPPORTED_VESSEL_COMPATIBILITY,
                                                   crane=crane,
-                                                  model_id="synthetic-lab-model")
+                                                  model_id="synthetic-lab-model",
+                                                  model_provenance=SYNTHETIC_MODEL_PROVENANCE)
                 verified = verify_bundle(bundle, trusted)
-                if (verified != created or verified.get("schema") != 7 or
+                if (verified != created or verified.get("schema") != 8 or
                         verified.get("target") != "vessel" or
                         verified.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY or
                         set(verified.get("images", {})) != set(ROLES) or
-                        verified.get("model", {}).get("id") != "synthetic-lab-model"):
+                        verified.get("model", {}).get("id") != "synthetic-lab-model" or
+                        verified.get("model", {}).get("provenance") != SYNTHETIC_MODEL_PROVENANCE):
                     raise AssertionError("three-image vessel bundle verification failed")
                 result["three_image_bundle"] = "signed-and-verified"
                 result["model_artifact"] = "synthetic-bytes-signed-not-served"
@@ -1011,9 +1019,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                         update_descriptors,
                                         SUPPORTED_VESSEL_COMPATIBILITY,
                                         crane=crane,
-                                        model_id="synthetic-lab-model")
+                                        model_id="synthetic-lab-model",
+                                        model_provenance=SYNTHETIC_MODEL_PROVENANCE)
                 update_verified = verify_bundle(update_bundle, trusted)
-                if (update_verified.get("schema") != 7 or
+                if (update_verified.get("schema") != 8 or
                         update_verified.get("target") != "vessel" or
                         update_verified.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY or
                         set(update_verified.get("images", {})) != set(ROLES) or

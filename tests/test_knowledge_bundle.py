@@ -91,12 +91,48 @@ class KnowledgeBundleTests(unittest.TestCase):
     def identity(archive: Path, *args: object) -> dict[str, str]:
         return {"archive_sha256": digest(archive.read_bytes())}
 
-    def create(self, model_id: str | None = None) -> dict[str, object]:
+    def create(self, model_id: str | None = None,
+               model_provenance: dict[str, str] | None = None) -> dict[str, object]:
         with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake), \
                 patch("infrastructure.release.bundle.validate_image_archive", side_effect=self.identity):
             return create_knowledge_bundle(self.payload, self.bundle, self.private,
                                            "0.1.0", self.images, self.compatibility,
-                                           crane=self.root / "crane", model_id=model_id)
+                                           crane=self.root / "crane", model_id=model_id,
+                                           model_provenance=model_provenance)
+
+    @staticmethod
+    def provenance() -> dict[str, str]:
+        return {"source_url": "https://example.invalid/synthetic-model",
+                "revision": "a" * 40, "publisher": "synthetic fixture",
+                "license_claim": "Synthetic lab only"}
+
+    def test_signed_model_provenance_is_declared_and_validated(self) -> None:
+        (self.payload / "model").mkdir()
+        (self.payload / "model" / "weights.bin").write_bytes(b"fictional weights")
+        declaration = self.provenance()
+        manifest = self.create("synthetic-lab-model", declaration)
+        self.assertEqual(manifest["schema"], 8)
+        self.assertEqual(manifest["model"]["provenance"], declaration)
+        with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
+            self.assertEqual(verify_bundle(self.bundle, self.trusted), manifest)
+        value = json.loads((self.bundle / "release-manifest.json").read_bytes())
+        value["model"]["provenance"]["source_url"] = "http://untrusted.invalid/model"
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        (self.bundle / "release-manifest.json").write_bytes(raw)
+        (self.bundle / "release-manifest.sig").write_bytes(base64.b64encode(self.key.sign(raw)))
+        with patch("infrastructure.release.bundle.verify_intake", side_effect=self.intake):
+            with self.assertRaisesRegex(BundleError, "model provenance source"):
+                verify_bundle(self.bundle, self.trusted)
+
+    def test_model_provenance_requires_model_and_immutable_revision(self) -> None:
+        with self.assertRaisesRegex(BundleError, "requires a model ID"):
+            self.create(model_provenance=self.provenance())
+        (self.payload / "model").mkdir()
+        (self.payload / "model" / "weights.bin").write_bytes(b"fictional weights")
+        declaration = self.provenance()
+        declaration["revision"] = "moving-main"
+        with self.assertRaisesRegex(BundleError, "revision"):
+            self.create("synthetic-lab-model", declaration)
 
     def test_model_files_are_signed_with_exact_inventory(self) -> None:
         model = self.payload / "model"

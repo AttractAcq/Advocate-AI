@@ -46,7 +46,7 @@ _MODEL_ENDPOINT = "http://127.0.0.1:11434/v1"
 
 
 def _signed_model_id(manifest: dict[str, object]) -> str | None:
-    return manifest["model"]["id"] if manifest["schema"] == 7 else None
+    return manifest["model"]["id"] if manifest["schema"] in (7, 8) else None
 
 
 def _private_file(path: Path, *, maximum: int = 4096) -> None:
