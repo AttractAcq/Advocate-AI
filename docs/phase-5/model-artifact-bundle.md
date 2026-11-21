@@ -61,7 +61,10 @@ descriptor. These are custodian declarations, not proof of publisher identity,
 licence terms or redistribution approval. Schema-7 model bundles without this
 declaration remain readable for prior synthetic lab work. The schema-8 CI
 fixture uses fictional model bytes and an explicitly synthetic declaration;
-it cannot run inference.
+it cannot run inference. The [PR #181 implementation-head
+run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44847102926)
+verifies schema 8 and that declaration before the synthetic signed vessel
+rehearsal, which completed with `signed-and-verified`.
 
 Actual model selection, vLLM start, offline cold start and GPU capacity remain
 the target-lab gate B-02. Approved media, key custody, licence review and
