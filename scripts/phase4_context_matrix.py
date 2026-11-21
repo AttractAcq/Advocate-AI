@@ -47,7 +47,8 @@ def _follow(primary: dict[str, object], ordinal: int, *, timestamp: str,
 
 async def _case(name: str, fixture: dict[str, object], incident: dict[str, object],
                 *, expected_status: int, expected_citations: list[str],
-                expected_model_calls: int) -> dict[str, object]:
+                expected_model_calls: int,
+                excluded_prompt_ids: tuple[str, ...] = ()) -> dict[str, object]:
     raw = json.dumps(fixture, sort_keys=True, separators=(",", ":")).encode("utf-8")
     password = secrets.token_urlsafe(24)
     with tempfile.TemporaryDirectory(prefix="sovereign-phase4-matrix-") as directory:
@@ -74,6 +75,10 @@ async def _case(name: str, fixture: dict[str, object], incident: dict[str, objec
         "expected_citations": citations == expected_citations,
         "expected_model_calls": len(model.prompts) == expected_model_calls,
         "related_instructions_excluded": INJECTION not in prompt,
+        "cited_ids_supplied_to_model": (not prompt or all(
+            event_id in prompt for event_id in expected_citations)),
+        "excluded_ids_absent_from_prompt": all(
+            event_id not in prompt for event_id in excluded_prompt_ids),
         "output_has_no_injected_instruction": INJECTION not in body.get("analysis", ""),
     }
     return {"name": name, "fixture_sha256": hashlib.sha256(raw).hexdigest(),
@@ -109,7 +114,10 @@ async def run() -> dict[str, object]:
                     expected_status=200,
                     expected_citations=["lab-wazuh-forti-001"] + [
                         f"lab-wazuh-forti-follow-{ordinal:03d}"
-                        for ordinal in range(7, 2, -1)], expected_model_calls=1),
+                        for ordinal in range(7, 2, -1)], expected_model_calls=1,
+                    excluded_prompt_ids=("lab-wazuh-forti-follow-001",
+                                         "lab-wazuh-forti-follow-002",
+                                         "lab-wazuh-forti-follow-008")),
         await _case("switch_without_related_alerts", base, switch,
                     expected_status=200, expected_citations=["lab-wazuh-switch-002"],
                     expected_model_calls=1),
