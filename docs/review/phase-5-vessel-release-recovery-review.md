@@ -34,7 +34,7 @@ not a review sign-off. The main paths are:
 | Current identity and knowledge reads | [PR #216](https://github.com/AttractAcq/Advocate-AI/pull/216), [PR #223](https://github.com/AttractAcq/Advocate-AI/pull/223), [PR #224](https://github.com/AttractAcq/Advocate-AI/pull/224), `apps/api/main.py`, `apps/api/oidc.py`, `tests/test_phase3_knowledge.py`, `tests/test_document_upload_staging.py` | Malformed signed claims and duplicate signing keys; token revocation during knowledge reads and upload staging; no document response or residual quarantined upload after revocation |
 | Wazuh evidence and AV/IT scope | [PR #217](https://github.com/AttractAcq/Advocate-AI/pull/217) through [PR #220](https://github.com/AttractAcq/Advocate-AI/pull/220), [PR #222](https://github.com/AttractAcq/Advocate-AI/pull/222), `services/connectors/wazuh.py`, `services/intelligence/`, `apps/api/main.py`, [Phase 4 gate](../phase-4/gate.md) | Snapshotted CA trust, bounded same-source evidence, exact citations, model claim fallback, and token revocation during incident reads; live collection and analyst review remain separate |
 | Archive identity through release evidence | [PR #225](https://github.com/AttractAcq/Advocate-AI/pull/225), [PR #228](https://github.com/AttractAcq/Advocate-AI/pull/228), [PR #229](https://github.com/AttractAcq/Advocate-AI/pull/229), `infrastructure/release/upstream.py`, `infrastructure/release/scan.py`, [tooling record](../phase-5/upstream-release-tools.md) | Archive hash checked around crane validation and after Syft cataloging; Trivy raw output isolated in a private temporary directory, final evidence files created exclusively, and generated JSON bounded to the intake limit with duplicate-key rejection; same archive, digest and scan evidence signed into the candidate; approved binary/database provenance and media custody remain open |
-| Offline threat-feed mount and recovery | [PR #231](https://github.com/AttractAcq/Advocate-AI/pull/231) through [PR #237](https://github.com/AttractAcq/Advocate-AI/pull/237), `services/intelligence/threat_snapshot.py`, `infrastructure/deploy/vessel_threat_feed.py`, `infrastructure/deploy/vessel_runtime.py`, `infrastructure/deploy/vessel_recovery_set.py`, `scripts/phase5_feed_bound_rehearsal.py` | Signed package and publisher metadata; no indicator values in Core responses or model context; separate read-only store/key mounts; pinning across install, switch and restart; schema-4/5 recovery receipt binding to the exact snapshot/key; denial before Docker on changed inputs; synthetic rehearsal scope versus approved media, publisher key custody and target packet proof |
+| Offline threat-feed mount and recovery | [PR #231](https://github.com/AttractAcq/Advocate-AI/pull/231) through [PR #239](https://github.com/AttractAcq/Advocate-AI/pull/239), `services/intelligence/threat_snapshot.py`, `infrastructure/deploy/vessel_threat_feed.py`, `infrastructure/deploy/vessel_runtime.py`, `infrastructure/deploy/vessel_recovery_set.py`, `scripts/phase5_feed_bound_rehearsal.py` | Signed package and publisher metadata; no indicator values in Core responses or model context; separate read-only store/key mounts; pinning across install, switch and restart; schema-4/5 recovery receipt binding to the exact snapshot/key; denial before Docker on changed inputs; serial imports cannot replace a newer snapshot with an older one; synthetic rehearsal scope versus approved media, publisher key custody and target packet proof |
 
 The exact-head [PR #227](https://github.com/AttractAcq/Advocate-AI/actions/runs/44934518565),
 [PR #228](https://github.com/AttractAcq/Advocate-AI/actions/runs/44935262125)
@@ -49,9 +49,15 @@ and [PR #232](https://github.com/AttractAcq/Advocate-AI/actions/runs/44940460173
 runs also passed all 13 jobs. PR #232 exercised the stale-warning browser path.
 PRs #233–236 each passed 13 final-head CI jobs with retained signed three-image
 results; their exact run IDs and result hashes are in the blocker index. The
-feed-backed actual-image scenario added in PR #237 still needs a passing
-final-head result. All of these stacked candidates need independent review
-before integration.
+feed-backed actual-image scenario added in PR #237 passed all 13 final-head
+CI jobs in [run 44946229877](https://github.com/AttractAcq/Advocate-AI/actions/runs/44946229877).
+The downloaded three-image `result.json` SHA-256 is
+`8e46bd08f6a16d8f04295e51eadd75bca567f1bcb31f83eb90bf73ad2044fe6c`.
+It records a passing schema-4 feed-bound clean restore with stale feed status,
+withheld indicator values, signed healthy runtime and zero unresolved findings
+in the Core, Console and Knowledge image reports. All of these stacked
+candidates need independent review before integration.
+[PR #238](https://github.com/AttractAcq/Advocate-AI/actions/runs/44946359690) and [PR #239](https://github.com/AttractAcq/Advocate-AI/actions/runs/44946402194) each passed 13/13 final-head jobs. Their retained result SHA-256 values are `e63721f86095957f48b5133dd236dc6a8371e3e0fbccc719aa8498aac7b59181` and `67550e9d0fbb13c52fb1edd55c52936343e674dcd6b53907416f107277b8fa18`. Both include the same passing feed-bound clean restore and zero unresolved image findings; PR #239 additionally serializes feed imports in local concurrency tests.
 
 ## Claims to verify
 
