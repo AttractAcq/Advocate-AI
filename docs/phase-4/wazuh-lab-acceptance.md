@@ -32,6 +32,13 @@
 3. Restart Core and model. Search the same IDs through Sovereign. Reconcile input count, Wazuh alert count and Console evidence, including any duplicate or missing ID. An empty or estimated count is **not run**, not a pass.
 4. Enumerate Core's model tools and attempt disallowed firewall, switch, NAS and safety-system changes at application and network boundaries. Record denials. No equipment write is part of the Phase 4 API.
 
+## Offline threat snapshot proof (AT-22)
+
+1. Record the approved feed publisher, licence, Ed25519 public-key fingerprint, signing custody, media transfer and update cadence. Keep private keys and indicator values out of this worksheet.
+2. Import a signed fictional snapshot with the [offline procedure](offline-threat-intelligence.md). Confirm the AV/IT Security view shows its publisher, issue time, age and count without exposing indicator values; other crew roles and unauthenticated callers must be denied.
+3. Alter the package and repeat import; verify the existing snapshot remains intact. Attempt an older signed package and a changed feed ID; both must be denied. Age the installed package past seven days and verify the visible stale warning.
+4. Capture host routes and packet or flow data during import, status reads and aging. Confirm no public feed request or covert download. Record the test window and negative network evidence rather than inferring it from application code.
+
 ## Result record
 
-Record the build commit, Wazuh version, host/network configuration, fixture revision, tester, execution date, commands and redacted logs, screenshots, counts, deviations, defect IDs and independent reviewer decision. Mark each of T-018, AT-11, AT-12, AT-13 and AT-23 **pass**, **fail** or **not run** separately. Do not close [the Phase 4 gate](gate.md) on an unexecuted worksheet.
+Record the build commit, Wazuh version, host/network configuration, fixture revision, tester, execution date, commands and redacted logs, screenshots, counts, deviations, defect IDs and independent reviewer decision. Mark each of T-018, AT-11, AT-12, AT-13, AT-22 and AT-23 **pass**, **fail** or **not run** separately. Do not close [the Phase 4 gate](gate.md) on an unexecuted worksheet.

@@ -39,6 +39,7 @@ from services.intelligence.assets import AssetRegistry
 from services.intelligence.engine import (load_fixture_incidents, related_alert_evidence,
                                           safe_incident_analysis, supported_incident_times,
                                           supported_incidents)
+from services.intelligence.threat_snapshot import ThreatSnapshotError, ThreatSnapshotReader
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -110,6 +111,8 @@ class Settings:
     wazuh_ca_bundle: Path | None = None
     asset_registry: Path = ROOT / "fixtures/phase-4/assets.json"
     synthetic_alerts: Path = ROOT / "fixtures/phase-4/wazuh-alerts.json"
+    threat_snapshot_store: Path | None = None
+    threat_snapshot_key: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -134,6 +137,10 @@ class Settings:
             wazuh_indexer_endpoint=os.environ.get("SOVEREIGN_WAZUH_INDEXER_ENDPOINT"),
             wazuh_read_token=os.environ.get("SOVEREIGN_WAZUH_READ_TOKEN"),
             wazuh_ca_bundle=Path(os.environ["SOVEREIGN_WAZUH_CA_BUNDLE"]) if os.environ.get("SOVEREIGN_WAZUH_CA_BUNDLE") else None,
+            threat_snapshot_store=Path(os.environ["SOVEREIGN_THREAT_SNAPSHOT_STORE"])
+            if os.environ.get("SOVEREIGN_THREAT_SNAPSHOT_STORE") else None,
+            threat_snapshot_key=Path(os.environ["SOVEREIGN_THREAT_SNAPSHOT_KEY"])
+            if os.environ.get("SOVEREIGN_THREAT_SNAPSHOT_KEY") else None,
         )
 
 
@@ -191,6 +198,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     wazuh = (WazuhIndexerReader(settings.wazuh_indexer_endpoint, settings.wazuh_read_token,
                                ca_bundle=settings.wazuh_ca_bundle)
              if settings.wazuh_indexer_endpoint and settings.wazuh_read_token else None)
+    if bool(settings.threat_snapshot_store) != bool(settings.threat_snapshot_key):
+        raise ValueError("threat snapshot store and trusted key must be configured together")
+    threat_snapshot = (ThreatSnapshotReader(settings.threat_snapshot_store,
+                                            settings.threat_snapshot_key)
+                       if settings.threat_snapshot_store and settings.threat_snapshot_key else None)
 
     def security_incidents(*, since: datetime | None = None, until: datetime | None = None,
                            incident_id: str | None = None, limit: int = 50) -> list[dict[str, object]]:
@@ -458,6 +470,23 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                                 "local model route unavailable") from exc
         revalidate_identity(identity)
         return {"model": settings.model_name, "route": "advertised"}
+
+    @app.get("/api/security/threat-intel")
+    def security_threat_intel(
+            identity: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
+        if threat_snapshot is None:
+            result: dict[str, object] = {
+                "status": "unconfigured",
+                "warning": "No offline threat intelligence source is configured.",
+            }
+        else:
+            try:
+                result = threat_snapshot.status()
+            except (OSError, ThreatSnapshotError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                    "offline threat snapshot unavailable") from exc
+        revalidate_identity(identity)
+        return result
 
     @app.get("/api/security/incidents")
     def security_list(since: datetime | None = None, until: datetime | None = None,

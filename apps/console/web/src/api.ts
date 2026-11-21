@@ -19,6 +19,17 @@ export type AdminStatus = {
   write_tools: string[]
 }
 export type SecurityIncident = { incident_id: string; summary: string; severity: string; timestamp: string }
+export type ThreatIntelStatus = {
+  status: 'current' | 'stale' | 'missing' | 'unconfigured' | 'unavailable'
+  warning: string | null
+  feed_id?: string
+  publisher?: string
+  issued_at?: string
+  expires_at?: string
+  age_hours?: number
+  indicator_count?: number
+  sha256?: string
+}
 export type SecurityDetail = {
   incident_id: string
   summary: string
