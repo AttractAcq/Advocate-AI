@@ -107,12 +107,13 @@ def _api(core: str, token: str, path: str, method: str = "GET") -> tuple[int, ob
     return outcome["status"], outcome["body"]
 
 
-def _flow(core: str, password: str, username: str, role: str) -> str:
+def _flow(core: str, password: str, username: str, role: str,
+          *, ca_path: str = "/state/ca.pem") -> str:
     code = (_VESSEL_FLOW.replace("__ISSUER__", repr(ISSUER))
             .replace("__PASSWORD__", repr(password))
             .replace("__USER__", repr(username))
             .replace("__ROLE__", repr(role))
-            .replace('ca = "/etc/fleet-ca.pem"', 'ca = "/state/ca.pem"'))
+            .replace('ca = "/etc/fleet-ca.pem"', f'ca = {ca_path!r}'))
     return json.loads(_run("docker", "exec", core, "python", "-c", code,
                            timeout=90))["token"]
 

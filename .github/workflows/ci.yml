@@ -514,6 +514,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          docker pull "$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)"
           docker build -f infrastructure/containers/Core.Dockerfile \
             --build-arg SOVEREIGN_SYNTHETIC_RELEASE=second \
             -t sovereign-core:synthetic-v2 .
