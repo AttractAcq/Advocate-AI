@@ -30,6 +30,21 @@ CASES = (
 )
 
 
+def require_expected_outcomes(results: list[dict[str, object]]) -> None:
+    """Refuse to publish a passing-looking report with missing or extra sources."""
+    failures = []
+    for item in results:
+        expected = item["expected_document_id"]
+        cited = {entry["citation"]["document_id"] for entry in item["citations"]}
+        if expected is None:
+            if item["no_answer_denial"] is not True or cited:
+                failures.append(str(item["case_id"]))
+        elif cited != {expected} or item["expected_source_cited"] is not True:
+            failures.append(str(item["case_id"]))
+    if failures:
+        raise RuntimeError("procedure evaluation failed: " + ", ".join(failures))
+
+
 async def run() -> dict[str, object]:
     if not DATABASE.is_file():
         raise RuntimeError("build the synthetic Phase 3 index before evaluating Core")
@@ -70,6 +85,7 @@ async def run() -> dict[str, object]:
                                 "expected_document_id": expected, "answer": turn["answer"],
                                 "citations": citations, "expected_source_cited": matched,
                                 "no_answer_denial": denied if expected is None else None})
+    require_expected_outcomes(results)
     allowed = [item for item in results if item["expected_document_id"]]
     denied = [item for item in results if not item["expected_document_id"]]
     report = {
