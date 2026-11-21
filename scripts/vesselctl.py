@@ -14,7 +14,7 @@ from infrastructure.deploy.vessel_installer import (
 from infrastructure.deploy.vessel_recovery_set import (
     abandon_incomplete_vessel_restore, activate_vessel_recovery_set,
     create_vessel_recovery_set, restore_vessel_recovery_files,
-    retry_abandoned_vessel_restore,
+    finish_incomplete_vessel_restore, retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_release_switch import (
@@ -117,6 +117,16 @@ def main(argv: list[str] | None = None) -> None:
     activate.add_argument("--core-state", type=Path, required=True)
     activate.add_argument("--lab-password-file", type=Path, required=True)
     activate.add_argument("--staging-parent", type=Path, required=True)
+    finish_restore = commands.add_parser("finish-incomplete-restore")
+    finish_restore.add_argument("--root", type=Path, required=True)
+    finish_restore.add_argument("--trusted-key", type=Path, required=True)
+    finish_restore.add_argument("--crane", type=Path, required=True)
+    finish_restore.add_argument("--receipt", type=Path, required=True)
+    finish_restore.add_argument("--receipt-key", type=Path, required=True)
+    finish_restore.add_argument("--password-file", type=Path, required=True)
+    finish_restore.add_argument("--restic", type=Path, required=True)
+    finish_restore.add_argument("--restic-sha256", required=True)
+    finish_restore.add_argument("--staging-parent", type=Path, required=True)
     abandon = commands.add_parser("abandon-incomplete-restore")
     abandon.add_argument("--root", type=Path, required=True)
     abandon.add_argument("--trusted-key", type=Path, required=True)
@@ -202,6 +212,11 @@ def main(argv: list[str] | None = None) -> None:
             args.receipt, args.receipt_key, args.password_file, args.restic,
             args.restic_sha256, args.root, args.core_state,
             args.lab_password_file, args.staging_parent)
+    elif args.command == "finish-incomplete-restore":
+        result = finish_incomplete_vessel_restore(
+            args.root, args.trusted_key, args.crane, args.receipt,
+            args.receipt_key, args.password_file, args.restic,
+            args.restic_sha256, args.staging_parent)
     elif args.command == "abandon-incomplete-restore":
         result = abandon_incomplete_vessel_restore(
             args.root, args.trusted_key, args.receipt, args.receipt_key,

@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import tempfile
 import uuid
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -29,7 +30,8 @@ from infrastructure.deploy.vessel_runtime import start_signed_vessel_services
 from infrastructure.deploy.vessel_recovery_set import (
     abandon_incomplete_vessel_restore, activate_vessel_recovery_set,
     create_vessel_recovery_set, restore_vessel_recovery_files,
-    retry_abandoned_vessel_restore,
+    finish_incomplete_vessel_restore, retry_abandoned_vessel_restore,
+    VesselRecoveryError,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_installer import (
@@ -739,6 +741,81 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
                            capture_output=True, text=True, timeout=30)
 
 
+def _rehearse_completed_restore_finish(bundle: Path, trusted: Path,
+                                       crane: Path, root: Path,
+                                       restic: Path,
+                                       restic_sha256: str) -> dict[str, str]:
+    """Simulate process loss after database restore but before service start."""
+    recovery = root / "vessel-recovery"
+    install = root / "finish-recovery-install"
+    state = root / "finish-recovery-state"
+    receipt = recovery / "receipt.json"
+    receipt_key = recovery / "receipt-public.pem"
+    value = verify_vessel_recovery_receipt(receipt, receipt_key)
+    try:
+        with patch("infrastructure.deploy.vessel_recovery_set.start_signed_vessel_services",
+                   side_effect=SystemExit("synthetic process loss")):
+            try:
+                activate_vessel_recovery_set(
+                    bundle, trusted, crane, root / "console-config.json",
+                    receipt, receipt_key, recovery / "restic-password",
+                    restic, restic_sha256, install, state,
+                    root / "lab-password", recovery / "staging")
+            except SystemExit as exc:
+                if str(exc) != "synthetic process loss":
+                    raise
+            else:
+                raise AssertionError("synthetic restore interruption was not triggered")
+        if ((install / "vessel-state.json").exists() or
+                not (install / "vessel-restore-intent.json").is_file()):
+            raise AssertionError("interrupted restore has unexpected active state")
+        policy = state / "roles.json"
+        original = policy.read_bytes()
+        policy.write_bytes(original + b"\n")
+        try:
+            finish_incomplete_vessel_restore(
+                install, trusted, crane, receipt, receipt_key,
+                recovery / "restic-password", restic, restic_sha256,
+                recovery / "staging")
+        except VesselRecoveryError as exc:
+            if "partial Core bytes differ" not in str(exc):
+                raise
+        else:
+            raise AssertionError("tampered partial Core state was activated")
+        finally:
+            policy.write_bytes(original)
+        result = finish_incomplete_vessel_restore(
+            install, trusted, crane, receipt, receipt_key,
+            recovery / "restic-password", restic, restic_sha256,
+            recovery / "staging")
+        status = status_vessel(install, trusted, crane)
+        if (result["result"] != "restored-and-activated" or
+                result["installation_id"] != value["installation_id"] or
+                status["result"] != "healthy" or
+                (install / "vessel-restore-intent.json").exists() or
+                (state / "postgres.dump").exists()):
+            raise AssertionError("completed partial restore was not activated")
+        return {"result": "pass", "tampered_core": "denied",
+                "finish": "signed-and-healthy"}
+    finally:
+        active = install / "vessel-state.json"
+        if active.exists():
+            record = json.loads(active.read_text())
+            runtime = record["runtime"]
+            stop_runtime(RuntimeHandle(runtime["network_id"], runtime["core_id"],
+                                       runtime["console_id"]))
+            stop_knowledge(KnowledgeVolumeHandle(
+                runtime["knowledge_id"], runtime["socket_volume"],
+                runtime["data_volume"], runtime["knowledge_run"],
+                record["installation_id"]))
+            subprocess.run(["docker", "volume", "rm", runtime["data_volume"]],
+                           capture_output=True, text=True, timeout=30)
+        elif (install / "vessel-restore-intent.json").exists():
+            abandon_incomplete_vessel_restore(
+                install, trusted, receipt, receipt_key,
+                discard_partial_data=True)
+
+
 def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
                                     root: Path) -> dict[str, str]:
     """Simulate process loss before first activation and resume from intent."""
@@ -1080,6 +1157,9 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                                                     updated=True)
                 result["interrupted_restore_abandon"] = \
                     _rehearse_interrupted_restore_abandon(
+                        bundle, trusted, crane, root, restic, restic_sha256)
+                result["completed_restore_finish"] = \
+                    _rehearse_completed_restore_finish(
                         bundle, trusted, crane, root, restic, restic_sha256)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)

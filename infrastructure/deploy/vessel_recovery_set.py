@@ -22,10 +22,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from apps.api.auth import verify_history_format
-from infrastructure.deploy.container_runtime import RuntimeHandle, _docker, _image_id
+from infrastructure.deploy.container_runtime import RuntimeHandle, _docker, _image_id, stop_runtime
 from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, _credentials, _volume, start_signed_knowledge,
-    stop_knowledge,
+    stop_knowledge, probe_knowledge,
 )
 from infrastructure.deploy.vessel_installer import (
     _assert_missing, _cleanup_failed_install, _operation_lock, _owner_directory,
@@ -647,6 +647,156 @@ def _partial_knowledge_resources(installation_id: str, data_volume: str,
             raise VesselRecoveryError("partial Knowledge container identity mismatch")
         return container
     return None
+
+
+def _match_restored_core(state: Path, restored: Path) -> None:
+    """Require the interrupted Core copy to equal the authenticated snapshot."""
+    _owner_directory(state)
+    def inventory(root: Path, *, snapshot: bool) -> dict[str, Path]:
+        found: dict[str, Path] = {}
+        for item in root.rglob("*"):
+            name = item.relative_to(root).as_posix()
+            # Restore verifies these receipt-bound artifacts, but the normal
+            # activation copies neither into the running Core state.
+            if snapshot and name in ("postgres.dump", "sovereign-snapshot-manifest.json"):
+                continue
+            if len(found) >= 1024:
+                raise VesselRecoveryError("partial Core inventory is oversized")
+            found[name] = item
+        return found
+
+    expected = inventory(restored, snapshot=True)
+    actual = inventory(state, snapshot=False)
+    if set(actual) != set(expected):
+        raise VesselRecoveryError("partial Core inventory differs from recovery snapshot")
+    for name, item in actual.items():
+        source = expected[name]
+        details = item.lstat()
+        if (item.is_symlink() or details.st_uid != os.getuid() or
+                stat.S_IMODE(details.st_mode) !=
+                stat.S_IMODE(source.lstat().st_mode) or
+                item.is_dir() != source.is_dir() or
+                (item.is_file() and details.st_nlink != 1) or
+                not (item.is_dir() or item.is_file())):
+            raise VesselRecoveryError("partial Core metadata differs from recovery snapshot")
+        if item.is_file() and (details.st_size != source.stat().st_size or
+                               _sha256(item) != _sha256(source)):
+            raise VesselRecoveryError("partial Core bytes differ from recovery snapshot")
+
+
+def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
+                                     receipt: Path, receipt_key: Path,
+                                     password_file: Path, restic: Path,
+                                     restic_sha256: str,
+                                     staging_parent: Path) -> dict[str, object]:
+    """Finish only a fully restored, receipt-matched Knowledge candidate."""
+    _owner_directory(staging_parent)
+    with _operation_lock(root):
+        marker = _read_restore_intent(root)
+        intent = _read_intent(root)
+        value = verify_vessel_recovery_receipt(receipt, receipt_key)
+        if value["schema"] != 2:
+            raise VesselRecoveryError("finishing restore requires row-digest receipt")
+        if (marker["snapshot_id"] != value["snapshot_id"] or
+                marker["release"] != value["release"] or
+                marker["installation_id"] != value["installation_id"] or
+                intent["release"] != value["release"] or
+                intent["installation_id"] != value["installation_id"] or
+                intent["data_volume"] != value["data_volume"]):
+            raise VesselRecoveryError("restore intent differs from signed receipt")
+        if ((root / "vessel-state.json").exists() or
+                (root / "vessel-state.json").is_symlink() or
+                (root / "vessel-restore-abandoned.json").exists() or
+                (root / "vessel-restore-abandoned.json").is_symlink()):
+            raise VesselRecoveryError("restore is active or abandoned")
+        state = Path(intent["core_state"])
+        if (state.resolve().is_relative_to(root.resolve()) or
+                root.resolve().is_relative_to(state.resolve()) or
+                staging_parent.resolve().is_relative_to(root.resolve()) or
+                staging_parent.resolve().is_relative_to(state.resolve())):
+            raise VesselRecoveryError("restore paths overlap")
+        repository = Path(value["repository"])
+        if any(path.resolve().is_relative_to(repository.resolve()) or
+               repository.resolve().is_relative_to(path.resolve())
+               for path in (root, state, staging_parent)):
+            raise VesselRecoveryError("restore paths overlap encrypted repository")
+        stage = root / "vessel-releases" / value["release"]
+        _verify_stage(stage, trusted_key, value["release"])
+        scope = f"label=sovereign.synthetic.install={value['installation_id']}"
+        containers = _scoped_list("ps", "-a", "--no-trunc", "--filter", scope,
+                                  "--quiet")
+        networks = _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                                "--quiet")
+        volumes = _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                               volume=True)
+        container = _partial_knowledge_resources(
+            value["installation_id"], value["data_volume"],
+            marker["restore_attempt"], containers, networks, volumes)
+        sockets = [name for name in volumes if name != value["data_volume"]]
+        if container is None or len(sockets) != 1:
+            raise VesselRecoveryError("completed Knowledge runtime is absent")
+        knowledge = KnowledgeVolumeHandle(
+            container, sockets[0], value["data_volume"],
+            sockets[0].removesuffix("-socket"), value["installation_id"])
+        probe_knowledge(knowledge)
+        with tempfile.TemporaryDirectory(prefix=".finish-vessel-restore-",
+                                         dir=staging_parent) as temporary:
+            restored = Path(temporary) / "restored"
+            restore_vessel_recovery_files(receipt, receipt_key, password_file,
+                                          restic, restic_sha256, restored)
+            _match_restored_core(state, restored)
+            lab_password = Path(intent["lab_password_file"])
+            _state_options(state, lab_password, root)
+            _verify_knowledge_schema(knowledge)
+            database = _verify_database(stage / "bundle", trusted_key, crane,
+                                        knowledge, state, root)
+            if (database["sources"] != value["sources"] or
+                    database["passages"] != value["passages"] or
+                    database["knowledge_sha256"] != value["knowledge_sha256"]):
+                raise VesselRecoveryError("restored Knowledge differs from receipt")
+        if (_read_restore_intent(root) != marker or _read_intent(root) != intent or
+                _scoped_list("ps", "-a", "--no-trunc", "--filter", scope,
+                             "--quiet") != containers or
+                _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                             "--quiet") or
+                set(_scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                                 volume=True)) != set(volumes)):
+            raise VesselRecoveryError("partial restore changed during verification")
+        _verify_stage(stage, trusted_key, value["release"])
+        probe_knowledge(knowledge)
+        services: RuntimeHandle | None = None
+        try:
+            services = start_signed_vessel_services(
+                stage / "bundle", trusted_key, crane, stage / "console-config.json",
+                state, lab_password, root, knowledge, value["installation_id"])
+            _write_state(root, _state_payload(
+                value["release"], value["installation_id"], state, lab_password,
+                services, knowledge))
+        except Exception:
+            try:
+                (root / "vessel-state.json").unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                raise VesselRecoveryError(
+                    "finish failed; active record could not be cleared; runtime retained"
+                ) from cleanup_error
+            if services is not None:
+                try:
+                    stop_runtime(services)
+                except Exception as cleanup_error:
+                    raise VesselRecoveryError(
+                        "finish failed; service cleanup incomplete"
+                    ) from cleanup_error
+            raise
+        for name in ("vessel-restore-intent.json", "vessel-intent.json"):
+            try:
+                (root / name).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return {"result": "restored-and-activated", "active": value["release"],
+                "installation_id": value["installation_id"],
+                "sources": database["sources"], "passages": database["passages"],
+                "audit_count": value["audit_count"],
+                "recovered_attempt": marker["restore_attempt"]}
 
 
 def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
