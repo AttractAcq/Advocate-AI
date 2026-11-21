@@ -2,6 +2,11 @@
 
 The public `main` branch is published at [AttractAcq/Advocate-AI](https://github.com/AttractAcq/Advocate-AI). The [CI workflow](../../.github/workflows/ci.yml) runs the synthetic lab and Core tests, builds the Console, scans full Git history with Gitleaks, verifies the Python lock, and audits Python/npm dependencies on pull requests. Gitleaks 8.24.3 is downloaded with a pinned SHA-256 because its GitHub Action failed on the initial root-commit range. The dependency gate checks `uv.lock` and the hashed `requirements.lock` with pip-audit, plus `package-lock.json` with npm audit. [Dependabot](../../.github/dependabot.yml) monitors GitHub Actions, Python and npm manifests. Actions are versioned or pinned in the workflow; before a production release, resolve all remaining action tags to full commit SHAs and review action provenance.
 
+CI groups runs by pull request and cancels an older run when that PR receives a
+new push. Main-branch and manual runs use unique run IDs, so a later run does
+not cancel them. Reviewers should use checks on the final PR head; an earlier
+cancelled run is not release evidence.
+
 The `main` protection rule is active: pull requests, one independent approving review, dismissal of stale approvals, approval after the last push, strict `quality`, `secrets` and `dependency-review` checks, no force pushes or deletions, administrator enforcement, linear history and conversation resolution. The GitHub API was used to confirm the saved settings. Add valid CODEOWNERS identities for security-sensitive paths when reviewers are known. Review repository secret-scanning and push-protection availability before G0A.
 
 Create release tags only from reviewed commits after CI passes. Phase 1 does not publish a software release. Signed bundles and rollback belong to Phase 5.
