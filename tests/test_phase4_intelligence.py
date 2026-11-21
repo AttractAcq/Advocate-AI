@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import os
+import ssl
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from apps.api.main import Settings, create_app
 from apps.api.model import ModelUnavailable
@@ -42,6 +48,42 @@ class FakeModel:
 
 
 class IntelligenceTests(unittest.TestCase):
+    def test_wazuh_ca_is_private_and_snapshotted_before_request(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,
+                                                "Synthetic Wazuh CA")])
+            certificate = (x509.CertificateBuilder().subject_name(name)
+                           .issuer_name(name).public_key(key.public_key())
+                           .serial_number(x509.random_serial_number())
+                           .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+                           .not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+                           .add_extension(x509.BasicConstraints(ca=True, path_length=None),
+                                          critical=True).sign(key, hashes.SHA256()))
+            ca = root / "ca.pem"
+            ca.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+            ca.chmod(0o600)
+            reader = WazuhIndexerReader(
+                "https://10.40.1.10:9200", "synthetic-read-token", ca_bundle=ca,
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, json=json.loads(ALERTS.read_text()))))
+            self.assertIsInstance(reader._tls_context, ssl.SSLContext)
+            ca.unlink()
+            ca.symlink_to(root / "other.pem")
+            self.assertEqual(len(reader.alerts(limit=3)), 3)
+            with self.assertRaises(ValueError):
+                WazuhIndexerReader("https://10.40.1.10:9200", "token", ca_bundle=ca)
+            ca.unlink()
+            ca.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+            ca.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, "unsafe Wazuh CA"):
+                WazuhIndexerReader("https://10.40.1.10:9200", "token", ca_bundle=ca)
+            ca.chmod(0o600)
+            os.link(ca, root / "alias.pem")
+            with self.assertRaisesRegex(ValueError, "unsafe Wazuh CA"):
+                WazuhIndexerReader("https://10.40.1.10:9200", "token", ca_bundle=ca)
+
     def test_fortigate_syslog_adapter_drops_unapproved_fields(self):
         parsed = parse_fortigate_syslog((ROOT / "fixtures/phase-4/fortigate-syslog.txt").read_text().strip())
         self.assertEqual(parsed["action"], "deny")

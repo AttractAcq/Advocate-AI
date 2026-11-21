@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
+import ssl
+import stat
 from urllib.parse import urlsplit
 
 import httpx
@@ -20,6 +23,28 @@ _INDEX_NAME = re.compile(r"wazuh-alerts-[A-Za-z0-9._-]{1,80}\Z")
 _DOCUMENT_ID = re.compile(r"[A-Za-z0-9._-]{1,80}\Z")
 SUPPORTED_DECODERS = ("fortigate", "switch-syslog", "host-agent")
 MAX_ALERT_RESPONSE = 2 * 1024 * 1024
+MAX_CA_BYTES = 64 * 1024
+
+
+def _private_ca_context(path: Path) -> ssl.SSLContext:
+    """Snapshot a private CA so a later path replacement cannot change trust."""
+    if not path.is_absolute():
+        raise ValueError("Wazuh CA path must be absolute")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW |
+                             os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(descriptor, "rb") as source:
+            details = os.fstat(source.fileno())
+            if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
+                    or details.st_nlink != 1 or stat.S_IMODE(details.st_mode) & 0o077
+                    or not 0 < details.st_size <= MAX_CA_BYTES):
+                raise ValueError("unsafe Wazuh CA file")
+            payload = source.read(MAX_CA_BYTES + 1)
+        if not 0 < len(payload) <= MAX_CA_BYTES:
+            raise ValueError("invalid Wazuh CA length")
+        return ssl.create_default_context(cadata=payload.decode("ascii"))
+    except (OSError, UnicodeError, ssl.SSLError) as exc:
+        raise ValueError("invalid Wazuh CA file") from exc
 
 
 def parse_incident_id(incident_id: str) -> tuple[str, str]:
@@ -57,6 +82,7 @@ class WazuhIndexerReader:
         self.endpoint = endpoint.rstrip("/")
         self.token = token
         self.ca_bundle = ca_bundle
+        self._tls_context = _private_ca_context(ca_bundle) if ca_bundle else None
         self.transport = transport
 
     def alerts(self, *, limit: int = 50, since: datetime | None = None,
@@ -87,7 +113,7 @@ class WazuhIndexerReader:
             "query": {"bool": {"filter": filters}} if filters else {"match_all": {}},
         }
         try:
-            with httpx.Client(timeout=10, verify=str(self.ca_bundle) if self.ca_bundle else True,
+            with httpx.Client(timeout=10, verify=self._tls_context or True,
                               trust_env=False, follow_redirects=False, transport=self.transport) as client:
                 with client.stream("POST", f"{self.endpoint}/wazuh-alerts*/_search", json=query,
                                    headers={"Authorization": f"Bearer {self.token}"}) as response:
