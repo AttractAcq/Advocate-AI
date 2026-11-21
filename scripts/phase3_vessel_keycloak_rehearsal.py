@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -119,6 +120,8 @@ def rehearse() -> dict[str, str]:
         (realm / "sovereign-realm.json").chmod(0o644)
         state = root / "state"
         shutil.copytree("fixtures", state)
+        subprocess.run([sys.executable, str(state / "generate.py")],
+                       check=True, capture_output=True, text=True, timeout=30)
         (state / "ca.pem").write_bytes(ca.read_bytes())
         (state / "ca.pem").chmod(0o600)
         (state / "revoked.jsonl").write_bytes(b"")
