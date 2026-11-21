@@ -380,6 +380,29 @@ class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tools", payload)
         self.assertIn("ENG-001", payload["messages"][1]["content"])
 
+    async def test_general_mode_does_not_claim_document_grounding(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def answer(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"choices": [{"message": {"content": "A general answer"}}]})
+
+        model = LocalModel("http://127.0.0.1:11434/v1", "qwen3.5:2b",
+                           transport=httpx.MockTransport(answer))
+        await model.complete("What is a hash?", [], general=True)
+        instruction = json.loads(requests[0].content)["messages"][0]["content"]
+        self.assertIn("general questions", instruction)
+        self.assertNotIn("supplied sources", instruction)
+
+    async def test_token_limited_answer_is_not_returned_as_complete(self) -> None:
+        model = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
+                "choices": [{"message": {"content": "An incomplete answer"},
+                             "finish_reason": "length"}]})))
+        with self.assertRaisesRegex(ModelUnavailable, "truncated"):
+            await model.complete("Explain hashes", [], general=True)
+
     async def test_timeout_is_distinct(self) -> None:
         def timeout(_: httpx.Request) -> httpx.Response:
             raise httpx.ReadTimeout("synthetic timeout")

@@ -34,8 +34,12 @@ for verifying API citation metadata and support for each claim.
 An [internal answer-by-answer review](claim-support-review.md) found six
 wording or support exceptions among the 40 allowed responses. The historical
 report does not retain structured citation objects or exact passages. The
-fresh Core API run records both and has five preliminary prose exceptions;
-neither review closes AT-09 or replaces independent assessment.
+19 November Core API run records both and has five preliminary prose
+exceptions. A [21 November concise-answer candidate](core-answer-evaluation.json)
+again records 40/40 expected markers and matching citations, plus 10/10
+no-answer denials; an internal reading found no unsupported additions in those
+40 marker answers. This narrow synthetic result does not close AT-09 or replace
+independent assessment of broader vessel questions.
 
 Phase 3 does not authorise vessel data. The G1 hardware/offline items from
 [Phase 2](../phase-2/gate.md) also remain open.
