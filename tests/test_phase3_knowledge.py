@@ -22,8 +22,10 @@ from services.policy.audit import AuditLog, verify
 class FakeModel:
     def __init__(self) -> None:
         self.contexts: list[list[dict[str, object]]] = []
+        self.questions: list[str] = []
 
     async def complete(self, question: str, context: list[dict[str, object]], *, general: bool = False) -> str:
+        self.questions.append(question)
         self.contexts.append(context)
         return "Synthetic answer [ENG-001 v1]"
 
@@ -145,6 +147,31 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(search_index(self.root, self.manifest, self.database, "engineer",
                                       "What actions are required?",
                                       document_ids={"ENG-002", "DEC-002"}), [])
+        overview = search_index(self.root, self.manifest, self.database, "engineer",
+                                "Summarize this", document_ids={"ENG-002"})
+        self.assertEqual([item["document_id"] for item in overview], ["ENG-002"])
+        self.assertEqual(search_index(self.root, self.manifest, self.database, "deckhand",
+                                      "Summarize this", document_ids={"ENG-002"}), [])
+        model_calls = len(self.model.questions)
+        summary = await self.client.post("/api/chat", headers=engineer,
+                                         json={"message": "Summarize this", "mode": "documents",
+                                               "selected_documents": ["ENG-002"]})
+        self.assertEqual([item["document_id"] for item in summary.json()["citations"]],
+                         ["ENG-002"])
+        self.assertTrue(summary.json()["answer"].startswith("Opening authorised excerpts only;"))
+        self.assertIn("Required action: Isolate the test equipment.", summary.json()["answer"])
+        self.assertEqual(len(self.model.questions), model_calls)
+        duplicate = await self.client.post("/api/chat", headers=engineer,
+                                           json={"message": "Summarize this", "mode": "documents",
+                                                 "selected_documents": ["ENG-002", "ENG-002"]})
+        self.assertTrue(duplicate.json()["answer"].startswith("Opening authorised excerpts only;"))
+        self.assertEqual([item["document_id"] for item in duplicate.json()["citations"]],
+                         ["ENG-002"])
+        self.assertEqual(len(self.model.questions), model_calls)
+        multi = await self.client.post("/api/chat", headers=engineer,
+                                       json={"message": "Summarize this", "mode": "documents",
+                                             "selected_documents": ["ENG-002", "DEC-002"]})
+        self.assertEqual(multi.json()["citations"], [])
         class ConstantEmbedder:
             model = "synthetic-generic-query"
 
@@ -159,6 +186,24 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
                                         "What actions are required?", embedder,
                                         document_ids={"ENG-002"})
         self.assertEqual([item["document_id"] for item in selected_vector], ["ENG-002"])
+        overview_vector = vector_search(self.root, self.manifest, self.database, "engineer",
+                                        "Summarize this", embedder, document_ids={"ENG-002"})
+        self.assertEqual([item["document_id"] for item in overview_vector], ["ENG-002"])
+
+    async def test_selected_overview_reads_only_opening_passages(self) -> None:
+        self.add("ENG-002", "engineering", "Opening passage. " * 250 + "LATE_MARKER")
+        self.save()
+        hits = search_index(self.root, self.manifest, self.database, "engineer",
+                            "Summarize this", limit=2, document_ids={"ENG-002"})
+        self.assertEqual([item["ordinal"] for item in hits], [0, 1])
+        self.assertNotIn("LATE_MARKER", " ".join(str(item["excerpt"]) for item in hits))
+        engineer = await self.login("engineer")
+        response = await self.client.post("/api/chat", headers=engineer,
+                                          json={"message": "Summarize this", "mode": "documents",
+                                                "selected_documents": ["ENG-002"]})
+        self.assertEqual([item["ordinal"] for item in response.json()["citations"]], [0, 1])
+        self.assertNotIn("LATE_MARKER", response.json()["answer"])
+        self.assertEqual(self.model.questions, [])
 
     async def test_knowledge_reads_discard_results_after_mid_request_logout(self) -> None:
         engineer = await self.login("engineer")

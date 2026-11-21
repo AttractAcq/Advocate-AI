@@ -21,7 +21,8 @@ from services.knowledge.indexed_retrieval import _terms, live_approved_rows
 from services.knowledge.ingestion import (_parse_verified_bytes, _valid_source,
                                           chunks, parse_local)
 from services.knowledge.manifest_io import load_manifest
-from services.knowledge.query_terms import search_terms as _search_terms
+from services.knowledge.query_terms import (search_terms as _search_terms,
+                                            selected_overview as _selected_overview)
 from services.policy.policy_file import load_policy
 
 
@@ -392,8 +393,9 @@ def search_index_pg(root: Path, manifest: Path, dsn: str, user_id: str, query: s
         raise ValueError("query must contain 1–1000 characters")
     if not isinstance(limit, int) or not 1 <= limit <= 10:
         raise ValueError("limit must be between 1 and 10")
-    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
-    if not wanted:
+    wanted = _search_terms(query)
+    overview = _selected_overview(wanted, document_ids)
+    if not wanted and not overview:
         return []
     allowed = _allowed(root, manifest, dsn, user_id, document_ids, collections)
     if not allowed:
@@ -401,11 +403,16 @@ def search_index_pg(root: Path, manifest: Path, dsn: str, user_id: str, query: s
     hits = []
     try:
         with _connect(dsn) as db:
-            for row in db.execute("""SELECT p.document_id,p.ordinal,p.text,s.sha256
+            statement = """SELECT p.document_id,p.ordinal,p.text,s.sha256
                 FROM knowledge_passages p JOIN knowledge_sources s USING (document_id)
-                WHERE p.document_id = ANY(%s) ORDER BY p.document_id,p.ordinal""", (list(allowed),)):
+                WHERE p.document_id = ANY(%s) ORDER BY p.document_id,p.ordinal"""
+            params: tuple[object, ...] = (list(allowed),)
+            if overview:
+                statement += " LIMIT %s"
+                params = (list(allowed), limit)
+            for row in db.execute(statement, params):
                 if (row["sha256"] == allowed[row["document_id"]]["sha256"]
-                        and wanted.issubset(_terms(row["text"]))):
+                        and (not wanted or wanted.issubset(_terms(row["text"])))):
                     source = allowed[row["document_id"]]
                     hits.append(_hit(source, row["ordinal"], row["text"], 1.0))
     except psycopg.Error as exc:
@@ -472,9 +479,13 @@ def vector_search_pg(root: Path, manifest: Path, dsn: str, user_id: str, query: 
                      collections: set[str] | None = None) -> list[dict[str, object]]:
     if not isinstance(query, str) or not query.strip() or len(query) > 1000 or not 1 <= limit <= 10:
         raise ValueError("invalid vector query")
-    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
-    if not wanted:
+    wanted = _search_terms(query)
+    overview = _selected_overview(wanted, document_ids)
+    if not wanted and not overview:
         return []
+    if overview:
+        return search_index_pg(root, manifest, dsn, user_id, query, limit=limit,
+                               document_ids=document_ids, collections=collections)
     allowed = _allowed(root, manifest, dsn, user_id, document_ids, collections)
     if not allowed:
         return []

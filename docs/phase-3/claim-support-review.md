@@ -130,3 +130,17 @@ those words are now removed from query terms, with direct retrieval regressions.
 A five-case local Core/Qwen rerun at source commit `1df6cf0` retains four
 exact-source citations and one deckhand denial. The deck “retrieve” wording expansion persists, so this
 change does not close the independent claim-support assessment.
+
+## Selected-document overview boundary
+
+A captain selecting ENG-006 and asking “Summarize this” previously retrieved no
+passage. A bounded one-source retrieval candidate now takes at most the first
+two permitted passages. Two local Qwen trials of a generated overview retained
+the correct structured citation but added unsupported wording, including a
+title/collection merge and action qualifiers absent from the excerpt. Core
+therefore returns the exact opening excerpts with citations and an explicit
+partial-coverage label for a generic request with one selected document; it
+does not call the model for this path. An unscoped generic request and a
+deckhand's selected engineering request still return no source. This is an
+extractive overview, not a validated generative summary. Human claim-support
+review and a safe full-document summarisation design remain open.

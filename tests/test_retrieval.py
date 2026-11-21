@@ -39,6 +39,13 @@ class SyntheticRetrievalTests(unittest.TestCase):
         self.assertEqual([hit["document_id"] for hit in hits], ["ENG-001"])
         self.assertEqual(search_fixture_documents(FIXTURES, "lab-captain-1", question,
                                                   document_ids={"ENG-001", "DEC-001"}), [])
+        self.assertEqual(search_fixture_documents(FIXTURES, "lab-captain-1",
+                                                  "Summarize this"), [])
+        overview = search_fixture_documents(FIXTURES, "lab-captain-1",
+                                            "Summarize this", document_ids={"ENG-001"})
+        self.assertEqual([hit["document_id"] for hit in overview], ["ENG-001"])
+        self.assertEqual(search_fixture_documents(FIXTURES, "lab-deckhand-1",
+                                                  "Summarize this", document_ids={"ENG-001"}), [])
 
     def test_allowed_source_has_verifiable_citation(self) -> None:
         hits = search_fixture_documents(FIXTURES, "lab-chief_engineer-1", "generator inspection")

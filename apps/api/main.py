@@ -29,6 +29,7 @@ from services.knowledge.paths import read_source_bytes
 from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows, preview_index, search_index
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
+from services.knowledge.query_terms import search_terms as _search_terms
 from services.knowledge.upload_staging import discard_upload, list_uploads, stage_upload
 from services.knowledge.ingestion import MAX_BYTES
 from services.policy.audit import AuditLog, verify as verify_audit
@@ -729,11 +730,14 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if conversation_id and len(stored.turns) >= 20:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "conversation limit reached")
 
+        selected_ids = set(request.selected_documents)
+        selected_overview = (request.mode == "documents" and len(selected_ids) == 1
+                             and not _search_terms(request.message))
         context: list[dict[str, object]] = []
         if request.mode == "documents":
             try:
-                options = {"limit": 5,
-                           "document_ids": set(request.selected_documents) if request.selected_documents else None,
+                options = {"limit": 2 if selected_overview else 5,
+                           "document_ids": selected_ids or None,
                            "collections": {request.workspace} if request.workspace else None}
                 if settings.knowledge_manifest and settings.knowledge_db:
                     context = search_index(settings.fixture_root, settings.knowledge_manifest,
@@ -753,12 +757,21 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             for hit in context:
                 record_decision(user_id, "retrieve", str(hit["document_id"]), "flagged")
             answer = "A permitted source contains instruction-like text. Its contents were withheld from the AI model; review the cited source directly."
+        elif selected_overview:
+            revalidate_identity(identity)
+            for hit in context:
+                record_decision(user_id, "retrieve", str(hit["document_id"]), "allow")
+            excerpts = [f"[Source {hit['document_id']} v{hit['version']}, passage {int(hit.get('ordinal', 0)) + 1}]\n{hit['excerpt']}"
+                        for hit in context]
+            answer = ("Opening authorised excerpts only; this is not a full-document summary.\n\n"
+                      + "\n\n".join(excerpts))
         else:
             revalidate_identity(identity)
             for hit in context:
                 record_decision(user_id, "retrieve", str(hit["document_id"]), "allow")
             try:
-                answer = await model.complete(request.message, context, general=request.mode == "general")
+                answer = await model.complete(request.message, context,
+                                              general=request.mode == "general")
             except ModelTimeout as exc:
                 raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
             except ModelUnavailable as exc:

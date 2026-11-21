@@ -50,5 +50,13 @@ independent assessor. The 50 marker cases also passed unchanged after the
 query normalization. This improves local retrieval coverage without closing
 the target identity, NAS or claim-support gates.
 
+For a generic request with exactly one selected document, the local candidate
+now returns at most the first two authorised passages as exact excerpts with
+citations and a visible partial-coverage label. It does not call the model.
+An unscoped generic request remains a no-source denial. This is a bounded
+opening overview, not a full-document or generative summary; the
+[claim-support review](claim-support-review.md) records why the local model
+candidate was not used for this path.
+
 Phase 3 does not authorise vessel data. The G1 hardware/offline items from
 [Phase 2](../phase-2/gate.md) also remain open.

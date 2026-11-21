@@ -9,7 +9,9 @@ import sqlite3
 from services.knowledge.acl import source_access
 from services.knowledge.paths import read_source_bytes
 from services.knowledge.manifest_io import load_manifest
-from services.knowledge.query_terms import search_terms as _search_terms, terms as _terms
+from services.knowledge.query_terms import (search_terms as _search_terms,
+                                            selected_overview as _selected_overview,
+                                            terms as _terms)
 from services.policy.policy_file import PolicyUnavailable, load_policy
 
 
@@ -85,8 +87,9 @@ def search_index(
         raise ValueError("query must contain 1–1000 characters")
     if not isinstance(limit, int) or not 1 <= limit <= 10:
         raise ValueError("limit must be between 1 and 10")
-    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
-    if not wanted:
+    wanted = _search_terms(query)
+    overview = _selected_overview(wanted, document_ids)
+    if not wanted and not overview:
         return []
     candidates = [row for row in approved_rows(root, manifest, database, user_id)
                   if (document_ids is None or row["document_id"] in document_ids)
@@ -96,16 +99,22 @@ def search_index(
     hits: list[tuple[float, str, int, dict[str, object]]] = []
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
         for source in candidates:
-            for ordinal, passage in db.execute(
-                    "SELECT ordinal,text FROM passages WHERE document_id=? ORDER BY ordinal",
-                    (source["document_id"],)):
-                present = _terms(passage)
-                common = wanted & present
-                if not common:
-                    continue
-                score = len(common) / len(wanted)
-                if score < 1.0:
-                    continue
+            statement = "SELECT ordinal,text FROM passages WHERE document_id=? ORDER BY ordinal"
+            params: tuple[str, ...] | tuple[str, int] = (source["document_id"],)
+            if overview:
+                statement += " LIMIT ?"
+                params = (source["document_id"], limit)
+            for ordinal, passage in db.execute(statement, params):
+                if wanted:
+                    present = _terms(passage)
+                    common = wanted & present
+                    if not common:
+                        continue
+                    score = len(common) / len(wanted)
+                    if score < 1.0:
+                        continue
+                else:
+                    score = 1.0
                 hit = {"document_id": source["document_id"], "version": source["version"],
                        "collection": source["collection"], "classification": source["classification"],
                        "owner": source["owner"], "sha256": source["sha256"],
