@@ -26,6 +26,15 @@ MAX_ALERT_RESPONSE = 2 * 1024 * 1024
 MAX_CA_BYTES = 64 * 1024
 
 
+def _unambiguous_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate Wazuh response field")
+        result[key] = value
+    return result
+
+
 def _private_ca_context(path: Path) -> ssl.SSLContext:
     """Snapshot a private CA so a later path replacement cannot change trust."""
     if not path.is_absolute():
@@ -123,8 +132,8 @@ class WazuhIndexerReader:
                         body.extend(chunk)
                         if len(body) > MAX_ALERT_RESPONSE:
                             raise ValueError("oversized Wazuh alert response")
-                    hits = json.loads(body)["hits"]["hits"]
-        except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
+                    hits = json.loads(body, object_pairs_hook=_unambiguous_object)["hits"]["hits"]
+        except (httpx.HTTPError, KeyError, ValueError, TypeError, UnicodeError) as exc:
             raise WazuhUnavailable("Wazuh alert search unavailable") from exc
         if not isinstance(hits, list) or len(hits) > limit:
             raise WazuhUnavailable("Wazuh returned invalid alert count")

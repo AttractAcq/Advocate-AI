@@ -284,6 +284,14 @@ class IntelligenceTests(unittest.TestCase):
             redirected.alerts()
         self.assertEqual(len(requests), 1)
 
+    def test_indexer_rejects_ambiguous_or_invalid_response_encoding(self):
+        for body in (b'{"hits":{"hits":[],"hits":[]}}', b"\xff"):
+            reader = WazuhIndexerReader(
+                "https://10.40.1.10:9200", "lab-read-token",
+                transport=httpx.MockTransport(lambda _: httpx.Response(200, content=body)))
+            with self.subTest(body=body), self.assertRaises(WazuhUnavailable):
+                reader.alerts()
+
 
 class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
