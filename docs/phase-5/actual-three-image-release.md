@@ -36,10 +36,12 @@ artifact; a green workflow can no longer mean that the vessel run was skipped.
 
 The retained PR #175–179 results were all `denied-findings` because the pinned
 Knowledge image still contained Alpine `libxml2` 2.13.9-r2. They do not prove
-the signed vessel run for those heads. A replacement Knowledge image that
-installs the fixed 2.13.9-r3 package is under qualification; the next run must
-record `signed-and-verified` and pass the signed vessel install, route, switch
-and recovery checks. The [vessel first installer](signed-vessel-first-install.md)
+the signed vessel run for those heads. [PR #180's implementation-head
+run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603)
+installs fixed `libxml2` 2.13.9-r3 and retains a `signed-and-verified` result
+with zero unresolved findings for all three images. Its signed install, model
+route, switch, rollback, initial and updated clean restore, and interrupted
+retry checks passed. The [vessel first installer](signed-vessel-first-install.md)
 now accepts this signed three-image bundle and checks the persistent database,
 runtime identities and schema version before recording activation. The
 [stopped release switch](vessel-release-switch.md) and

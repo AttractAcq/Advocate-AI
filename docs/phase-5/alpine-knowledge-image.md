@@ -47,3 +47,13 @@ UNKNOWN findings. Release intake returns `preflight-pass`. This is evidence
 for a candidate image, not approval to distribute it or a signed vessel
 bundle. The Core and Console archives in that run also pass release intake;
 the three-image signature and installer remain separate work.
+
+After a later vulnerability database update, the retained PR #175–179
+Knowledge scans found HIGH CVE-2026-86144 in inherited `libxml2` 2.13.9-r2.
+The assembled image now pins Alpine v3.24's [2.13.9-r3
+package](https://pkgs.alpinelinux.org/packages?arch=x86_64&branch=v3.24&name=libxml2). A local
+amd64 build confirmed the installed version; the [PR #180 Linux
+run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603)
+records zero unresolved findings in the exact Knowledge archive and completes
+the signed three-image vessel rehearsal. This remains synthetic release
+evidence, subject to target hardware and independent review.

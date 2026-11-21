@@ -69,25 +69,17 @@ upgrade compatibility between real software or database versions.
 PRs #175–179 all report `three_image_bundle=denied-findings`. Their green CI
 jobs prove that image intake refused a Knowledge image with a HIGH `libxml2`
 finding; they do not prove the signed vessel install, switch, model route or
-recovery paths on those heads. The latest confirmed successful signed vessel
-result must be identified from its retained artifact before a reviewer treats
-any older CI badge as actual-image evidence. The [build queue](../blockers-and-build-queue.md)
-tracks the [Knowledge image fix and CI exit gate](https://github.com/AttractAcq/Advocate-AI/pull/180)
-for skipped rehearsals.
-The first fixed-image [Linux run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44838868647)
-reached signed clean restore, then failed a stale assertion that counted only
-one conversation after the model route probe had created another. The candidate
-now compares every restored conversation ID with the encrypted pre-restore
-snapshot and checks each through Core. A full passing result is still pending.
-The next [Linux run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44840328911)
-reached the same restore check and exposed an empty conversation persisted by
-a failed model request. Core now creates a new conversation after a successful
-answer; the reviewer should challenge this on both ephemeral and persistent
-history. Full signed recovery evidence remains pending.
-The [next run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44841909742)
-passed clean restore and reached the interrupted-restore retry, which still
-assumed one conversation. That retry now compares the complete ID set with
-the same encrypted snapshot and checks every turn through Core.
+recovery paths on those heads. [PR #180](https://github.com/AttractAcq/Advocate-AI/pull/180)
+updates the Knowledge package and makes a skipped signed rehearsal fail CI.
+Three successive Linux runs exposed stale conversation-count assumptions and
+an empty history record from a failed model request; those findings are retained
+in the [build queue](../blockers-and-build-queue.md). The
+[PR #180 implementation-head result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603)
+is `signed-and-verified`, has zero unresolved findings for all three images,
+and reports passing signed install, model route, release switch, initial and
+updated clean restore, and interrupted retry. This supersedes the skipped
+actual-image evidence, while production model inference and external gates
+remain open.
 
 ## Reproducible evidence
 
@@ -109,8 +101,9 @@ the same encrypted snapshot and checks every turn through Core.
 | Signed model tree and staging capacity | [PR #175](https://github.com/AttractAcq/Advocate-AI/pull/175), [PR #176](https://github.com/AttractAcq/Advocate-AI/pull/176) and [model bundle procedure](../phase-5/model-artifact-bundle.md) | Local tests cover signed fictional bytes, tamper refusal and low-space refusal. The [PR #175](https://github.com/AttractAcq/Advocate-AI/actions/runs/44828966126) and [PR #176](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831181328) jobs passed, but retained vessel results say `denied-findings`; their signed staging paths did not run. |
 | Signed model request route | [PR #177](https://github.com/AttractAcq/Advocate-AI/pull/177) and [PR #178](https://github.com/AttractAcq/Advocate-AI/pull/178) | Core is configured with the signed model ID and container-loopback endpoint. The intended actual-image probe uses a temporary responder for request ID, wrong-name denial and 503 after shutdown. The [PR #177](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831684982) and [PR #178](https://github.com/AttractAcq/Advocate-AI/actions/runs/44833680520) jobs passed, but retained vessel results say `denied-findings`; the route probe did not run. |
 | Authenticated model advertisement | [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), `apps/api/model.py`, `apps/api/main.py`, `tests/test_core_api.py` | Local tests cover AV/IT-only loopback `/v1/models` readiness and 503 for wrong or malformed advertisements. [All 12 implementation-head jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44835630041) after a Fleet browser DNS retry, but the retained vessel result says `denied-findings`; the signed vessel readiness probe did not run. This is a control-plane signal, not a model inference or GPU acceptance test. |
+| Signed three-image vessel path restored | [PR #180](https://github.com/AttractAcq/Advocate-AI/pull/180) and [retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603) | The artifact reports `signed-and-verified`, zero unresolved Core, Console and Knowledge findings, model tamper refusal, signed request and outage behavior, release switch and rollback, initial and updated clean restore, and interrupted-restore retry. All 12 implementation-head CI jobs passed. |
 
-At the PR #179 implementation head, `make check` passed 417 tests with 16
+At the PR #180 implementation head, `make check` passed 419 tests with 16
 expected skips. For an independent reproduction, record the commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
