@@ -613,7 +613,7 @@ def _partial_knowledge_resources(installation_id: str, data_volume: str,
     run_name = sockets[0].removesuffix("-socket") if sockets else None
     if run_name is not None:
         _volume(sockets[0], installation_id, "knowledge-socket", create=False,
-                run_name=run_name)
+                run_name=run_name, restore_attempt=restore_attempt)
     if containers:
         if run_name is None or data_volume not in volumes:
             raise VesselRecoveryError("partial Knowledge container lacks its volumes")
@@ -629,6 +629,7 @@ def _partial_knowledge_resources(installation_id: str, data_volume: str,
                 labels.get("sovereign.synthetic.install") != installation_id or
                 labels.get("sovereign.synthetic.role") != "knowledge" or
                 labels.get("sovereign.synthetic.run") != run_name or
+                labels.get("sovereign.synthetic.restore_attempt") != restore_attempt or
                 _docker("inspect", container, "--format", "{{.Name}}") !=
                 f"/{run_name}" or
                 _docker("inspect", container, "--format",
@@ -694,7 +695,8 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
         for name in volumes:
             if name != value["data_volume"]:
                 _volume(name, value["installation_id"], "knowledge-socket",
-                        create=False, run_name=name.removesuffix("-socket"))
+                        create=False, run_name=name.removesuffix("-socket"),
+                        restore_attempt=marker["restore_attempt"])
                 _docker("volume", "rm", name)
         if volumes:
             if value["data_volume"] in volumes:

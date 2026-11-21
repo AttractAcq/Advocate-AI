@@ -127,7 +127,7 @@ def _migration_credential(root: Path, *, initialize: bool = False) -> tuple[Path
 def _volume(name: str, installation_id: str, role: str, *, create: bool,
             run_name: str | None = None,
             restore_attempt: str | None = None) -> None:
-    if restore_attempt is not None and (role != "knowledge-data" or
+    if restore_attempt is not None and (role not in ("knowledge-data", "knowledge-socket") or
             not _INSTALL.fullmatch(restore_attempt)):
         raise KnowledgeVolumeError("invalid Knowledge restore attempt")
     if create:
@@ -189,13 +189,15 @@ def start_signed_knowledge(bundle: Path, trusted_key: Path, crane: Path,
                 restore_attempt=restore_attempt)
         created_data = initialize
         _volume(socket_name, installation_id, "knowledge-socket", create=True,
-                run_name=run_name)
+                run_name=run_name, restore_attempt=restore_attempt)
         created_socket = True
         container = docker(
             "run", "-d", "--pull", "never", "--name", run_name,
             "--label", f"sovereign.synthetic.install={installation_id}",
             "--label", f"sovereign.synthetic.run={run_name}",
             "--label", "sovereign.synthetic.role=knowledge",
+            *(["--label", f"sovereign.synthetic.restore_attempt={restore_attempt}"]
+              if restore_attempt is not None else []),
             "--network", "none",
             "--mount", f"type=volume,source={data_name},target=/var/lib/postgresql/data",
             "--mount", f"type=volume,source={socket_name},target=/var/run/postgresql",

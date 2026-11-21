@@ -314,7 +314,8 @@ class VesselRecoverySetTests(unittest.TestCase):
         container = "c" * 64
         labels = {"sovereign.synthetic.install": identifier,
                   "sovereign.synthetic.role": "knowledge",
-                  "sovereign.synthetic.run": run}
+                  "sovereign.synthetic.run": run,
+                  "sovereign.synthetic.restore_attempt": "d" * 32}
         mounts = [{"Destination": "/var/lib/postgresql/data",
                    "Type": "volume", "Name": data},
                   {"Destination": "/var/run/postgresql",
@@ -339,6 +340,14 @@ class VesselRecoverySetTests(unittest.TestCase):
                 container)
         self.assertEqual(volume.call_count, 2)
         labels["sovereign.synthetic.role"] = "console"
+        with patch("infrastructure.deploy.vessel_recovery_set._volume"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker",
+                   side_effect=inspect):
+            with self.assertRaisesRegex(VesselRecoveryError, "identity mismatch"):
+                _partial_knowledge_resources(
+                    identifier, data, "d" * 32, [container], [], [data, socket])
+        labels["sovereign.synthetic.role"] = "knowledge"
+        labels["sovereign.synthetic.restore_attempt"] = "e" * 32
         with patch("infrastructure.deploy.vessel_recovery_set._volume"), \
              patch("infrastructure.deploy.vessel_recovery_set._docker",
                    side_effect=inspect):
@@ -375,7 +384,8 @@ class VesselRecoverySetTests(unittest.TestCase):
                    "installation_id": identifier, "data_volume": data}
         labels = {"sovereign.synthetic.install": identifier,
                   "sovereign.synthetic.role": "knowledge",
-                  "sovereign.synthetic.run": run}
+                  "sovereign.synthetic.run": run,
+                  "sovereign.synthetic.restore_attempt": attempt}
         mounts = [{"Destination": "/var/lib/postgresql/data",
                    "Type": "volume", "Name": data},
                   {"Destination": "/var/run/postgresql",

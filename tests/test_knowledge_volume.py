@@ -140,6 +140,21 @@ class KnowledgeVolumeTests(unittest.TestCase):
             with self.assertRaisesRegex(KnowledgeVolumeError, "identity mismatch"):
                 _volume(name, installation, "knowledge-data", create=False,
                         restore_attempt="c" * 32)
+        socket = "sovereign-knowledge-" + "c" * 12 + "-socket"
+        socket_metadata = {"Name": socket, "Driver": "local",
+                           "Labels": {"sovereign.synthetic.install": installation,
+                                      "sovereign.synthetic.role": "knowledge-socket",
+                                      "sovereign.synthetic.run": socket.removesuffix("-socket"),
+                                      "sovereign.synthetic.restore_attempt": "b" * 32}}
+        with patch("infrastructure.deploy.knowledge_volume.docker",
+                   return_value=json.dumps(socket_metadata)):
+            _volume(socket, installation, "knowledge-socket", create=False,
+                    run_name=socket.removesuffix("-socket"),
+                    restore_attempt="b" * 32)
+            with self.assertRaisesRegex(KnowledgeVolumeError, "identity mismatch"):
+                _volume(socket, installation, "knowledge-socket", create=False,
+                        run_name=socket.removesuffix("-socket"),
+                        restore_attempt="d" * 32)
 
 
 if __name__ == "__main__":
