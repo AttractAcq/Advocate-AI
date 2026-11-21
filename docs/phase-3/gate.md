@@ -41,5 +41,14 @@ no-answer denials; an internal reading found no unsupported additions in those
 40 marker answers. This narrow synthetic result does not close AT-09 or replace
 independent assessment of broader vessel questions.
 
+A [five-case procedure-action run](procedure-answer-evaluation.json) adds four
+non-marker action questions and one cross-role denial. It cites the intended
+source in all four permitted cases and denies the engineering source to a
+deckhand. One answer expands “use” to “retrieve” for a checklist; the
+[internal review](claim-support-review.md) records that wording for the
+independent assessor. The 50 marker cases also passed unchanged after the
+query normalization. This improves local retrieval coverage without closing
+the target identity, NAS or claim-support gates.
+
 Phase 3 does not authorise vessel data. The G1 hardware/offline items from
 [Phase 2](../phase-2/gate.md) also remain open.
