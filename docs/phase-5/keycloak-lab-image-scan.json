@@ -1,20 +1,15 @@
 {
   "status": "untriaged-lab-image-findings",
   "scan_date_utc": "2026-11-21",
-  "ci_run": "https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282",
-  "image": "quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0",
+  "ci_run": "https://github.com/AttractAcq/Advocate-AI/actions/runs/44854299539",
+  "image": "quay.io/keycloak/keycloak@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3",
   "scanner": "Trivy 0.76.2",
-  "report_sha256": "ff59358a55b035601955514077343bb50b380956bf86fa834d5e83a302d01530",
+  "report_sha256": "3d357c18e841e221fc3f6e23465b5e93fc891cc0a193ce0c3a5470c33d1ec2fa",
   "severity_counts": {
-    "HIGH": 10,
-    "CRITICAL": 1
+    "HIGH": 6,
+    "CRITICAL": 0
   },
   "findings": [
-    {"id": "CVE-2026-114938", "package": "java-21-openjdk-headless", "status": "fixed", "fixed_version": "1:21.0.13.1.2-1.2.el9"},
-    {"id": "CVE-2026-114939", "package": "java-21-openjdk-headless", "status": "fixed", "fixed_version": "1:21.0.13.1.2-1.2.el9"},
-    {"id": "CVE-2026-114940", "package": "java-21-openjdk-headless", "status": "fixed", "fixed_version": "1:21.0.13.1.2-1.2.el9"},
-    {"id": "CVE-2026-114941", "package": "java-21-openjdk-headless", "status": "fixed", "fixed_version": "1:21.0.13.1.2-1.2.el9"},
-    {"id": "CVE-2026-114942", "package": "java-21-openjdk-headless", "status": "fixed", "fixed_version": "1:21.0.13.1.2-1.2.el9"},
     {"id": "CVE-2026-91403", "package": "java-21-openjdk-headless", "status": "will_not_fix", "fixed_version": null},
     {"id": "CVE-2026-119373", "package": "sqlite-libs", "status": "affected", "fixed_version": null},
     {"id": "CVE-2026-119374", "package": "sqlite-libs", "status": "affected", "fixed_version": null},

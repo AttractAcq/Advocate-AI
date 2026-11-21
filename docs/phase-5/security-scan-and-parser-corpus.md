@@ -16,11 +16,13 @@ The lab still uses Keycloak `start-dev` and a Docker bridge that may have egress
 The first [CI scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/43850286761)
 found **six HIGH and zero CRITICAL** advisories in the lab image. The [21
 November scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282)
-of the same digest reports **ten HIGH and one CRITICAL**. That previous-image
+of the same digest reports **ten HIGH and one CRITICAL**. The [rebuilt image
+scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/44854299539)
+reports **six HIGH and zero CRITICAL**. Its current
 [summary record](keycloak-lab-image-scan.json) lists the IDs, package names,
 scanner status and retained report hash; it contains no vessel data. No
 finding has been accepted for release. The [package triage](keycloak-finding-triage.md)
-uses that retained CI report and vendor references while a rebuilt image is
+uses the retained CI reports and vendor references while the rebuilt image is
 being qualified. It does not accept any finding or
 qualify the lab image for a release.
 
