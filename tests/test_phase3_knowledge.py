@@ -107,6 +107,37 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(allowed.json()["citations"][0]["document_id"], "ENG-001")
         self.assertEqual(self.model.contexts[0][0]["document_id"], "ENG-001")
 
+    async def test_knowledge_reads_discard_results_after_mid_request_logout(self) -> None:
+        engineer = await self.login("engineer")
+        conversation = await self.client.post("/api/chat", headers=engineer,
+                                              json={"message": "generator inspection"})
+        self.assertEqual(conversation.status_code, 200)
+        conversation_id = conversation.json()["conversation_id"]
+        cases = (
+            ("/api/sources", "apps.api.main.approved_rows", approved_rows),
+            ("/api/sources/ENG-001/preview", "apps.api.main.preview_index", preview_index),
+            ("/api/search", "apps.api.main.search_index", search_index),
+            (f"/api/conversations/{conversation_id}", "apps.api.main.approved_rows", approved_rows),
+        )
+        for path, target, original in cases:
+            with self.subTest(path=path):
+                headers = await self.login("engineer")
+                token = headers["Authorization"].removeprefix("Bearer ")
+
+                def revoke_after_read(*args, **kwargs):
+                    result = original(*args, **kwargs)
+                    self.app.state.sessions.logout(token)
+                    return result
+
+                with patch(target, side_effect=revoke_after_read):
+                    if path == "/api/search":
+                        response = await self.client.post(path, headers=headers,
+                                                          json={"query": "generator inspection"})
+                    else:
+                        response = await self.client.get(path, headers=headers)
+                self.assertEqual(response.status_code, 403, response.text)
+                self.assertNotIn("generator inspection secret marker", response.text)
+
     async def test_citation_points_to_retrieved_passage(self) -> None:
         self.add("ENG-002", "engineering", "routine text " * 115 + "secondpassage uniquemarker")
         self.save()
