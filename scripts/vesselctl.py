@@ -25,6 +25,9 @@ from infrastructure.deploy.vessel_history_migration import (
     migrate_stopped_vessel_history, verify_vessel_history_migration_backup,
     verify_vessel_history_migration_receipt,
 )
+from infrastructure.deploy.vessel_identity_recovery import (
+    create_identity_recovery_pair, restore_paired_realm,
+)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -98,6 +101,22 @@ def main(argv: list[str] | None = None) -> None:
     verify = commands.add_parser("verify-recovery-receipt")
     verify.add_argument("--receipt", type=Path, required=True)
     verify.add_argument("--receipt-key", type=Path, required=True)
+    identity_pair = commands.add_parser("pair-identity-recovery")
+    identity_pair.add_argument("--core-receipt", type=Path, required=True)
+    identity_pair.add_argument("--core-receipt-key", type=Path, required=True)
+    identity_pair.add_argument("--archive", type=Path, required=True)
+    identity_pair.add_argument("--archive-key", type=Path, required=True)
+    identity_pair.add_argument("--archive-checkpoint", required=True)
+    identity_pair.add_argument("--signing-key", type=Path, required=True)
+    identity_pair.add_argument("--output", type=Path, required=True)
+    identity_restore = commands.add_parser("restore-paired-identity")
+    identity_restore.add_argument("--pair", type=Path, required=True)
+    identity_restore.add_argument("--pair-key", type=Path, required=True)
+    identity_restore.add_argument("--core-receipt", type=Path, required=True)
+    identity_restore.add_argument("--core-receipt-key", type=Path, required=True)
+    identity_restore.add_argument("--archive", type=Path, required=True)
+    identity_restore.add_argument("--archive-key", type=Path, required=True)
+    identity_restore.add_argument("--destination", type=Path, required=True)
     restore = commands.add_parser("restore-recovery-files")
     restore.add_argument("--receipt", type=Path, required=True)
     restore.add_argument("--receipt-key", type=Path, required=True)
@@ -210,6 +229,16 @@ def main(argv: list[str] | None = None) -> None:
             args.restic_sha256, args.staging_parent)
     elif args.command == "verify-recovery-receipt":
         result = verify_vessel_recovery_receipt(args.receipt, args.receipt_key)
+    elif args.command == "pair-identity-recovery":
+        result = create_identity_recovery_pair(
+            args.core_receipt, args.core_receipt_key, args.archive,
+            args.archive_key, args.archive_checkpoint, args.signing_key,
+            args.output)
+    elif args.command == "restore-paired-identity":
+        result = restore_paired_realm(
+            args.pair, args.pair_key, args.core_receipt,
+            args.core_receipt_key, args.archive, args.archive_key,
+            args.destination)
     elif args.command == "restore-recovery-files":
         result = restore_vessel_recovery_files(
             args.receipt, args.receipt_key, args.password_file, args.restic,

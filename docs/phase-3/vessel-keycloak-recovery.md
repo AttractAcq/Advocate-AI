@@ -28,3 +28,6 @@ sessions and events. A production identity database topology, consistent
 capture point across Core/Knowledge/Keycloak, signing-key custody, separate
 checkpoint storage, backup media, RTO/RPO and target-host rehearsal remain
 open under B-03/B-07/B-10 in the [blocker tracker](../blockers-and-build-queue.md).
+The [synthetic identity recovery pair](../phase-5/vessel-identity-recovery-pair.md)
+can bind this export's bytes to one signed Core/Knowledge receipt for later
+verification; it does not establish that missing common capture point.
