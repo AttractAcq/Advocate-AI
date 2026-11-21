@@ -16,7 +16,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.vessel_recovery_set import (
-    VesselRecoveryError, _grant_restored_knowledge, _stage_core, _sign_receipt,
+    VesselRecoveryError, _grant_restored_knowledge, _partial_knowledge_resources,
+    _stage_core, _sign_receipt,
     abandon_incomplete_vessel_restore,
     activate_vessel_recovery_set, retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
@@ -304,6 +305,118 @@ class VesselRecoverySetTests(unittest.TestCase):
             with self.assertRaisesRegex(VesselRecoveryError, "differs"):
                 retry_abandoned_vessel_restore(*args)
         activate.assert_not_called()
+
+    def test_partial_restore_container_requires_exact_identity(self) -> None:
+        identifier = "a" * 32
+        data = f"sovereign-{identifier}-knowledge-data"
+        run = "sovereign-knowledge-" + "b" * 12
+        socket = run + "-socket"
+        container = "c" * 64
+        labels = {"sovereign.synthetic.install": identifier,
+                  "sovereign.synthetic.role": "knowledge",
+                  "sovereign.synthetic.run": run,
+                  "sovereign.synthetic.restore_attempt": "d" * 32}
+        mounts = [{"Destination": "/var/lib/postgresql/data",
+                   "Type": "volume", "Name": data},
+                  {"Destination": "/var/run/postgresql",
+                   "Type": "volume", "Name": socket}]
+        def inspect(*args: str) -> str:
+            if args[-1] == "{{json .Config.Labels}}":
+                return json.dumps(labels)
+            if args[-1] == "{{json .Mounts}}":
+                return json.dumps(mounts)
+            if args[-1] == "{{.Name}}":
+                return "/" + run
+            if args[-1] == "{{.HostConfig.NetworkMode}}":
+                return "none"
+            if args[-1] == "{{json .HostConfig.PortBindings}}":
+                return "null"
+            raise AssertionError(args)
+        with patch("infrastructure.deploy.vessel_recovery_set._volume") as volume, \
+             patch("infrastructure.deploy.vessel_recovery_set._docker",
+                   side_effect=inspect):
+            self.assertEqual(_partial_knowledge_resources(
+                identifier, data, "d" * 32, [container], [], [data, socket]),
+                container)
+        self.assertEqual(volume.call_count, 2)
+        labels["sovereign.synthetic.role"] = "console"
+        with patch("infrastructure.deploy.vessel_recovery_set._volume"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker",
+                   side_effect=inspect):
+            with self.assertRaisesRegex(VesselRecoveryError, "identity mismatch"):
+                _partial_knowledge_resources(
+                    identifier, data, "d" * 32, [container], [], [data, socket])
+        labels["sovereign.synthetic.role"] = "knowledge"
+        labels["sovereign.synthetic.restore_attempt"] = "e" * 32
+        with patch("infrastructure.deploy.vessel_recovery_set._volume"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker",
+                   side_effect=inspect):
+            with self.assertRaisesRegex(VesselRecoveryError, "identity mismatch"):
+                _partial_knowledge_resources(
+                    identifier, data, "d" * 32, [container], [], [data, socket])
+        with patch("infrastructure.deploy.vessel_recovery_set._volume") as volume:
+            with self.assertRaisesRegex(VesselRecoveryError, "unexpected"):
+                _partial_knowledge_resources(
+                    identifier, data, "d" * 32, [], ["e" * 64], [data])
+            volume.assert_not_called()
+        with patch("infrastructure.deploy.vessel_recovery_set._volume") as volume, \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            self.assertIsNone(_partial_knowledge_resources(
+                identifier, data, "d" * 32, [], [], [data, socket]))
+            self.assertEqual(volume.call_count, 2)
+            docker.assert_not_called()
+
+    def test_abandon_removes_only_verified_partial_knowledge_run(self) -> None:
+        install = self.root / "crashed-restore"
+        install.mkdir(mode=0o700)
+        identifier, release, snapshot = "a" * 32, "b" * 24, "c" * 64
+        attempt = "d" * 32
+        data = f"sovereign-{identifier}-knowledge-data"
+        run = "sovereign-knowledge-" + "e" * 12
+        socket = run + "-socket"
+        container = "f" * 64
+        _write_intent(install, release, identifier, self.state,
+                      self.root / "lab-password")
+        _write_private_record(install, "vessel-restore-intent.json", {
+            "schema": 2, "snapshot_id": snapshot, "release": release,
+            "installation_id": identifier, "restore_attempt": attempt})
+        receipt = {"snapshot_id": snapshot, "release": release,
+                   "installation_id": identifier, "data_volume": data}
+        labels = {"sovereign.synthetic.install": identifier,
+                  "sovereign.synthetic.role": "knowledge",
+                  "sovereign.synthetic.run": run,
+                  "sovereign.synthetic.restore_attempt": attempt}
+        mounts = [{"Destination": "/var/lib/postgresql/data",
+                   "Type": "volume", "Name": data},
+                  {"Destination": "/var/run/postgresql",
+                   "Type": "volume", "Name": socket}]
+        removed: list[tuple[str, ...]] = []
+        def docker(*args: str) -> str:
+            if args[0] == "inspect":
+                lookup = {"{{json .Config.Labels}}": json.dumps(labels),
+                          "{{json .Mounts}}": json.dumps(mounts),
+                          "{{.Name}}": "/" + run,
+                          "{{.HostConfig.NetworkMode}}": "none",
+                          "{{json .HostConfig.PortBindings}}": "null"}
+                return lookup[args[-1]]
+            removed.append(args)
+            return ""
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_stage"), \
+             patch("infrastructure.deploy.vessel_recovery_set._scoped_list",
+                   side_effect=[[container], [], [data, socket], [], [], []]), \
+             patch("infrastructure.deploy.vessel_recovery_set._volume"), \
+             patch("infrastructure.deploy.vessel_recovery_set._assert_missing"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker",
+                   side_effect=docker):
+            result = abandon_incomplete_vessel_restore(
+                install, self.root / "key", self.root / "receipt",
+                self.root / "receipt-key", discard_partial_data=True)
+        self.assertEqual(result["result"], "abandoned")
+        self.assertEqual(removed, [("rm", "-f", container),
+                                   ("volume", "rm", socket),
+                                   ("volume", "rm", data)])
 
 
 if __name__ == "__main__":
