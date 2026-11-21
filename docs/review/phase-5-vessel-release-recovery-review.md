@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #229](https://github.com/AttractAcq/Advocate-AI/pull/229) at a
+through [PR #237](https://github.com/AttractAcq/Advocate-AI/pull/237) at a
 recorded final commit SHA. The original brief covered PRs #151–192; the later
 OIDC, Keycloak, intelligence and evidence-binding work is included below. These are stacked, unmerged
 PRs; the reviewer must identify the exact final tree tested. A green CI job is
@@ -34,6 +34,7 @@ not a review sign-off. The main paths are:
 | Current identity and knowledge reads | [PR #216](https://github.com/AttractAcq/Advocate-AI/pull/216), [PR #223](https://github.com/AttractAcq/Advocate-AI/pull/223), [PR #224](https://github.com/AttractAcq/Advocate-AI/pull/224), `apps/api/main.py`, `apps/api/oidc.py`, `tests/test_phase3_knowledge.py`, `tests/test_document_upload_staging.py` | Malformed signed claims and duplicate signing keys; token revocation during knowledge reads and upload staging; no document response or residual quarantined upload after revocation |
 | Wazuh evidence and AV/IT scope | [PR #217](https://github.com/AttractAcq/Advocate-AI/pull/217) through [PR #220](https://github.com/AttractAcq/Advocate-AI/pull/220), [PR #222](https://github.com/AttractAcq/Advocate-AI/pull/222), `services/connectors/wazuh.py`, `services/intelligence/`, `apps/api/main.py`, [Phase 4 gate](../phase-4/gate.md) | Snapshotted CA trust, bounded same-source evidence, exact citations, model claim fallback, and token revocation during incident reads; live collection and analyst review remain separate |
 | Archive identity through release evidence | [PR #225](https://github.com/AttractAcq/Advocate-AI/pull/225), [PR #228](https://github.com/AttractAcq/Advocate-AI/pull/228), [PR #229](https://github.com/AttractAcq/Advocate-AI/pull/229), `infrastructure/release/upstream.py`, `infrastructure/release/scan.py`, [tooling record](../phase-5/upstream-release-tools.md) | Archive hash checked around crane validation and after Syft cataloging; Trivy raw output isolated in a private temporary directory, final evidence files created exclusively, and generated JSON bounded to the intake limit with duplicate-key rejection; same archive, digest and scan evidence signed into the candidate; approved binary/database provenance and media custody remain open |
+| Offline threat-feed mount and recovery | [PR #231](https://github.com/AttractAcq/Advocate-AI/pull/231) through [PR #237](https://github.com/AttractAcq/Advocate-AI/pull/237), `services/intelligence/threat_snapshot.py`, `infrastructure/deploy/vessel_threat_feed.py`, `infrastructure/deploy/vessel_runtime.py`, `infrastructure/deploy/vessel_recovery_set.py`, `scripts/phase5_feed_bound_rehearsal.py` | Signed package and publisher metadata; no indicator values in Core responses or model context; separate read-only store/key mounts; pinning across install, switch and restart; schema-4/5 recovery receipt binding to the exact snapshot/key; denial before Docker on changed inputs; synthetic rehearsal scope versus approved media, publisher key custody and target packet proof |
 
 The exact-head [PR #227](https://github.com/AttractAcq/Advocate-AI/actions/runs/44934518565),
 [PR #228](https://github.com/AttractAcq/Advocate-AI/actions/runs/44935262125)
@@ -43,6 +44,11 @@ values are recorded in W-188–W-190 of the blocker index. Each reports a
 signed and verified synthetic bundle, passing OIDC and real Keycloak paired
 recovery, and zero unresolved Core, Console and Knowledge image findings.
 These results do not establish production image approval or independent review.
+The final-head [PR #231](https://github.com/AttractAcq/Advocate-AI/actions/runs/44940070576)
+and [PR #232](https://github.com/AttractAcq/Advocate-AI/actions/runs/44940460173)
+runs also passed all 13 jobs. PR #232 exercised the stale-warning browser path.
+PRs #233–237 are separate stacked candidates; their final-head release and
+review evidence must be checked individually before integration.
 
 ## Claims to verify
 
@@ -107,6 +113,16 @@ These results do not establish production image approval or independent review.
     The real Keycloak rehearsal must demonstrate that an old unrevoked token
     remains valid after clean restore and an old revoked token remains denied,
     rather than treating a changed signing key as proof of revocation.
+12. A signed offline feed must stay outside writable Core state. Core must
+    expose only verified provenance and freshness metadata to AV/IT and never
+    return indicator values through the status API. A replaced store or key,
+    tampered snapshot, rollback, unexpected writable mount, or absent feed
+    binding must fail closed. Schema-4/5 recovery must require the exact signed
+    snapshot and key on clean activation and verify the pinned intent on an
+    interrupted finish; a stopped switch must demand a recovery receipt for
+    the currently installed feed. Independently inspect the actual-image
+    rehearsal output and repeat approved-media import and no-egress capture
+    on target hardware before accepting AT-22.
 
 These are implementation claims for the reviewer to challenge, not accepted
 security findings. The second Core image in CI has a distinct image identity
