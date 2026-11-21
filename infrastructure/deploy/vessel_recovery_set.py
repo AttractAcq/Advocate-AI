@@ -666,18 +666,20 @@ def _match_restored_core(state: Path, restored: Path) -> None:
     expected = inventory(restored, exclude_dump=True)
     actual = inventory(state, exclude_dump=False)
     if set(actual) != set(expected):
-        raise VesselRecoveryError("partial Core state differs from recovery snapshot")
+        raise VesselRecoveryError("partial Core inventory differs from recovery snapshot")
     for name, item in actual.items():
         source = expected[name]
         details = item.lstat()
         if (item.is_symlink() or details.st_uid != os.getuid() or
-                stat.S_IMODE(details.st_mode) & 0o077 or
+                stat.S_IMODE(details.st_mode) !=
+                stat.S_IMODE(source.lstat().st_mode) or
                 item.is_dir() != source.is_dir() or
-                (item.is_file() and
-                 (details.st_nlink != 1 or details.st_size != source.stat().st_size or
-                  _sha256(item) != _sha256(source))) or
+                (item.is_file() and details.st_nlink != 1) or
                 not (item.is_dir() or item.is_file())):
-            raise VesselRecoveryError("partial Core state differs from recovery snapshot")
+            raise VesselRecoveryError("partial Core metadata differs from recovery snapshot")
+        if item.is_file() and (details.st_size != source.stat().st_size or
+                               _sha256(item) != _sha256(source)):
+            raise VesselRecoveryError("partial Core bytes differ from recovery snapshot")
 
 
 def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
@@ -769,8 +771,19 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
                 value["release"], value["installation_id"], state, lab_password,
                 services, knowledge))
         except Exception:
+            try:
+                (root / "vessel-state.json").unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                raise VesselRecoveryError(
+                    "finish failed; active record could not be cleared; runtime retained"
+                ) from cleanup_error
             if services is not None:
-                stop_runtime(services)
+                try:
+                    stop_runtime(services)
+                except Exception as cleanup_error:
+                    raise VesselRecoveryError(
+                        "finish failed; service cleanup incomplete"
+                    ) from cleanup_error
             raise
         for name in ("vessel-restore-intent.json", "vessel-intent.json"):
             try:

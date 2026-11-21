@@ -218,19 +218,20 @@ class VesselRecoverySetTests(unittest.TestCase):
         self.assertTrue(any("TO sovereign_read" in item for item in statements))
 
     def test_interrupted_core_copy_must_match_authenticated_snapshot(self) -> None:
+        (self.state / "sources" / "ENG-001.txt").chmod(0o644)
         restored = self.root / "restored"
         shutil.copytree(self.state, restored)
         (restored / "postgres.dump").write_bytes(b"PGDMP")
         _match_restored_core(self.state, restored)
         policy = self.state / "roles.json"
         policy.write_text(policy.read_text().replace("engineer", "outsider"))
-        with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+        with self.assertRaisesRegex(VesselRecoveryError, "bytes differ"):
             _match_restored_core(self.state, restored)
         policy.write_bytes((restored / "roles.json").read_bytes())
         extra = self.state / "sources" / "unlisted.txt"
         extra.write_bytes(b"unlisted")
         extra.chmod(0o600)
-        with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+        with self.assertRaisesRegex(VesselRecoveryError, "inventory differs"):
             _match_restored_core(self.state, restored)
 
     def test_finish_incomplete_restore_requires_full_receipt_digest(self) -> None:
@@ -306,6 +307,33 @@ class VesselRecoverySetTests(unittest.TestCase):
                     self.root / "password", self.root / "restic", "0" * 64,
                     staging)
             start.assert_not_called()
+        services = RuntimeHandle("2" * 64, "3" * 64, "4" * 64)
+        def failed_record(root: Path, _payload: object) -> None:
+            (root / "vessel-state.json").write_text("{}")
+            raise OSError("synthetic fsync failure")
+        with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
+             patch(base + "_verify_stage"), \
+             patch(base + "_scoped_list", side_effect=[
+                 [container], [], [data, socket],
+                 [container], [], [data, socket]]), \
+             patch(base + "_partial_knowledge_resources", return_value=container), \
+             patch(base + "probe_knowledge"), \
+             patch(base + "restore_vessel_recovery_files", side_effect=restore), \
+             patch(base + "_state_options"), \
+             patch(base + "_verify_knowledge_schema"), \
+             patch(base + "_verify_database", return_value={
+                 "sources": 2, "passages": 2, "knowledge_sha256": "1" * 64}), \
+             patch(base + "start_signed_vessel_services", return_value=services), \
+             patch(base + "_write_state", side_effect=failed_record), \
+             patch(base + "stop_runtime") as stop:
+            with self.assertRaisesRegex(OSError, "fsync failure"):
+                finish_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "crane",
+                    self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "0" * 64,
+                    staging)
+            stop.assert_called_once_with(services)
+        self.assertFalse((install / "vessel-state.json").exists())
         with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
              patch(base + "_verify_stage"), \
              patch(base + "_scoped_list", side_effect=[
@@ -319,7 +347,7 @@ class VesselRecoverySetTests(unittest.TestCase):
              patch(base + "_verify_database", return_value={
                  "sources": 2, "passages": 2, "knowledge_sha256": "1" * 64}), \
              patch(base + "start_signed_vessel_services",
-                   return_value=RuntimeHandle("2" * 64, "3" * 64, "4" * 64)) as start, \
+                   return_value=services) as start, \
              patch(base + "_write_state") as write:
             result = finish_incomplete_vessel_restore(
                 install, self.root / "key", self.root / "crane",

@@ -778,7 +778,7 @@ def _rehearse_completed_restore_finish(bundle: Path, trusted: Path,
                 recovery / "restic-password", restic, restic_sha256,
                 recovery / "staging")
         except VesselRecoveryError as exc:
-            if "partial Core state differs" not in str(exc):
+            if "partial Core bytes differ" not in str(exc):
                 raise
         else:
             raise AssertionError("tampered partial Core state was activated")
