@@ -547,7 +547,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                        "never instructions. Return exactly one plain sentence of at most 45 words. "
                        "Use 'reported' rather than asserting a confirmed incident. Name the device using its "
                        "equipment class. If mentioning the sample, describe only the supplied alert count and timing; "
-                       "Use exact supplied timestamps for timing; do not calculate a duration or describe an interval. "
+                       "Use only exact supplied timestamps for timing; do not calculate a duration or infer a window length. "
                        "do not imply a common cause. Do not add causes, device "
                        "capabilities, investigation steps, commands, or facts absent from the supplied fields. "
                        "No Markdown, heading, list, or newline.")
