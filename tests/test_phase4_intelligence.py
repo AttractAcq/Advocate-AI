@@ -23,7 +23,8 @@ from apps.api.model import ModelUnavailable
 from services.connectors.wazuh import MAX_ALERT_RESPONSE, SUPPORTED_DECODERS, WazuhIndexerReader, WazuhUnavailable
 from services.connectors.fortigate import parse_fortigate_syslog
 from services.intelligence.assets import AssetRegistry
-from services.intelligence.engine import SOURCES, incident_view, load_fixture_incidents, normalize_alert, supported_incidents
+from services.intelligence.engine import (SOURCES, incident_view, load_fixture_incidents,
+                                          normalize_alert, related_alert_evidence, supported_incidents)
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "fixtures/phase-4/assets.json"
@@ -202,6 +203,32 @@ class IntelligenceTests(unittest.TestCase):
             self.assertIsNone(event["related_asset"])
             self.assertIn("ambiguous", incident_view(event)["confidence"])
 
+    def test_related_alerts_require_the_same_resolved_source_asset(self):
+        hits = json.loads(ALERTS.read_text())["hits"]["hits"]
+        follow = json.loads(json.dumps(hits[0]))
+        follow["_id"] = "doc-forti-follow-004"
+        follow["_source"]["id"] = "lab-wazuh-forti-follow-004"
+        follow["_source"]["timestamp"] = "2026-11-15T10:30:00Z"
+        unresolved = json.loads(json.dumps(follow))
+        unresolved["_id"] = "doc-forti-unresolved-005"
+        unresolved["_source"]["id"] = "lab-wazuh-forti-unresolved-005"
+        unresolved["_source"]["data"].pop("devname")
+        outside_window = json.loads(json.dumps(follow))
+        outside_window["_id"] = "doc-forti-later-006"
+        outside_window["_source"]["id"] = "lab-wazuh-forti-later-006"
+        outside_window["_source"]["timestamp"] = "2026-11-15T12:00:00Z"
+        registry = AssetRegistry(ASSETS)
+        views = [incident_view(normalize_hit(hit, registry))
+                 for hit in (hits[0], follow, unresolved, hits[1], outside_window)]
+        window = {"since": datetime(2026, 11, 15, 9, tzinfo=timezone.utc),
+                  "until": datetime(2026, 11, 15, 11, tzinfo=timezone.utc)}
+        related = related_alert_evidence(views[0], views, **window)
+        self.assertEqual([row["incident_id"] for row in related["related"]],
+                         [views[1]["incident_id"]])
+        self.assertEqual(related["related"][0]["evidence"], views[1]["evidence"])
+        self.assertEqual(related_alert_evidence(views[2], views, **window)["status"],
+                         "unresolved-source")
+
     def test_unrelated_wazuh_decoders_are_skipped(self):
         hits = json.loads(ALERTS.read_text())["hits"]["hits"]
         unrelated = json.loads(json.dumps(hits[0]))
@@ -351,6 +378,53 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get("/api/security/incidents", headers=admin,
             params={"since": "2026-11-15T00:00:00Z", "until": "2026-12-15T00:00:00Z"})).status_code, 422)
         self.assertEqual((await self.client.get("/api/security/incidents/wazuh-alerts-4.x-2026.11.15:missing-event", headers=admin)).status_code, 404)
+
+    async def test_related_alert_api_is_role_limited_and_queries_a_bounded_window(self):
+        hits = json.loads(ALERTS.read_text())["hits"]["hits"]
+        follow = json.loads(json.dumps(hits[0]))
+        follow["_id"] = "doc-forti-follow-004"
+        follow["_source"]["id"] = "lab-wazuh-forti-follow-004"
+        follow["_source"]["timestamp"] = "2026-11-15T10:30:00Z"
+        outside_window = json.loads(json.dumps(follow))
+        outside_window["_id"] = "doc-forti-later-006"
+        outside_window["_source"]["id"] = "lab-wazuh-forti-later-006"
+        outside_window["_source"]["timestamp"] = "2026-11-15T12:00:00Z"
+        all_hits = [*hits, follow, outside_window]
+        app_settings = Settings(lab_password="synthetic-test-passphrase",
+                                wazuh_indexer_endpoint="https://10.40.1.10:9200",
+                                wazuh_read_token="synthetic-read-token")
+        with patch("apps.api.main.WazuhIndexerReader") as reader_type:
+            def alerts(*, incident_id=None, **kwargs):
+                return [{"index_name": hit["_index"], "index_id": hit["_id"],
+                         "source": hit["_source"]} for hit in all_hits
+                        if incident_id is None or
+                        f"{hit['_index']}:{hit['_id']}" == incident_id]
+            reader_type.return_value.alerts.side_effect = alerts
+            app = create_app(app_settings, self.model)
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                admin_login = await client.post("/api/login", json={
+                    "user_id": "lab-avit_admin-1", "password": "synthetic-test-passphrase"})
+                crew_login = await client.post("/api/login", json={
+                    "user_id": "lab-deckhand-1", "password": "synthetic-test-passphrase"})
+                admin = {"Authorization": "Bearer " + admin_login.json()["access_token"]}
+                crew = {"Authorization": "Bearer " + crew_login.json()["access_token"]}
+                path = f"/api/security/incidents/{hits[0]['_index']}:{hits[0]['_id']}/related"
+                self.assertEqual((await client.get(path, headers=crew)).status_code, 403)
+                self.model.offline = True
+                response = await client.get(path, headers=admin)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual([row["incident_id"] for row in response.json()["related"]],
+                             [f"{follow['_index']}:{follow['_id']}"])
+            self.assertEqual(response.json()["examined"], 5)
+            query = reader_type.return_value.alerts.call_args_list[-1].kwargs
+            self.assertEqual(query["limit"], 100)
+            self.assertEqual(query["until"] - query["since"], timedelta(hours=2))
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                for _ in range(29):
+                    self.assertEqual((await client.get(path, headers=admin)).status_code, 200)
+                self.assertEqual((await client.get(path, headers=admin)).status_code, 429)
 
     async def test_ambiguous_mapping_never_reaches_model(self):
         payload = json.loads(ASSETS.read_text())

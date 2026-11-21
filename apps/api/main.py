@@ -35,7 +35,8 @@ from services.policy.policy_file import (PolicyUnavailable, load_policy,
                                          policy_directory_lock, read_policy_bytes)
 from services.connectors.wazuh import WazuhIndexerReader, WazuhUnavailable, parse_incident_id
 from services.intelligence.assets import AssetRegistry
-from services.intelligence.engine import load_fixture_incidents, safe_incident_analysis, supported_incidents
+from services.intelligence.engine import (load_fixture_incidents, related_alert_evidence,
+                                          safe_incident_analysis, supported_incidents)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -190,7 +191,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
              if settings.wazuh_indexer_endpoint and settings.wazuh_read_token else None)
 
     def security_incidents(*, since: datetime | None = None, until: datetime | None = None,
-                           incident_id: str | None = None) -> list[dict[str, object]]:
+                           incident_id: str | None = None, limit: int = 50) -> list[dict[str, object]]:
         if incident_id is not None:
             try:
                 parse_incident_id(incident_id)
@@ -205,7 +206,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "alert interval out of bounds")
         try:
             if wazuh:
-                return supported_incidents(wazuh.alerts(limit=1 if incident_id else 50,
+                return supported_incidents(wazuh.alerts(limit=1 if incident_id else limit,
                                            since=since, until=until, incident_id=incident_id), assets)
             incidents = load_fixture_incidents(settings.synthetic_alerts, assets)
             if incident_id:
@@ -213,7 +214,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             if since is not None and until is not None:
                 incidents = [item for item in incidents if since <=
                              datetime.fromisoformat(str(item["event"]["timestamp"])) < until]
-            return incidents
+            return incidents[:limit]
         except (WazuhUnavailable, ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "security alert source unavailable") from exc
 
@@ -468,6 +469,30 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             if item["incident_id"] == incident_id:
                 return item
         raise HTTPException(status.HTTP_404_NOT_FOUND, "incident not found")
+
+    @app.get("/api/security/incidents/{incident_id}/related")
+    def security_related(incident_id: str,
+                         identity: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
+        if not limiter.allow(f"security-related:{identity[0]}", maximum=30):
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                                "related alert rate limit reached")
+        primary = next((item for item in security_incidents(incident_id=incident_id)
+                        if item["incident_id"] == incident_id), None)
+        if primary is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "incident not found")
+        try:
+            moment = datetime.fromisoformat(str(primary["event"]["timestamp"]))
+            since, until = moment - timedelta(hours=1), moment + timedelta(hours=1)
+        except (ValueError, OverflowError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "security alert source unavailable") from exc
+        candidates = (security_incidents(since=since, until=until, limit=100)
+                      if primary["event"]["asset_status"] == "known" else [])
+        revalidate_identity(identity)
+        result = related_alert_evidence(primary, candidates, since=since, until=until)
+        result.update({"window_start": since.isoformat(), "window_end": until.isoformat(),
+                       "notice": "Only up to 100 supported alerts in this two-hour window were checked when the source was mapped; this is not an exhaustive incident correlation."})
+        return result
 
     @app.post("/api/security/incidents/{incident_id}/explain")
     async def security_explain(incident_id: str,

@@ -140,6 +140,32 @@ def incident_view(event: Mapping[str, object]) -> dict[str, object]:
                           "rule_id": event["rule_id"], "location": event["location"]}]}
 
 
+def related_alert_evidence(primary: Mapping[str, object],
+                           candidates: list[dict[str, object]], *,
+                           since: datetime, until: datetime) -> dict[str, object]:
+    """Correlate only alerts with the same explicitly resolved source asset."""
+    event = primary["event"]
+    asset = event["asset"]
+    if event["asset_status"] != "known" or not isinstance(asset, dict):
+        return {"incident_id": primary["incident_id"], "status": "unresolved-source",
+                "related": [], "examined": len(candidates), "limit": 100}
+    matches = []
+    for item in candidates:
+        other = item["event"]
+        other_asset = other["asset"]
+        observed_at = datetime.fromisoformat(str(other["timestamp"]))
+        if (item["incident_id"] != primary["incident_id"] and
+                since <= observed_at < until and
+                other["asset_status"] == "known" and isinstance(other_asset, dict) and
+                other_asset["asset_id"] == asset["asset_id"]):
+            matches.append({"incident_id": item["incident_id"],
+                            "summary": item["summary"], "timestamp": other["timestamp"],
+                            "severity": other["severity"], "evidence": item["evidence"]})
+    matches.sort(key=lambda row: (row["timestamp"], row["incident_id"]), reverse=True)
+    return {"incident_id": primary["incident_id"], "status": "observed-same-source",
+            "related": matches[:20], "examined": len(candidates), "limit": 100}
+
+
 def supported_incidents(hits: list[dict[str, object]], registry: AssetRegistry) -> list[dict[str, object]]:
     incidents: list[dict[str, object]] = []
     for hit in hits:
