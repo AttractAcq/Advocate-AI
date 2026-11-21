@@ -141,7 +141,8 @@ def incident_view(event: Mapping[str, object]) -> dict[str, object]:
 
 
 def related_alert_evidence(primary: Mapping[str, object],
-                           candidates: list[dict[str, object]]) -> dict[str, object]:
+                           candidates: list[dict[str, object]], *,
+                           since: datetime, until: datetime) -> dict[str, object]:
     """Correlate only alerts with the same explicitly resolved source asset."""
     event = primary["event"]
     asset = event["asset"]
@@ -152,7 +153,9 @@ def related_alert_evidence(primary: Mapping[str, object],
     for item in candidates:
         other = item["event"]
         other_asset = other["asset"]
+        observed_at = datetime.fromisoformat(str(other["timestamp"]))
         if (item["incident_id"] != primary["incident_id"] and
+                since <= observed_at < until and
                 other["asset_status"] == "known" and isinstance(other_asset, dict) and
                 other_asset["asset_id"] == asset["asset_id"]):
             matches.append({"incident_id": item["incident_id"],

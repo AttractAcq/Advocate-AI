@@ -489,7 +489,7 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         candidates = (security_incidents(since=since, until=until, limit=100)
                       if primary["event"]["asset_status"] == "known" else [])
         revalidate_identity(identity)
-        result = related_alert_evidence(primary, candidates)
+        result = related_alert_evidence(primary, candidates, since=since, until=until)
         result.update({"window_start": since.isoformat(), "window_end": until.isoformat(),
                        "notice": "Only up to 100 supported alerts in this two-hour window were checked when the source was mapped; this is not an exhaustive incident correlation."})
         return result

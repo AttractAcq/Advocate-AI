@@ -213,14 +213,20 @@ class IntelligenceTests(unittest.TestCase):
         unresolved["_id"] = "doc-forti-unresolved-005"
         unresolved["_source"]["id"] = "lab-wazuh-forti-unresolved-005"
         unresolved["_source"]["data"].pop("devname")
+        outside_window = json.loads(json.dumps(follow))
+        outside_window["_id"] = "doc-forti-later-006"
+        outside_window["_source"]["id"] = "lab-wazuh-forti-later-006"
+        outside_window["_source"]["timestamp"] = "2026-11-15T12:00:00Z"
         registry = AssetRegistry(ASSETS)
         views = [incident_view(normalize_hit(hit, registry))
-                 for hit in (hits[0], follow, unresolved, hits[1])]
-        related = related_alert_evidence(views[0], views)
+                 for hit in (hits[0], follow, unresolved, hits[1], outside_window)]
+        window = {"since": datetime(2026, 11, 15, 9, tzinfo=timezone.utc),
+                  "until": datetime(2026, 11, 15, 11, tzinfo=timezone.utc)}
+        related = related_alert_evidence(views[0], views, **window)
         self.assertEqual([row["incident_id"] for row in related["related"]],
                          [views[1]["incident_id"]])
         self.assertEqual(related["related"][0]["evidence"], views[1]["evidence"])
-        self.assertEqual(related_alert_evidence(views[2], views)["status"],
+        self.assertEqual(related_alert_evidence(views[2], views, **window)["status"],
                          "unresolved-source")
 
     def test_unrelated_wazuh_decoders_are_skipped(self):
@@ -379,7 +385,11 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
         follow["_id"] = "doc-forti-follow-004"
         follow["_source"]["id"] = "lab-wazuh-forti-follow-004"
         follow["_source"]["timestamp"] = "2026-11-15T10:30:00Z"
-        all_hits = [*hits, follow]
+        outside_window = json.loads(json.dumps(follow))
+        outside_window["_id"] = "doc-forti-later-006"
+        outside_window["_source"]["id"] = "lab-wazuh-forti-later-006"
+        outside_window["_source"]["timestamp"] = "2026-11-15T12:00:00Z"
+        all_hits = [*hits, follow, outside_window]
         app_settings = Settings(lab_password="synthetic-test-passphrase",
                                 wazuh_indexer_endpoint="https://10.40.1.10:9200",
                                 wazuh_read_token="synthetic-read-token")
@@ -406,7 +416,7 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual([row["incident_id"] for row in response.json()["related"]],
                              [f"{follow['_index']}:{follow['_id']}"])
-            self.assertEqual(response.json()["examined"], 4)
+            self.assertEqual(response.json()["examined"], 5)
             query = reader_type.return_value.alerts.call_args_list[-1].kwargs
             self.assertEqual(query["limit"], 100)
             self.assertEqual(query["until"] - query["since"], timedelta(hours=2))
