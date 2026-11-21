@@ -17,6 +17,10 @@ staged-document listing and conversation reads, before returning their content.
 A synthetic mid-request token revocation test covers the source, preview,
 search and conversation paths. This checks the local API behavior; the target
 identity and policy-change propagation still require independent testing.
+For document staging, Core revalidates after the quarantine write and audit
+decision and removes the new upload if the identity changed during the request.
+A synthetic test revokes the token inside the write and checks that no blob or
+metadata remains.
 
 The injection fixture initially reached the local model and produced an
 unsupported description of its hex text. Core now withholds instruction-like

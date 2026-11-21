@@ -4,10 +4,12 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 
 from apps.api.main import Settings, create_app
+from services.knowledge.upload_staging import stage_upload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,9 +25,10 @@ class UploadStagingTests(unittest.IsolatedAsyncioTestCase):
             shutil.copy(ROOT / "fixtures" / name, self.fixtures / name)
         shutil.copytree(ROOT / "fixtures/sources", self.fixtures / "sources")
         self.staging = self.root / "quarantine"
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(
+        self.app = create_app(
             Settings(fixture_root=self.fixtures, lab_password="synthetic-test-passphrase",
-                     upload_root=self.staging))), base_url="http://test")
+                     upload_root=self.staging))
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://test")
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
@@ -62,6 +65,24 @@ class UploadStagingTests(unittest.IsolatedAsyncioTestCase):
         too_large = await self.client.post("/api/documents/stage", headers={**actor, **headers}, content=b"x" * (8 * 1024 * 1024 + 1))
         self.assertEqual(too_large.status_code, 413)
         self.assertFalse(list(self.staging.glob("*.blob"))) if self.staging.exists() else None
+
+    async def test_revocation_during_stage_discards_quarantined_upload(self) -> None:
+        engineer = await self._login("lab-chief_engineer-1")
+        token = engineer["Authorization"].removeprefix("Bearer ")
+
+        def stage_then_revoke(*args, **kwargs):
+            item = stage_upload(*args, **kwargs)
+            self.app.state.sessions.logout(token)
+            return item
+
+        with patch("apps.api.main.stage_upload", side_effect=stage_then_revoke):
+            response = await self.client.post("/api/documents/stage", headers={**engineer,
+                "Content-Type": "application/octet-stream", "X-Filename": "engine-room.txt"},
+                content=b"synthetic-private-upload-marker")
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertNotIn("synthetic-private-upload-marker", response.text)
+        self.assertEqual(list(self.staging.glob("*.blob")), [])
+        self.assertEqual(list(self.staging.glob("*.json")), [])
 
     async def test_upload_root_cannot_overlap_approved_sources(self) -> None:
         with self.assertRaises(ValueError):
