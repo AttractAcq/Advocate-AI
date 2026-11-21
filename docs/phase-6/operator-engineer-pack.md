@@ -1,6 +1,6 @@
 # Operator and engineer pack — synthetic draft
 
-**Status:** W-06 local documentation. This pack describes the software that exists on 16 November 2026. It is not a vessel as-built record, an approved installation method statement, a production operating procedure, or G3 acceptance. Use fictional data and disposable lab keys for the commands below. The [build queue](../blockers-and-build-queue.md) holds the open gates.
+**Status:** synthetic operator draft updated 21 November 2026. This pack is not a vessel as-built record, an approved installation method statement, a production operating procedure, or G3 acceptance. Use fictional data and disposable lab keys for the linked commands. The [build queue](../blockers-and-build-queue.md) holds the open gates.
 
 ## Document map
 
@@ -11,7 +11,7 @@
 | Identity administrator and source owner | [Identity and permissions](identity-and-permissions.md) | Request, approve, change and test a role or document source mapping |
 | AV/IT operator and incident lead | [Alert triage and escalation](alert-triage-and-escalation.md) | Check source events, preserve evidence and route incidents to the right authority |
 
-The command-level source records remain the [installer](../phase-5/installer.md), [offline release](../phase-5/offline-release.md), [backup/recovery](../phase-5/backup-recovery.md), [diagnostics](../phase-5/diagnostics.md), [identity design](../phase-3/identity-operations.md) and [Phase 4 runbook](../phase-4/runbook.md). If a command or capability conflicts with this pack, verify the implementation and correct the pack before use.
+The earlier software-pointer path is documented in the [installer](../phase-5/installer.md), [offline release](../phase-5/offline-release.md) and [file backup](../phase-5/backup-recovery.md) runbooks. The current signed vessel image path is documented in the [stopped release](../phase-5/vessel-release-switch.md), [Core/Knowledge recovery](../phase-5/vessel-recovery-set.md), [paired Keycloak recovery](../phase-5/vessel-identity-recovery-pair.md) and [diagnostics](../phase-5/diagnostics.md) runbooks. The [identity design](../phase-3/identity-operations.md) and [Phase 4 runbook](../phase-4/runbook.md) cover their respective boundaries. If a command or capability conflicts with this pack, verify the implementation and correct the pack before use.
 
 ## Reference drawing and as-built status
 
