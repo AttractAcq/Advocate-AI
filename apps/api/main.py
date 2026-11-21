@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import ssl
 import stat
 from typing import Literal
 
@@ -72,6 +73,10 @@ def _validated_oidc_ca(path: Path) -> Path:
             or stat.S_IMODE(path.stat().st_mode) & 0o077
             or not 0 < path.stat().st_size <= 64 * 1024):
         raise ValueError("OIDC CA file must be a private regular file")
+    try:
+        ssl.create_default_context(cafile=str(path))
+    except OSError as exc:
+        raise ValueError("OIDC CA file must contain valid trust material") from exc
     return path
 
 

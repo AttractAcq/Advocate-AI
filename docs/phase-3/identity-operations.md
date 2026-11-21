@@ -26,8 +26,9 @@ password grant for scripted tests; it must not be copied into production.
 
 Core can now be configured with `SOVEREIGN_OIDC_ISSUER` and a private
 `SOVEREIGN_OIDC_CA_FILE` for a DNS-named HTTPS Keycloak realm on port 443. The
-CA file must be an absolute, owner-only regular file with one link and at most
-64 KiB. An HTTPS issuer without this explicit trust file, a CA file without an
+CA file must contain valid PEM trust material in an absolute, owner-only
+regular file with one link and at most 64 KiB. An HTTPS issuer without this
+explicit trust file, a CA file without an
 issuer, or a CA file paired with lab HTTP is refused at startup. The existing
 loopback HTTP realm remains available for fictional lab tests. Token validation
 still requires the Core audience, Console client, current local role and

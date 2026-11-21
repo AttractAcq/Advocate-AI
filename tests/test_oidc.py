@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import time
@@ -10,7 +11,10 @@ from unittest.mock import patch
 
 import httpx
 import jwt
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from apps.api.oidc import OidcVerifier
 from apps.api.main import Settings, create_app
@@ -42,6 +46,19 @@ class OidcTests(unittest.TestCase):
         claims.update(overrides)
         return jwt.encode(claims, self.private, algorithm="RS256", headers={"kid": "lab-key"})
 
+    def ca_file(self) -> Path:
+        ca = Path(self.temporary.name) / "issuer-ca.pem"
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Fictional Vessel CA")])
+        certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+                       .public_key(self.private.public_key()).serial_number(x509.random_serial_number())
+                       .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+                       .not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+                       .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+                       .sign(self.private, hashes.SHA256()))
+        ca.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        ca.chmod(0o600)
+        return ca
+
     def test_signature_audience_role_expiry_and_policy_revocation(self) -> None:
         valid = self.token()
         self.assertEqual(self.verifier.user_for(valid)["id"], "engineer")
@@ -61,9 +78,7 @@ class OidcTests(unittest.TestCase):
 
     def test_core_https_issuer_requires_private_ca(self) -> None:
         issuer = "https://identity.vessel.example/realms/sovereign"
-        ca = Path(self.temporary.name) / "issuer-ca.pem"
-        ca.write_text("synthetic CA placeholder")
-        ca.chmod(0o600)
+        ca = self.ca_file()
         variables = {"SOVEREIGN_OIDC_ISSUER": issuer,
                      "SOVEREIGN_OIDC_CA_FILE": str(ca)}
         with patch.dict(os.environ, variables, clear=True):
@@ -83,9 +98,7 @@ class OidcTests(unittest.TestCase):
                                 oidc_ca_file=ca))
 
     def test_core_rejects_exposed_or_ambiguous_ca_file(self) -> None:
-        ca = Path(self.temporary.name) / "issuer-ca.pem"
-        ca.write_text("synthetic CA placeholder")
-        ca.chmod(0o600)
+        ca = self.ca_file()
         variables = {"SOVEREIGN_OIDC_ISSUER":
                      "https://identity.vessel.example/realms/sovereign",
                      "SOVEREIGN_OIDC_CA_FILE": str(ca)}
@@ -102,6 +115,9 @@ class OidcTests(unittest.TestCase):
         alias.symlink_to(ca)
         with patch.dict(os.environ, {**variables, "SOVEREIGN_OIDC_CA_FILE": str(alias)},
                         clear=True), self.assertRaises(ValueError):
+            Settings.from_env()
+        ca.write_text("not a certificate")
+        with patch.dict(os.environ, variables, clear=True), self.assertRaises(ValueError):
             Settings.from_env()
 
     def test_logout_revocation_survives_verifier_restart(self) -> None:
