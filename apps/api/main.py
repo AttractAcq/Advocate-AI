@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.auth import LabRateLimiter, LabSessions
-from apps.api.model import MAX_ANSWER_CHARS, LocalModel, ModelTimeout, ModelUnavailable
+from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable
 from apps.api.oidc import OidcVerifier
 from services.knowledge.acl import source_access
 from services.knowledge.retrieval import search_fixture_documents
@@ -730,13 +730,14 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if conversation_id and len(stored.turns) >= 20:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "conversation limit reached")
 
-        selected_overview = (request.mode == "documents" and len(request.selected_documents) == 1
+        selected_ids = set(request.selected_documents)
+        selected_overview = (request.mode == "documents" and len(selected_ids) == 1
                              and not _search_terms(request.message))
         context: list[dict[str, object]] = []
         if request.mode == "documents":
             try:
-                options = {"limit": 5,
-                           "document_ids": set(request.selected_documents) if request.selected_documents else None,
+                options = {"limit": 2 if selected_overview else 5,
+                           "document_ids": selected_ids or None,
                            "collections": {request.workspace} if request.workspace else None}
                 if settings.knowledge_manifest and settings.knowledge_db:
                     context = search_index(settings.fixture_root, settings.knowledge_manifest,
@@ -756,22 +757,25 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
             for hit in context:
                 record_decision(user_id, "retrieve", str(hit["document_id"]), "flagged")
             answer = "A permitted source contains instruction-like text. Its contents were withheld from the AI model; review the cited source directly."
+        elif selected_overview:
+            revalidate_identity(identity)
+            for hit in context:
+                record_decision(user_id, "retrieve", str(hit["document_id"]), "allow")
+            excerpts = [f"[Source {hit['document_id']} v{hit['version']}, passage {int(hit.get('ordinal', 0)) + 1}]\n{hit['excerpt']}"
+                        for hit in context]
+            answer = ("Opening authorised excerpts only; this is not a full-document summary.\n\n"
+                      + "\n\n".join(excerpts))
         else:
             revalidate_identity(identity)
             for hit in context:
                 record_decision(user_id, "retrieve", str(hit["document_id"]), "allow")
             try:
-                answer = await model.complete(request.message, context, general=request.mode == "general")
+                answer = await model.complete(request.message, context,
+                                              general=request.mode == "general")
             except ModelTimeout as exc:
                 raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
             except ModelUnavailable as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-            if selected_overview:
-                notice = "Based on the first permitted excerpts; later parts of the document may be omitted. "
-                if len(notice) + len(answer) > MAX_ANSWER_CHARS:
-                    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                                        "model answer exceeds response limit")
-                answer = notice + answer
         revalidate_identity(identity)
         citations = [{"document_id": item["document_id"], "version": item["version"],
                       "collection": item["collection"], "sha256": item["sha256"],
