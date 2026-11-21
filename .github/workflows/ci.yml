@@ -279,6 +279,8 @@ jobs:
           .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal
       - name: Rehearse encrypted vessel Keycloak clean recovery
         run: .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal --recovery
+      - name: Rehearse vessel Keycloak signing-key rotation
+        run: .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal --rotation
 
   fleet-browser-https-rehearsal:
     if: github.event_name == 'pull_request'

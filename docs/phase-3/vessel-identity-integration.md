@@ -9,16 +9,18 @@ The same mode is carried through status, stopped release switch, rollback,
 encrypted recovery receipt schema 3, clean restore and interrupted restore.
 The existing schema-1 lab path remains supported.
 
-This is local software evidence. Signed-image OIDC installation, browser login,
-Keycloak state backup and clean restore, site PKI and network routes, MFA and
-independent security assessment are still required before pilot acceptance.
+This is synthetic software evidence. Signed-image OIDC installation, browser
+login, MFA enrollment and a separate encrypted Keycloak realm recovery have
+passed CI. Site PKI and network routes, coordinated production identity
+database recovery, and independent security assessment are still required
+before pilot acceptance.
 The Core recovery set captures CA and token revocations; Keycloak accounts,
 realm configuration and signing keys require a separate coordinated recovery
 process.
 
 A signed-image rehearsal has been added to the three-image CI path. It uses a
 fictional HTTPS JWKS service to exercise install, role denial, logout and Core
-clean restore. Its CI result is pending; it does not exercise Keycloak login,
+clean restore. Its CI check passed; it does not exercise Keycloak login,
 browser redirects or Keycloak state recovery.
 
 A separate Docker CI rehearsal now starts the pinned lab Keycloak image on an
@@ -28,28 +30,35 @@ built Core image validates those tokens against the Keycloak JWKS and current
 local policy, limits visible source collections, refuses the lab credential
 path and rejects a logged-out token. [All 12 CI checks passed on PR #201's
 final head](https://github.com/AttractAcq/Advocate-AI/actions/runs/44898304865).
-This is protocol and API evidence only; real accounts, MFA, Keycloak clean
-recovery, approved PKI and target network remain untested.
+This is protocol and API evidence only; real accounts, approved PKI and the
+target network remain untested.
 
 The next synthetic browser rehearsal drives the built Console through the
 pinned lab Keycloak and built Core over temporary HTTPS loopback ingress. It
 checks the browser PKCE callback, engineer document scope, removal of code and
 state from the browser, and sign-out. The [Chrome job passed on PR
 #202](https://github.com/AttractAcq/Advocate-AI/actions/runs/44900895751/job/136836420808);
-the full release job is still pending. The test-only ingress bridge does not
+all 13 final-head CI checks passed. The test-only ingress bridge does not
 establish vessel TLS or zero egress.
 
 A follow-on synthetic variant requires TOTP enrollment for the fictional
 engineer, rejects an invalid code on the next login, and verifies a valid
 code reaches Core through Console. The [Chrome job passed on PR
 #203](https://github.com/AttractAcq/Advocate-AI/actions/runs/44901281996/job/136837582633);
-the full release job is still pending. Production factor choice, enrollment,
+all 13 final-head CI checks passed. Production factor choice, enrollment,
 recovery, site PKI and operator approval remain open.
 
 The [Keycloak clean recovery rehearsal](vessel-keycloak-recovery.md) is a
-separate synthetic export and encrypted archive check. Its CI result is
-pending; it does not replace a coordinated production identity database
+separate synthetic export and encrypted archive check. All 13 final-head CI
+checks passed on PR #204; it does not replace a coordinated production identity database
 backup or the signed Core/Knowledge recovery set.
+
+The synthetic vessel signing-key rotation rehearsal creates a new Keycloak
+RSA provider, checks that Core accepts both keys during overlap, retires the
+old provider, restarts Core to clear its cached JWKS, and verifies the old
+token is denied while a new token retains engineering-only source access.
+Production key custody, rotation cadence, emergency rollover and outage
+policy remain owner decisions.
 
 ## Required behavior
 
