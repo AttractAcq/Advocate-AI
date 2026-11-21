@@ -13,7 +13,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
 from infrastructure.deploy.vessel_identity import (
-    VesselIdentityError, preflight_vessel_identity,
+    VesselIdentityError, identity_from_record, identity_record,
+    preflight_vessel_identity,
 )
 
 
@@ -78,6 +79,19 @@ class VesselIdentityTests(unittest.TestCase):
         with patch("infrastructure.deploy.vessel_identity._docker", return_value="false"):
             with self.assertRaises(VesselIdentityError):
                 preflight_vessel_identity(self.config, self.state, "vessel-identity")
+
+    def test_persisted_record_pins_ca_issuer_and_network(self) -> None:
+        with patch("infrastructure.deploy.vessel_identity._docker", side_effect=self.docker):
+            identity = preflight_vessel_identity(self.config, self.state,
+                                                 "vessel-identity")
+            record = identity_record(identity)
+            self.assertEqual(identity_from_record(record, self.config, self.state), identity)
+            changed = dict(record, network_id="b" * 64)
+            with self.assertRaises(VesselIdentityError):
+                identity_from_record(changed, self.config, self.state)
+            self.ca.write_bytes(self.ca.read_bytes() + b"\n")
+            with self.assertRaises(VesselIdentityError):
+                identity_from_record(record, self.config, self.state)
         self.config.write_text('{"schema":1,"oidc_issuer":null}')
         with patch("infrastructure.deploy.vessel_identity._docker", side_effect=self.docker):
             with self.assertRaises(VesselIdentityError):

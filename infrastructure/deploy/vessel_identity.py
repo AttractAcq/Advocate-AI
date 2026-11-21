@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -96,3 +97,33 @@ def preflight_vessel_identity(config: Path, state: Path, network_name: str) -> V
                        '{{index .Labels "sovereign.vessel.identity"}}') != "true"):
         raise VesselIdentityError("vessel identity network must be labelled and internal")
     return VesselIdentity(issuer, ca, revocations, network_name, network_id)
+
+
+def identity_record(identity: VesselIdentity) -> dict[str, str]:
+    """Pin immutable identity inputs in private installation state."""
+    return {
+        "mode": "oidc",
+        "issuer": identity.issuer,
+        "ca_file": str(identity.ca_file),
+        "ca_sha256": hashlib.sha256(_private_regular(identity.ca_file,
+                                                     maximum=64 * 1024)).hexdigest(),
+        "revocations_file": str(identity.revocations_file),
+        "network_name": identity.network_name,
+        "network_id": identity.network_id,
+    }
+
+
+def identity_from_record(value: object, config: Path,
+                         state: Path) -> VesselIdentity:
+    """Refuse changed issuer, CA or network before resuming an installation."""
+    expected = {"mode", "issuer", "ca_file", "ca_sha256", "revocations_file",
+                "network_name", "network_id"}
+    if (not isinstance(value, dict) or set(value) != expected
+            or any(not isinstance(item, str) for item in value.values())
+            or value["mode"] != "oidc"
+            or not re.fullmatch(r"[0-9a-f]{64}", value["ca_sha256"])):
+        raise VesselIdentityError("invalid persisted vessel identity record")
+    identity = preflight_vessel_identity(config, state, value["network_name"])
+    if identity_record(identity) != value:
+        raise VesselIdentityError("persisted vessel identity changed")
+    return identity
