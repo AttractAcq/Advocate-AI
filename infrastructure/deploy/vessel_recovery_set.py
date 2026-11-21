@@ -384,13 +384,18 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
                 entries = ["roles.json", "approved.json", "audit.jsonl",
                            "history.db", "postgres.dump"]
                 if identity is not None:
-                    entries.extend(("oidc-ca.pem", "oidc-revocations.jsonl"))
+                    # The encrypted snapshot excludes .pem names as a
+                    # key-custody guard. This file is a public CA certificate,
+                    # mapped back to the Core path only after verified restore.
+                    entries.extend(("oidc-ca.crt", "oidc-revocations.jsonl"))
                 entries.extend(item.relative_to(frozen).as_posix()
                                for item in (frozen / "sources").rglob("*")
                                if item.is_file())
                 spec = frozen / "snapshot-spec.json"
                 spec.write_text(json.dumps({"schema": 1, "files": [
-                    {"name": name, "kind": "file", "source": name} for name in entries]}))
+                    {"name": name, "kind": "file",
+                     "source": "oidc-ca.pem" if name == "oidc-ca.crt" else name}
+                    for name in entries]}))
                 snapshot = create_snapshot(spec, repository, password_file,
                                            restic, restic_sha256, staging_parent)
                 if (read_manifest_bytes(state / "approved.json") !=
@@ -465,6 +470,12 @@ def restore_vessel_recovery_files(receipt: Path, receipt_key: Path,
     restored = restore_snapshot(value["snapshot_id"], Path(value["repository"]),
                                 password_file, restic, restic_sha256, destination)
     try:
+        if value["schema"] == 3:
+            certificate = destination / "oidc-ca.crt"
+            core_certificate = destination / "oidc-ca.pem"
+            if os.path.lexists(core_certificate):
+                raise VesselRecoveryError("unexpected vessel identity trust file")
+            certificate.rename(core_certificate)
         with tempfile.TemporaryDirectory(prefix=".verify-vessel-recovery-",
                                          dir=destination.parent) as temporary:
             sources, checkpoint, manifest_digest = _stage_core(
