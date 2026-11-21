@@ -35,7 +35,7 @@
       "prompt_sha256": "36508f45f23cca8f5b4d85af4c9fe51395ea6b2c2887ee377f544deddbcb1075"
     },
     {
-      "analysis": "A network switch named lab-switch-1 reported a failed login attempt on November 15, 2026 at 10:01:00 UTC.",
+      "analysis": "A network switch named lab-switch-1 reported a failed login attempt on November 15, 2026 at 10:01:00 UTC with zero additional alerts.",
       "checks": {
         "answer_times_come_from_cited_events": true,
         "cited_ids_supplied_to_model": true,
@@ -111,6 +111,6 @@
   "model": "qwen3.5:2b",
   "model_digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
   "schema": 1,
-  "source_commit": "011239fe9b530c17d4c955d78880cf9bc8dee136",
-  "timestamp_utc": "2026-11-21T16:48:05.784181+00:00"
+  "source_commit": "5543c486eda46efd65d840a7d0a6c5f24bc87a60",
+  "timestamp_utc": "2026-11-21T16:50:56.698776+00:00"
 }
