@@ -34,8 +34,15 @@ recovery, approved PKI and target network remain untested.
 The next synthetic browser rehearsal drives the built Console through the
 pinned lab Keycloak and built Core over temporary HTTPS loopback ingress. It
 checks the browser PKCE callback, engineer document scope, removal of code and
-state from the browser, and sign-out. Its separate CI result is pending. The
-test-only ingress bridge does not establish vessel TLS or zero egress.
+state from the browser, and sign-out. The [Chrome job passed on PR
+#202](https://github.com/AttractAcq/Advocate-AI/actions/runs/44900895751/job/136836420808);
+the full release job is still pending. The test-only ingress bridge does not
+establish vessel TLS or zero egress.
+
+A follow-on synthetic variant requires TOTP enrollment for the fictional
+engineer, rejects an invalid code on the next login, and verifies a valid
+code reaches Core through Console. Its CI result is pending. Production factor
+choice, enrollment, recovery, site PKI and operator approval remain open.
 
 ## Required behavior
 

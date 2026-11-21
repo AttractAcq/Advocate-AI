@@ -20,7 +20,7 @@ from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, _identity_materia
 ISSUER = f"https://{IDENTITY_HOST}/realms/sovereign"
 
 
-def _realm(password: str) -> dict[str, object]:
+def _realm(password: str, mfa: bool = False) -> dict[str, object]:
     users = []
     for username, role in (("lab-chief_engineer-1", "chief_engineer"),
                            ("lab-deckhand-1", "deckhand")):
@@ -28,7 +28,7 @@ def _realm(password: str) -> dict[str, object]:
             "username": username, "enabled": True, "emailVerified": True,
             "email": username + "@synthetic.example.invalid",
             "firstName": "Synthetic", "lastName": "Crew",
-            "requiredActions": [],
+            "requiredActions": ["CONFIGURE_TOTP"] if mfa else [],
             "realmRoles": [role],
             "credentials": [{"type": "password", "value": password,
                              "temporary": False}],
@@ -37,6 +37,8 @@ def _realm(password: str) -> dict[str, object]:
         "realm": "sovereign", "enabled": True, "sslRequired": "all",
         "registrationAllowed": False, "resetPasswordAllowed": False,
         "accessTokenLifespan": 300,
+        "otpPolicyType": "totp", "otpPolicyAlgorithm": "HmacSHA1",
+        "otpPolicyDigits": 6, "otpPolicyPeriod": 30,
         "roles": {"realm": [{"name": "chief_engineer"}, {"name": "deckhand"}]},
         "clients": [{
             "clientId": "sovereign-core", "enabled": True,
