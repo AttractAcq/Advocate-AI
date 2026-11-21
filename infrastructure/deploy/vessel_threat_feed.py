@@ -6,10 +6,13 @@ import hashlib
 from pathlib import Path
 
 from infrastructure.deploy.vessel_runtime import ThreatFeedMount, VesselRuntimeError, _feed_options
+from services.intelligence.threat_snapshot import ThreatSnapshotReader
 
 
 _FIELDS = {"store", "trusted_key", "store_device", "store_inode",
            "key_device", "key_inode", "key_sha256"}
+_EVIDENCE_FIELDS = {"key_sha256", "snapshot_sha256", "feed_id",
+                    "publisher", "issued_at"}
 
 
 def feed_record(feed: ThreatFeedMount, state: Path, root: Path) -> dict[str, object]:
@@ -41,3 +44,24 @@ def feed_from_record(value: object, state: Path, root: Path) -> ThreatFeedMount:
     if current != value:
         raise VesselRuntimeError("vessel threat feed identity changed")
     return feed
+
+
+def feed_evidence(feed: ThreatFeedMount, state: Path, root: Path) -> dict[str, str]:
+    """Return the exact signed package and public key in use at capture time."""
+    record = feed_record(feed, state, root)
+    status = ThreatSnapshotReader(feed.store, feed.trusted_key).status()
+    if status["status"] == "missing":
+        raise VesselRuntimeError("feed-backed recovery needs an installed snapshot")
+    return {"key_sha256": record["key_sha256"],
+            "snapshot_sha256": status["sha256"],
+            "feed_id": status["feed_id"], "publisher": status["publisher"],
+            "issued_at": status["issued_at"]}
+
+
+def verify_feed_evidence(value: object, feed: ThreatFeedMount,
+                         state: Path, root: Path) -> None:
+    if (not isinstance(value, dict) or set(value) != _EVIDENCE_FIELDS or
+            any(not isinstance(item, str) for item in value.values())):
+        raise VesselRuntimeError("invalid signed feed binding")
+    if feed_evidence(feed, state, root) != value:
+        raise VesselRuntimeError("signed feed binding differs from host inputs")

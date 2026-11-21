@@ -42,6 +42,10 @@ from infrastructure.deploy.vessel_identity import (
 )
 from infrastructure.deploy.postgres_socket import sql as postgres_sql, verify_security
 from infrastructure.deploy.vessel_runtime import _state_options, start_signed_vessel_services
+from infrastructure.deploy.vessel_runtime import ThreatFeedMount
+from infrastructure.deploy.vessel_threat_feed import (
+    feed_evidence, feed_from_record, feed_record, verify_feed_evidence,
+)
 from infrastructure.release.bundle import require_supported_vessel_compatibility, verify_bundle
 from infrastructure.restic_repository import create_snapshot, restore_snapshot
 from scripts.phase5_postgres_rehearsal import _dump, _restore
@@ -58,6 +62,7 @@ class VesselRecoveryError(ValueError):
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 _RELEASE = re.compile(r"[0-9a-f]{24}\Z")
 _INSTALL = re.compile(r"[0-9a-f]{32}\Z")
+_FEED_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}\Z")
 _MAX_SOURCES = 120
 _MAX_AUDIT = 16 * 1024 * 1024
 _MAX_HISTORY = 256 * 1024 * 1024
@@ -258,10 +263,14 @@ def _receipt_payload(value: object) -> dict[str, object]:
                 "audit_count", "audit_tail_hash", "manifest_sha256",
                 "dump_sha256", "sources", "passages", "files"}
     if (not isinstance(value, dict) or type(value.get("schema")) is not int or
-            value["schema"] not in (1, 2, 3) or
+            value["schema"] not in (1, 2, 3, 4, 5) or
             set(value) != (common if value["schema"] == 1 else
                            common | {"knowledge_sha256"} if value["schema"] == 2 else
-                           common | {"knowledge_sha256", "identity"}) or
+                           common | {"knowledge_sha256", "identity"}
+                           if value["schema"] == 3 else
+                           common | {"knowledge_sha256", "feed"}
+                           if value["schema"] == 4 else
+                           common | {"knowledge_sha256", "identity", "feed"}) or
             not isinstance(value["installation_id"], str) or
             not _INSTALL.fullmatch(value["installation_id"]) or
             not isinstance(value["release"], str) or
@@ -271,7 +280,7 @@ def _receipt_payload(value: object) -> dict[str, object]:
             any(not isinstance(value[key], str) or not _ID.fullmatch(value[key])
                 for key in ("snapshot_id", "audit_tail_hash", "manifest_sha256",
                             "dump_sha256")) or
-            (value["schema"] in (2, 3) and
+            (value["schema"] in (2, 3, 4, 5) and
              (not isinstance(value["knowledge_sha256"], str) or
               not _ID.fullmatch(value["knowledge_sha256"]))) or
             not isinstance(value["repository"], str) or
@@ -280,9 +289,9 @@ def _receipt_payload(value: object) -> dict[str, object]:
             any(type(value[key]) is not int or value[key] < 1
                 for key in ("audit_count", "sources", "passages", "files")) or
             value["files"] != value["sources"] +
-            (7 if value["schema"] == 3 else 5)):
+            (7 if value["schema"] in (3, 5) else 5)):
         raise VesselRecoveryError("invalid vessel recovery receipt fields")
-    if value["schema"] == 3:
+    if value["schema"] in (3, 5):
         identity = value["identity"]
         if (not isinstance(identity, dict) or
                 set(identity) != {"issuer", "ca_sha256", "revocations_sha256"} or
@@ -296,6 +305,22 @@ def _receipt_payload(value: object) -> dict[str, object]:
             raise VesselRecoveryError("invalid vessel recovery issuer") from exc
         if not identity["issuer"].startswith("https://"):
             raise VesselRecoveryError("vessel recovery issuer must use HTTPS")
+    if value["schema"] in (4, 5):
+        feed = value["feed"]
+        if (not isinstance(feed, dict) or
+                set(feed) != {"key_sha256", "snapshot_sha256", "feed_id",
+                              "publisher", "issued_at"} or
+                any(not isinstance(feed[name], str) or not _ID.fullmatch(feed[name])
+                    for name in ("key_sha256", "snapshot_sha256")) or
+                any(not isinstance(feed[name], str) or not _FEED_ID.fullmatch(feed[name])
+                    for name in ("feed_id", "publisher"))):
+            raise VesselRecoveryError("invalid vessel recovery feed binding")
+        try:
+            issued = datetime.fromisoformat(feed["issued_at"])
+        except (TypeError, ValueError) as exc:
+            raise VesselRecoveryError("invalid vessel recovery feed issue time") from exc
+        if issued.tzinfo is None:
+            raise VesselRecoveryError("vessel recovery feed issue time lacks timezone")
     try:
         timestamp = datetime.fromisoformat(value["created_utc"])
     except (TypeError, ValueError) as exc:
@@ -346,15 +371,16 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
         raise VesselRecoveryError("vessel recovery paths must be separate")
     with _operation_lock(root):
         record = _read_state(root)
-        if "threat_feed" in record:
-            raise VesselRecoveryError(
-                "feed-backed recovery requires a signed feed binding receipt")
         release = record["active"]
         stage = root / "vessel-releases" / release
         _verify_stage(stage, trusted_key, release)
         state, lab_password, identity = _record_inputs(
             record, root, stage / "console-config.json")
-        _state_options(state, lab_password, root, identity=identity)
+        feed_data = record.get("threat_feed")
+        feed = feed_from_record(feed_data, state, root) if feed_data is not None else None
+        binding = feed_evidence(feed, state, root) if feed is not None else None
+        _state_options(state, lab_password, root, identity=identity,
+                       threat_feed=feed)
         for candidate in (repository, staging_parent, receipt.parent):
             if (candidate.resolve().is_relative_to(state.resolve()) or
                     state.resolve().is_relative_to(candidate.resolve())):
@@ -414,8 +440,11 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
                             (frozen / "oidc-revocations.jsonl").read_bytes()):
                     raise VesselRecoveryError("OIDC material changed during recovery capture")
                 _recovery_inventory(installation_id, runtime)
+                if feed is not None:
+                    verify_feed_evidence(binding, feed, state, root)
                 receipt_fields = {
-                    "schema": 3 if identity is not None else 2,
+                    "schema": (5 if identity is not None else 4) if feed else
+                              (3 if identity is not None else 2),
                     "installation_id": installation_id,
                     "release": release, "data_volume": runtime["data_volume"],
                     "snapshot_id": snapshot["snapshot_id"],
@@ -435,6 +464,8 @@ def create_vessel_recovery_set(root: Path, trusted_key: Path, crane: Path,
                         "ca_sha256": _sha256(frozen / "oidc-ca.pem"),
                         "revocations_sha256": _sha256(frozen / "oidc-revocations.jsonl"),
                     }
+                if binding is not None:
+                    receipt_fields["feed"] = binding
                 payload = _receipt_payload(receipt_fields)
                 _sign_receipt(receipt, payload, signing_key)
                 return payload
@@ -473,7 +504,7 @@ def restore_vessel_recovery_files(receipt: Path, receipt_key: Path,
     restored = restore_snapshot(value["snapshot_id"], Path(value["repository"]),
                                 password_file, restic, restic_sha256, destination)
     try:
-        if value["schema"] == 3:
+        if value["schema"] in (3, 5):
             certificate = destination / "oidc-ca.crt"
             core_certificate = destination / "oidc-ca.pem"
             if os.path.lexists(core_certificate):
@@ -483,7 +514,7 @@ def restore_vessel_recovery_files(receipt: Path, receipt_key: Path,
                                          dir=destination.parent) as temporary:
             sources, checkpoint, manifest_digest = _stage_core(
                 destination, Path(temporary) / "frozen",
-                oidc=value["schema"] == 3)
+                oidc=value["schema"] in (3, 5))
         with (destination / "postgres.dump").open("rb") as archive:
             header = archive.read(5)
         if (restored["files"] != value["files"] or sources != value["sources"] or
@@ -492,7 +523,7 @@ def restore_vessel_recovery_files(receipt: Path, receipt_key: Path,
                 _sha256(destination / "postgres.dump") != value["dump_sha256"] or
                 header != b"PGDMP"):
             raise VesselRecoveryError("restored vessel recovery set differs from receipt")
-        if value["schema"] == 3 and (
+        if value["schema"] in (3, 5) and (
                 _sha256(destination / "oidc-ca.pem") != value["identity"]["ca_sha256"] or
                 _sha256(destination / "oidc-revocations.jsonl") !=
                 value["identity"]["revocations_sha256"]):
@@ -569,7 +600,8 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                                  identity_pair: Path | None = None,
                                  identity_pair_key: Path | None = None,
                                  identity_archive: Path | None = None,
-                                 identity_archive_key: Path | None = None
+                                 identity_archive_key: Path | None = None,
+                                 threat_feed: ThreatFeedMount | None = None
                                  ) -> dict[str, object]:
     """Activate a clean synthetic host only after signed, restricted restore."""
     _owner_directory(root.parent)
@@ -580,7 +612,9 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
     require_supported_vessel_compatibility(manifest)
     if _release_id(bundle, console_config) != value["release"]:
         raise VesselRecoveryError("recovery release differs from signed receipt")
-    oidc = value["schema"] == 3
+    oidc = value["schema"] in (3, 5)
+    if (threat_feed is None) != (value["schema"] not in (4, 5)):
+        raise VesselRecoveryError("clean restore feed mode differs from signed receipt")
     if (oidc and (lab_password is not None or identity_network is None)) or \
             (not oidc and (lab_password is None or identity_network is not None)):
         raise VesselRecoveryError("clean restore identity mode differs from receipt")
@@ -600,6 +634,10 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
            repository.resolve().is_relative_to(candidate.resolve())
            for candidate in (root, core_state, staging_parent)):
         raise VesselRecoveryError("clean recovery paths overlap encrypted repository")
+    feed_data = None
+    if threat_feed is not None:
+        feed_data = feed_record(threat_feed, core_state, root)
+        verify_feed_evidence(value["feed"], threat_feed, core_state, root)
     if lab_password is not None:
         lab_secret = _private_bytes(lab_password, 4096).decode("utf-8")
         if (not 16 <= len(lab_secret.rstrip("\n")) <= 200 or
@@ -652,12 +690,13 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                 marker["identity_pair_sha256"] = pair_digest
             _write_private_record(root, "vessel-restore-intent.json", marker)
             _write_intent(root, release, installation_id, core_state, lab_password,
-                          identity=identity)
+                          identity=identity, threat_feed=feed_data)
             knowledge = start_signed_knowledge(stage / "bundle", trusted_key,
                                                crane, root, installation_id,
                                                initialize=True,
                                                restore_attempt=restore_attempt)
-            _state_options(core_state, lab_password, root, identity=identity)
+            _state_options(core_state, lab_password, root, identity=identity,
+                           threat_feed=threat_feed)
             _restore(knowledge.container_id, restored / "postgres.dump")
             _grant_restored_knowledge(knowledge.container_id)
             _verify_knowledge_schema(knowledge)
@@ -665,17 +704,19 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                                         knowledge, core_state, root)
             if (database["sources"] != value["sources"] or
                     database["passages"] != value["passages"] or
-                    (value["schema"] in (2, 3) and
+                    (value["schema"] in (2, 3, 4, 5) and
                      database["knowledge_sha256"] != value["knowledge_sha256"])):
                 raise VesselRecoveryError("restored Knowledge differs from receipt")
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane, stage / "console-config.json",
                 core_state, lab_password, root, knowledge, installation_id,
-                restore_attempt=restore_attempt, identity=identity)
+                restore_attempt=restore_attempt, identity=identity,
+                threat_feed=threat_feed)
             _write_state(root, _state_payload(release, installation_id,
                                                core_state, lab_password,
                                                services, knowledge,
-                                               identity=identity))
+                                               identity=identity,
+                                               threat_feed=feed_data))
             (root / "vessel-restore-intent.json").unlink()
             (root / "vessel-intent.json").unlink(missing_ok=True)
             return {"result": "restored-and-activated", "active": release,
@@ -837,7 +878,7 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
         marker = _read_restore_intent(root)
         intent = _read_intent(root)
         value = verify_vessel_recovery_receipt(receipt, receipt_key)
-        if value["schema"] not in (2, 3):
+        if value["schema"] not in (2, 3, 4, 5):
             raise VesselRecoveryError("finishing restore requires row-digest receipt")
         if (marker["snapshot_id"] != value["snapshot_id"] or
                 marker["release"] != value["release"] or
@@ -845,10 +886,16 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
                 intent["release"] != value["release"] or
                 intent["installation_id"] != value["installation_id"] or
                 intent["data_volume"] != value["data_volume"] or
-                intent["schema"] != (2 if value["schema"] == 3 else 1)):
+                intent["schema"] != (2 if value["schema"] in (3, 5) else 1) or
+                ("threat_feed" in intent) != (value["schema"] in (4, 5))):
             raise VesselRecoveryError("restore intent differs from signed receipt")
+        feed_data = intent.get("threat_feed")
+        feed = (feed_from_record(feed_data, Path(intent["core_state"]), root)
+                if feed_data is not None else None)
+        if feed is not None:
+            verify_feed_evidence(value["feed"], feed, Path(intent["core_state"]), root)
         pair_digest = _verify_activation_identity_pair(
-            value["schema"] == 3, receipt, receipt_key, staging_parent,
+            value["schema"] in (3, 5), receipt, receipt_key, staging_parent,
             identity_pair, identity_pair_key, identity_archive,
             identity_archive_key)
         if marker.get("identity_pair_sha256") != pair_digest:
@@ -902,7 +949,8 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
                     _sha256(identity.revocations_file) !=
                     value["identity"]["revocations_sha256"]):
                 raise VesselRecoveryError("partial identity differs from signed receipt")
-            _state_options(state, lab_password, root, identity=identity)
+            _state_options(state, lab_password, root, identity=identity,
+                           threat_feed=feed)
             _verify_knowledge_schema(knowledge)
             database = _verify_database(stage / "bundle", trusted_key, crane,
                                         knowledge, state, root)
@@ -925,10 +973,11 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane, stage / "console-config.json",
                 state, lab_password, root, knowledge, value["installation_id"],
-                restore_attempt=marker["restore_attempt"], identity=identity)
+                restore_attempt=marker["restore_attempt"], identity=identity,
+                threat_feed=feed)
             _write_state(root, _state_payload(
                 value["release"], value["installation_id"], state, lab_password,
-                services, knowledge, identity=identity))
+                services, knowledge, identity=identity, threat_feed=feed_data))
         except Exception:
             try:
                 (root / "vessel-state.json").unlink(missing_ok=True)
@@ -972,8 +1021,13 @@ def abandon_incomplete_vessel_restore(root: Path, trusted_key: Path,
                 intent["release"] != value["release"] or
                 intent["installation_id"] != value["installation_id"] or
                 intent["data_volume"] != value["data_volume"] or
-                intent["schema"] != (2 if value["schema"] == 3 else 1)):
+                intent["schema"] != (2 if value["schema"] in (3, 5) else 1) or
+                ("threat_feed" in intent) != (value["schema"] in (4, 5))):
             raise VesselRecoveryError("restore intent differs from signed receipt")
+        if ("threat_feed" in intent and
+                intent["threat_feed"]["key_sha256"] !=
+                value["feed"]["key_sha256"]):
+            raise VesselRecoveryError("restore feed key differs from signed receipt")
         _verify_stage(root / "vessel-releases" / value["release"],
                       trusted_key, value["release"])
         active = root / "vessel-state.json"
@@ -1085,7 +1139,8 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
                                    identity_pair: Path | None = None,
                                    identity_pair_key: Path | None = None,
                                    identity_archive: Path | None = None,
-                                   identity_archive_key: Path | None = None
+                                   identity_archive_key: Path | None = None,
+                                   threat_feed: ThreatFeedMount | None = None
                                    ) -> dict[str, object]:
     """Retry a terminal abandoned attempt into entirely new private paths."""
     with _operation_lock(abandoned_root):
@@ -1102,12 +1157,17 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
                 intent["release"] != value["release"] or
                 intent["installation_id"] != value["installation_id"] or
                 intent["data_volume"] != value["data_volume"] or
-                intent["schema"] != (2 if value["schema"] == 3 else 1)):
+                intent["schema"] != (2 if value["schema"] in (3, 5) else 1) or
+                ("threat_feed" in intent) != (value["schema"] in (4, 5))):
             raise VesselRecoveryError("abandoned attempt differs from signed receipt")
-        if value["schema"] == 3:
+        if ("threat_feed" in intent and
+                intent["threat_feed"]["key_sha256"] !=
+                value["feed"]["key_sha256"]):
+            raise VesselRecoveryError("abandoned feed key differs from signed receipt")
+        if value["schema"] in (3, 5):
             _owner_directory(staging_parent)
         pair_digest = _verify_activation_identity_pair(
-            value["schema"] == 3, receipt, receipt_key, staging_parent,
+            value["schema"] in (3, 5), receipt, receipt_key, staging_parent,
             identity_pair, identity_pair_key, identity_archive,
             identity_archive_key)
         if marker.get("identity_pair_sha256") != pair_digest:
@@ -1131,5 +1191,6 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
             lab_password, staging_parent, identity_network=identity_network,
             identity_pair=identity_pair, identity_pair_key=identity_pair_key,
             identity_archive=identity_archive,
-            identity_archive_key=identity_archive_key)
+            identity_archive_key=identity_archive_key,
+            threat_feed=threat_feed)
         return {**result, "retry_of_attempt": marker["restore_attempt"]}
