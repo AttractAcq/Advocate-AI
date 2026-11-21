@@ -379,6 +379,33 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
             params={"since": "2026-11-15T00:00:00Z", "until": "2026-12-15T00:00:00Z"})).status_code, 422)
         self.assertEqual((await self.client.get("/api/security/incidents/wazuh-alerts-4.x-2026.11.15:missing-event", headers=admin)).status_code, 404)
 
+    async def test_incident_reads_discard_results_after_mid_request_logout(self):
+        hit = json.loads(ALERTS.read_text())["hits"]["hits"][0]
+        incident_id = f"{hit['_index']}:{hit['_id']}"
+        selected_token = None
+        with patch("apps.api.main.WazuhIndexerReader") as reader_type:
+            app = create_app(Settings(lab_password="synthetic-test-passphrase",
+                                      wazuh_indexer_endpoint="https://10.40.1.10:9200",
+                                      wazuh_read_token="synthetic-read-token"), self.model)
+
+            def alerts(**kwargs):
+                app.state.sessions.logout(selected_token)
+                return [{"index_name": hit["_index"], "index_id": hit["_id"],
+                         "source": hit["_source"]}]
+
+            reader_type.return_value.alerts.side_effect = alerts
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                for path in ("/api/security/incidents", f"/api/security/incidents/{incident_id}"):
+                    login = await client.post("/api/login", json={
+                        "user_id": "lab-avit_admin-1", "password": "synthetic-test-passphrase"})
+                    self.assertEqual(login.status_code, 200)
+                    selected_token = login.json()["access_token"]
+                    response = await client.get(path, headers={
+                        "Authorization": "Bearer " + selected_token})
+                    self.assertEqual(response.status_code, 403, response.text)
+                    self.assertNotIn(incident_id, response.text)
+
     async def test_related_alert_api_is_role_limited_and_queries_a_bounded_window(self):
         hits = json.loads(ALERTS.read_text())["hits"]["hits"]
         follow = json.loads(json.dumps(hits[0]))
