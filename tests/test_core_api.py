@@ -394,6 +394,15 @@ class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("general questions", instruction)
         self.assertNotIn("supplied sources", instruction)
 
+    async def test_token_limited_answer_is_not_returned_as_complete(self) -> None:
+        model = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
+                "choices": [{"message": {"content": "An incomplete answer"},
+                             "finish_reason": "length"}]})))
+        with self.assertRaisesRegex(ModelUnavailable, "truncated"):
+            await model.complete("Explain hashes", [], general=True)
+
     async def test_timeout_is_distinct(self) -> None:
         def timeout(_: httpx.Request) -> httpx.Response:
             raise httpx.ReadTimeout("synthetic timeout")

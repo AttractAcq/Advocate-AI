@@ -65,9 +65,10 @@ class LocalModel:
             instruction = system_instruction
         elif general:
             instruction = (
-                "You are Sovereign AI in a synthetic lab. Answer general questions clearly. "
+                "You are Sovereign AI in a synthetic lab. Answer general questions clearly "
+                "in at most two sentences unless the user asks for more detail. "
                 "Do not claim access to vessel documents or control of equipment. "
-                "State uncertainty when you do not know."
+                "State uncertainty when you do not know, and avoid absolute guarantees."
             )
         else:
             instruction = (
@@ -100,7 +101,10 @@ class LocalModel:
             async with httpx.AsyncClient(timeout=self.timeout, trust_env=False, transport=self.transport) as client:
                 response = await client.post(f"{self.endpoint}/chat/completions", json=payload)
                 response.raise_for_status()
-                answer = response.json()["choices"][0]["message"]["content"]
+                choice = response.json()["choices"][0]
+                answer = choice["message"]["content"]
+                if choice.get("finish_reason") == "length":
+                    raise ModelUnavailable("local inference output was truncated")
         except httpx.TimeoutException as exc:
             raise ModelTimeout("local inference timed out") from exc
         except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as exc:
