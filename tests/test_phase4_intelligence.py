@@ -69,9 +69,14 @@ class IntelligenceTests(unittest.TestCase):
                 transport=httpx.MockTransport(
                     lambda request: httpx.Response(200, json=json.loads(ALERTS.read_text()))))
             self.assertIsInstance(reader._tls_context, ssl.SSLContext)
+            trusted_certificates = reader._tls_context.get_ca_certs(binary_form=True)
+            self.assertIn(certificate.public_bytes(serialization.Encoding.DER),
+                          trusted_certificates)
             ca.unlink()
             ca.symlink_to(root / "other.pem")
             self.assertEqual(len(reader.alerts(limit=3)), 3)
+            self.assertEqual(reader._tls_context.get_ca_certs(binary_form=True),
+                             trusted_certificates)
             with self.assertRaises(ValueError):
                 WazuhIndexerReader("https://10.40.1.10:9200", "token", ca_bundle=ca)
             ca.unlink()
