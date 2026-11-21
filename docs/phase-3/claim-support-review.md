@@ -91,3 +91,23 @@ streams at most 64 KiB of completion JSON and rejects answers over 8,000
 characters instead of silently slicing them. A live local Qwen request and
 focused oversized-response tests exercise this boundary; they do not measure
 answer quality on vessel material.
+
+## Procedure-action candidate run
+
+A separate [five-case Core API run](procedure-answer-evaluation.json) at source
+commit `9063449` asks for required actions in one fictional procedure from each
+of four collections, then asks the engineering question as a deckhand. The
+earlier strict word-subset guard returned no source for all four permitted
+questions because it treated question framing and `actions`/`action` or
+`require`/`required` as different content. Shared deterministic term
+normalization now handles those forms in the SQLite, PostgreSQL, vector and
+Phase 2 fixture search paths while preserving authorization before ranking.
+
+The new run records four correct source IDs, hashes and exact preview excerpts,
+and one deckhand no-answer denial. I compared each answer with its excerpt:
+the management, engineering and interior actions are directly supported. The
+deck answer says “retrieve the fictional deck checklist” where the source says
+“use the fictional deck checklist”; that is a small wording expansion, so I
+would send it to the independent claim-support reviewer. A separate rerun of
+the 50 marker questions retained 40/40 expected answers and citations and
+10/10 denials. These are synthetic, internal checks and do not close AT-09.
