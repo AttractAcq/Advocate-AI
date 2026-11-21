@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -134,6 +135,72 @@ class OidcTests(unittest.TestCase):
         self.assertIsNotNone(restarted.user_for(self.token(iat=int(time.time()) - 1)))
         path.write_text('{"sha256":')
         self.assertIsNone(restarted.user_for(self.token()))
+
+    def test_revocation_file_rejects_links_fifo_and_exposed_permissions(self) -> None:
+        path = Path(self.temporary.name) / "revoked.jsonl"
+        protected = Path(self.temporary.name) / "protected.txt"
+        protected.write_text("untouched")
+        protected.chmod(0o600)
+        verifier = OidcVerifier(self.issuer, self.roles, transport=self.verifier.transport,
+                                revocations_path=path)
+        token = self.token()
+        for kind in ("symlink", "hardlink", "fifo"):
+            with self.subTest(kind=kind):
+                if kind == "symlink":
+                    path.symlink_to(protected)
+                elif kind == "hardlink":
+                    os.link(protected, path)
+                else:
+                    os.mkfifo(path)
+                self.assertIsNone(verifier.user_for(token))
+                with self.assertRaises((OSError, ValueError)):
+                    verifier.revoke(token)
+                self.assertEqual(protected.read_text(), "untouched")
+                path.unlink()
+        path.write_text("")
+        path.chmod(0o644)
+        self.assertIsNone(verifier.user_for(token))
+        with self.assertRaises((OSError, ValueError)):
+            verifier.revoke(token)
+
+    def test_revocation_log_rejects_ambiguous_and_partial_records(self) -> None:
+        path = Path(self.temporary.name) / "revoked.jsonl"
+        verifier = OidcVerifier(self.issuer, self.roles, transport=self.verifier.transport,
+                                revocations_path=path)
+        token = self.token()
+        for content in ('{"sha256":"bad"}\n',
+                        '{"sha256":"' + '0' * 64 + '","sha256":"' + '1' * 64 + '"}\n',
+                        '{"sha256":"' + '0' * 64 + '"}'):
+            with self.subTest(content=content[:20]):
+                path.write_text(content)
+                path.chmod(0o600)
+                self.assertIsNone(verifier.user_for(token))
+
+    def test_missing_or_redirected_revocation_directory_denies(self) -> None:
+        directory = Path(self.temporary.name) / "revocation-store"
+        verifier = OidcVerifier(self.issuer, self.roles, transport=self.verifier.transport,
+                                revocations_path=directory / "revoked.jsonl")
+        token = self.token()
+        self.assertIsNone(verifier.user_for(token))
+        directory.mkdir(mode=0o700)
+        self.assertIsNotNone(verifier.user_for(token))
+        directory.rmdir()
+        directory.symlink_to(self.roles.parent, target_is_directory=True)
+        self.assertIsNone(verifier.user_for(token))
+
+    def test_logout_reports_unavailable_when_revocation_write_fails(self) -> None:
+        with patch("apps.api.main.OidcVerifier", return_value=self.verifier):
+            app = create_app(Settings(fixture_root=self.roles.parent,
+                                      oidc_issuer=self.issuer))
+        async def call_logout() -> httpx.Response:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://127.0.0.1") as client:
+                return await client.post("/api/logout", headers={
+                    "Authorization": "Bearer " + self.token()})
+        with patch.object(self.verifier, "revoke", side_effect=OSError("disk unavailable")):
+            response = asyncio.run(call_logout())
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "identity revocation unavailable")
 
     def test_unknown_kids_cannot_trigger_unbounded_jwks_refresh(self) -> None:
         calls = []

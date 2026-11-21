@@ -365,7 +365,11 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
     @app.post("/api/logout")
     def logout(identity: tuple[str, dict[str, str]] = Depends(current_identity)) -> dict[str, bool]:
         if oidc:
-            oidc.revoke(identity[0])
+            try:
+                oidc.revoke(identity[0])
+            except (OSError, ValueError) as exc:
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                    "identity revocation unavailable") from exc
         else:
             sessions.logout(identity[0])
         return {"ok": True}
