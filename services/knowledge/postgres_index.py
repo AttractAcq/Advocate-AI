@@ -21,6 +21,7 @@ from services.knowledge.indexed_retrieval import _terms, live_approved_rows
 from services.knowledge.ingestion import (_parse_verified_bytes, _valid_source,
                                           chunks, parse_local)
 from services.knowledge.manifest_io import load_manifest
+from services.knowledge.query_terms import search_terms as _search_terms
 from services.policy.policy_file import load_policy
 
 
@@ -391,7 +392,7 @@ def search_index_pg(root: Path, manifest: Path, dsn: str, user_id: str, query: s
         raise ValueError("query must contain 1–1000 characters")
     if not isinstance(limit, int) or not 1 <= limit <= 10:
         raise ValueError("limit must be between 1 and 10")
-    wanted = _terms(query)
+    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
     if not wanted:
         return []
     allowed = _allowed(root, manifest, dsn, user_id, document_ids, collections)
@@ -471,7 +472,7 @@ def vector_search_pg(root: Path, manifest: Path, dsn: str, user_id: str, query: 
                      collections: set[str] | None = None) -> list[dict[str, object]]:
     if not isinstance(query, str) or not query.strip() or len(query) > 1000 or not 1 <= limit <= 10:
         raise ValueError("invalid vector query")
-    wanted = _terms(query)
+    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
     if not wanted:
         return []
     allowed = _allowed(root, manifest, dsn, user_id, document_ids, collections)

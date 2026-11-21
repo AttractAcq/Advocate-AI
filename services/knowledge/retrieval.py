@@ -12,7 +12,7 @@ from pathlib import Path
 
 from services.knowledge.acl import source_access
 from services.knowledge.paths import read_source_bytes
-from services.knowledge.query_terms import terms as _terms
+from services.knowledge.query_terms import search_terms as _search_terms, terms as _terms
 from services.policy.policy_file import load_policy
 _MAX_DOCUMENT_BYTES = 64 * 1024
 _MAX_QUERY_CHARS = 1000
@@ -39,7 +39,7 @@ def search_fixture_documents(
     base = fixture_root.resolve(strict=True)
     manifest = base / "manifest.csv"
     policy = load_policy(base / "roles.json")
-    wanted = _terms(query)
+    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
     if not wanted:
         return []
 

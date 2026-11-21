@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from services.knowledge.indexed_retrieval import _terms, approved_rows
+from services.knowledge.query_terms import search_terms as _search_terms
 
 
 class Embedder(Protocol):
@@ -102,7 +103,7 @@ def vector_search(root: Path, manifest: Path, database: Path | str, user_id: str
                                 limit=limit, document_ids=document_ids, collections=collections)
     if not query.strip() or len(query) > 1000 or not 1 <= limit <= 10:
         raise ValueError("invalid vector query")
-    wanted = _terms(query)
+    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
     if not wanted:
         return []
     allowed = {row["document_id"]: row for row in approved_rows(root, manifest, database, user_id)

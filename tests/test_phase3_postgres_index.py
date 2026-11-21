@@ -38,6 +38,13 @@ class FakeModel:
         return "Synthetic answer [ENG-001 v1]"
 
 
+class ConstantEmbedder:
+    model = "synthetic-generic-query"
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] for _ in texts]
+
+
 class SchemaVersionBoundaryTests(unittest.TestCase):
     def test_unversioned_existing_table_requires_explicit_migration(self) -> None:
         db = Mock()
@@ -123,6 +130,23 @@ class PostgresKnowledgeTests(unittest.TestCase):
         self.assertIn("ENG-001", result["quarantined"])
         self.assertEqual(vector_search(self.root, self.manifest, self.dsn,
                                        "engineer", "generator", FakeEmbedder()), [])
+
+    def test_generic_query_requires_selected_document(self) -> None:
+        self.add_source("ENG-002", "engineering",
+                        "HVAC intake procedure. Required action: Isolate the test equipment.")
+        self.save()
+        question = "What actions are required?"
+        self.assertEqual(search_index(self.root, self.manifest, self.dsn,
+                                      "engineer", question), [])
+        self.assertEqual([hit["document_id"] for hit in search_index(
+            self.root, self.manifest, self.dsn, "engineer", question,
+            document_ids={"ENG-002"})], ["ENG-002"])
+        build_vectors(self.dsn, ConstantEmbedder())
+        self.assertEqual(vector_search(self.root, self.manifest, self.dsn,
+                                       "engineer", question, ConstantEmbedder()), [])
+        self.assertEqual([hit["document_id"] for hit in vector_search(
+            self.root, self.manifest, self.dsn, "engineer", question, ConstantEmbedder(),
+            document_ids={"ENG-002"})], ["ENG-002"])
 
     def test_manifest_failure_and_replacement_invalidate_results(self) -> None:
         original = dict(self.rows[0])

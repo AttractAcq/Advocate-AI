@@ -128,9 +128,34 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
                                       json={"message": "According to the Line inspection procedure, what actions are required?",
                                             "mode": "documents"})
         self.assertEqual([item["document_id"] for item in deck.json()["citations"]], ["DEC-002"])
-        broad = search_index(self.root, self.manifest, self.database, "engineer",
-                             "What should be done?")
-        self.assertEqual(broad, [])
+        for question in ("What should be done?", "What actions are required?",
+                         "What is the procedure?", "Which steps do the procedures require?"):
+            with self.subTest(generic=question):
+                self.assertEqual(search_index(self.root, self.manifest, self.database,
+                                              "engineer", question), [])
+                response = await self.client.post("/api/chat", headers=engineer,
+                                                  json={"message": question, "mode": "documents"})
+                self.assertEqual(response.json()["citations"], [])
+        selected = search_index(self.root, self.manifest, self.database, "engineer",
+                                "What actions are required?", document_ids={"ENG-002"})
+        self.assertEqual([item["document_id"] for item in selected], ["ENG-002"])
+        self.assertEqual(search_index(self.root, self.manifest, self.database, "engineer",
+                                      "What actions are required?",
+                                      document_ids={"ENG-002", "DEC-002"}), [])
+        class ConstantEmbedder:
+            model = "synthetic-generic-query"
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[1.0, 0.0] for _ in texts]
+
+        embedder = ConstantEmbedder()
+        build_vectors(self.database, embedder)
+        self.assertEqual(vector_search(self.root, self.manifest, self.database, "engineer",
+                                       "What actions are required?", embedder), [])
+        selected_vector = vector_search(self.root, self.manifest, self.database, "engineer",
+                                        "What actions are required?", embedder,
+                                        document_ids={"ENG-002"})
+        self.assertEqual([item["document_id"] for item in selected_vector], ["ENG-002"])
 
     async def test_knowledge_reads_discard_results_after_mid_request_logout(self) -> None:
         engineer = await self.login("engineer")
