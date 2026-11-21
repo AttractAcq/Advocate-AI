@@ -21,6 +21,15 @@ fictional HTTPS JWKS service to exercise install, role denial, logout and Core
 clean restore. Its CI result is pending; it does not exercise Keycloak login,
 browser redirects or Keycloak state recovery.
 
+A separate Docker CI rehearsal now starts the pinned lab Keycloak image on an
+internal identity network, imports fictional crew and Console client records,
+and exchanges PKCE authorization codes for engineer and deckhand tokens. The
+built Core image validates those tokens against the Keycloak JWKS and current
+local policy, limits visible source collections, refuses the lab credential
+path and rejects a logged-out token. This is protocol and API evidence only;
+the vessel browser, real accounts, MFA, Keycloak clean recovery, approved PKI
+and target network remain untested.
+
 ## Required behavior
 
 - A strict vessel release uses one named, local HTTPS Keycloak realm for crew
