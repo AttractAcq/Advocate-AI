@@ -1,8 +1,8 @@
 # Signed offline model artifact in a vessel bundle
 
-Schema-7 vessel bundles bind a model directory to the same Ed25519 release
-signature as the Core, Console and Knowledge images. Put the approved model
-files under `payload/model/` and pass `--model-id` to `pack-knowledge`. The
+Schema-7 and schema-8 vessel bundles bind a model directory to the same Ed25519
+release signature as the Core, Console and Knowledge images. Put the approved
+model files under `payload/model/` and pass `--model-id` to `pack-knowledge`. The
 manifest lists every model file with its size and SHA-256 twice: in the full
 payload inventory and in a model descriptor bearing that ID. The signer checks
 the exact model tree, copies it into the private bundle and signs the copied
@@ -13,7 +13,7 @@ Stopped release switching repeats that process before activation. The free
 space check is a local filesystem preflight; target quotas and actual peak
 usage still require a hardware rehearsal.
 
-For schema-7 installs, Core receives `SOVEREIGN_MODEL_NAME` from the verified
+For schema-7 and schema-8 installs, Core receives `SOVEREIGN_MODEL_NAME` from the verified
 model descriptor and a fixed HTTP loopback `/v1` endpoint. Vessel status
 checks those environment values against the active signed bundle and rejects
 an altered request name or endpoint. This binds Core's request configuration
@@ -52,8 +52,19 @@ The ID is an operator label, not proof of model publisher, licence, weights
 quality or serving compatibility. The connected preparation process must
 record source, revision, publisher authentication, redistribution terms and
 model safety decision separately before the custodian signs a production
-release. The schema-7 synthetic CI fixture uses two small fictional byte sets
-to prove signed model changes and tamper refusal; it cannot run inference.
+release. To record the source declaration in a schema-8 bundle, pass
+`--model-provenance-json` with a small JSON object containing exactly
+`source_url` (HTTPS URL without credentials or query), `revision` (40 or 64
+lowercase hex characters), `publisher` and `license_claim`. The signer and
+verifier reject malformed declarations and sign the values in the model
+descriptor. These are custodian declarations, not proof of publisher identity,
+licence terms or redistribution approval. Schema-7 model bundles without this
+declaration remain readable for prior synthetic lab work. The schema-8 CI
+fixture uses fictional model bytes and an explicitly synthetic declaration;
+it cannot run inference. The [PR #181 implementation-head
+run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44847102926)
+verifies schema 8 and that declaration before the synthetic signed vessel
+rehearsal, which completed with `signed-and-verified`.
 
 Actual model selection, vLLM start, offline cold start and GPU capacity remain
 the target-lab gate B-02. Approved media, key custody, licence review and

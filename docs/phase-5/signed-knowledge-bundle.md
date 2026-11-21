@@ -40,6 +40,7 @@ The CLI accepts a strict descriptor file:
   --images-json /path/to/three-image-descriptors.json \
   --knowledge-schema 1 --core-state-schema 1 \
   --model-id APPROVED_MODEL_ID \
+  --model-provenance-json /path/to/model-provenance.json \
   --crane /path/to/verified/crane
 ```
 
@@ -48,14 +49,14 @@ remain [denied by archive intake](pgvector-image-intake.md). The locally built
 [Alpine Knowledge candidate](alpine-knowledge-image.md) has a resolved SBOM
 and a zero-finding synthetic scan, but distribution provenance, licence review
 and release-signing custody remain open. The [vessel installer](signed-vessel-first-install.md)
-now stages and activates the schema-6 or schema-7 database image with separate database
+now stages and activates the schema-6, schema-7 or schema-8 database image with separate database
 roles and protected credentials. [Stopped release switching](vessel-release-switch.md)
 and [coordinated recovery](vessel-recovery-set.md) have synthetic rehearsals.
 Actual schema migration and rollback compatibility across versions, target
 hardware and independent security review remain open.
 
-The [actual-image rehearsal](actual-three-image-release.md) now tests the schema-7
-model-file binding and this
+The [actual-image rehearsal](actual-three-image-release.md) now tests the schema-8
+model-file and declared-provenance binding and this
 contract against the locally built Alpine Knowledge candidate alongside Core
 and Console. Its result is a disposable synthetic trial, not a production
 release authorization.

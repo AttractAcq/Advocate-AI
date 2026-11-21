@@ -6,8 +6,9 @@ images. It saves each exact local image into a temporary archive, validates
 the archive layers and manifest digest with pinned crane, produces a CycloneDX
 inventory with pinned Syft, and scans the same archive with pinned Trivy and
 the dated offline vulnerability database. Each role must pass the release
-intake before [schema 7](signed-knowledge-bundle.md) can sign the exact three
-archives, their evidence files, a fictional model file tree and `target=vessel` under one detached Ed25519
+intake before [schema 8](signed-knowledge-bundle.md) can sign the exact three
+archives, their evidence files, a fictional model file tree, its declared
+synthetic provenance and `target=vessel` under one detached Ed25519
 signature. The verifier checks the resulting copy with a separate public key.
 The rehearsal changes the fictional model bytes in the second release and
 requires the model descriptor to change; it also alters a signed model file

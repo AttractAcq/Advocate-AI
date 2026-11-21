@@ -9,7 +9,7 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #180](https://github.com/AttractAcq/Advocate-AI/pull/180), including
+through [PR #181](https://github.com/AttractAcq/Advocate-AI/pull/181), including
 their ancestors, at a recorded commit SHA. These are stacked, unmerged PRs;
 the reviewer must identify the exact final tree tested. The main paths are:
 
@@ -23,6 +23,7 @@ the reviewer must identify the exact final tree tested. The main paths are:
 | Operator entry points | `scripts/vesselctl.py`, [switch runbook](../phase-5/vessel-release-switch.md), [recovery runbook](../phase-5/vessel-recovery-set.md) | Required inputs, refusal paths and operator-visible state |
 | Actual images and tests | `scripts/phase5_three_image_release.py`, `tests/test_vessel_release_switch.py`, `tests/test_vessel_recovery_set.py`, `.github/workflows/ci.yml` | What is exercised with signed images versus mocks; review the engineer/deckhand API probe in PR #162 |
 | Signed model artifact and request route | `infrastructure/release/bundle.py`, `infrastructure/deploy/vessel_runtime.py`, `scripts/phase5_three_image_release.py`, [model bundle procedure](../phase-5/model-artifact-bundle.md) | Exact model tree and ID binding, stage capacity preflight, Core runtime configuration, container-loopback request, wrong-name refusal and outage behavior |
+| Model provenance declaration | [PR #181](https://github.com/AttractAcq/Advocate-AI/pull/181), `infrastructure/release/bundle.py`, [model bundle procedure](../phase-5/model-artifact-bundle.md) | Schema-8 strict signed declaration, schema-7 legacy acceptance, malformed source/revision refusal, and the boundary between custodian assertion and publisher or licence verification |
 
 ## Claims to verify
 
@@ -102,8 +103,9 @@ remain open.
 | Signed model request route | [PR #177](https://github.com/AttractAcq/Advocate-AI/pull/177) and [PR #178](https://github.com/AttractAcq/Advocate-AI/pull/178) | Core is configured with the signed model ID and container-loopback endpoint. The intended actual-image probe uses a temporary responder for request ID, wrong-name denial and 503 after shutdown. The [PR #177](https://github.com/AttractAcq/Advocate-AI/actions/runs/44831684982) and [PR #178](https://github.com/AttractAcq/Advocate-AI/actions/runs/44833680520) jobs passed, but retained vessel results say `denied-findings`; the route probe did not run. |
 | Authenticated model advertisement | [PR #179](https://github.com/AttractAcq/Advocate-AI/pull/179), `apps/api/model.py`, `apps/api/main.py`, `tests/test_core_api.py` | Local tests cover AV/IT-only loopback `/v1/models` readiness and 503 for wrong or malformed advertisements. [All 12 implementation-head jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44835630041) after a Fleet browser DNS retry, but the retained vessel result says `denied-findings`; the signed vessel readiness probe did not run. This is a control-plane signal, not a model inference or GPU acceptance test. |
 | Signed three-image vessel path restored | [PR #180](https://github.com/AttractAcq/Advocate-AI/pull/180) and [retained CI result](https://github.com/AttractAcq/Advocate-AI/actions/runs/44843503603) | The artifact reports `signed-and-verified`, zero unresolved Core, Console and Knowledge findings, model tamper refusal, signed request and outage behavior, release switch and rollback, initial and updated clean restore, and interrupted-restore retry. All 12 implementation-head CI jobs passed. |
+| Declared model provenance | [PR #181](https://github.com/AttractAcq/Advocate-AI/pull/181) and [implementation-head CI](https://github.com/AttractAcq/Advocate-AI/actions/runs/44847102926) | Local tests cover schema-8 signing and verification, rejection of a re-signed invalid source URL, immutable revision validation, and continued schema-7 acceptance. All 12 CI jobs passed; the retained signed vessel result is `signed-and-verified` with zero unresolved findings and passing install, route and recovery checks. The rehearsal asserts schema 8 and the exact fictional declaration. External source authentication remains open. |
 
-At the PR #180 implementation head, `make check` passed 419 tests with 16
+At the PR #181 implementation head, `make check` passed 421 tests with 16
 expected skips. For an independent reproduction, record the commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
@@ -126,6 +128,7 @@ lab and retain the observed output, resource inventory and timing.
 | Alter a model file, add an unlisted model file, or change the Core model name or endpoint | Confirm signature and tree verification refuse altered bytes, and active status refuses runtime drift; try both stopped and running states |
 | Name an unapproved model in a chat request, then stop the loopback responder | Confirm Core denies the name before forwarding and returns 503 after the responder stops, without a remote or fallback route |
 | Advertise a different model ID, return malformed or oversized metadata, or remove the model service | Check AV/IT readiness returns 503 while other roles remain denied; separately determine whether an actual prompt can be answered after a cold start |
+| Re-sign a model descriptor with a changed source URL, moving revision, or misleading licence claim | Verify schema-8 structure rejection where applicable; separately authenticate the publisher and assess the licence because a valid release signature only attests to the custodian's declaration |
 | Add a labelled container, network, extra volume or different restore-attempt label | Check that cleanup and abandonment do not remove ambiguous resources |
 | Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate |
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |
