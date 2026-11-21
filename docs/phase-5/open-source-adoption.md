@@ -27,7 +27,9 @@ cryptographic verification is possible, but does not establish publisher
 identity, signature provenance, acceptable offline audit evidence or release
 key custody. Sovereign's existing signed bundle remains the release gate.
 
-The [current pinned lab Keycloak scan](keycloak-lab-image-scan.json) has ten HIGH
-and one CRITICAL finding. No tool adoption accepts those findings, closes G2/G3, or replaces
+The [rebuilt pinned lab Keycloak scan](keycloak-lab-image-scan.json) has six HIGH
+and zero CRITICAL findings; the [previous image scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282)
+had ten HIGH and one CRITICAL. No tool adoption accepts the remaining findings,
+closes G2/G3, or replaces
 target hardware and independent security evidence in the
 [blocker tracker](../blockers-and-build-queue.md).
