@@ -6,18 +6,22 @@
 
 Run `make security-config-scan` from the repository root. The scanner exits nonzero if the synthetic installer and topology disagree, a DNS name leaves loopback, the lab advertises public egress, the Keycloak image loses its digest pin, or its Docker create command exposes a public port or requests privileged/host resources. The launch command also applies a memory limit, PID limit, capability drop and no-new-privileges. `make check` runs the same scan in CI. This is a static check of committed settings, **not** a host firewall or live no-egress test.
 
-The only container currently declared by this repository is the **synthetic Keycloak lab** image. Its OCI index digest is in [container-image.json](../../infrastructure/lab/container-image.json); the manifest was read from the public Quay registry on 16 November 2026. The `container-scan` PR job uses the pinned [Trivy action](https://github.com/aquasecurity/trivy-action) and Trivy v0.76.2 to scan that digest for high and critical package advisories. It validates and retains the JSON report as a CI artifact for 30 days, and writes the finding count to the job summary. Findings do not currently fail the job: the image is lab-only and findings require human triage against a release candidate. A scanner failure or missing report **does** fail the job. Capture the CI run, exact image digest, scanner/database versions, finding IDs, fix availability and disposition in the controlled review record. This scan does not cover a production Core/Console/model image, because none has been approved or built.
+The standalone **synthetic Keycloak lab** image has its OCI index digest in
+[container-image.json](../../infrastructure/lab/container-image.json). The
+rebuilt `26.8.2-3` digest was resolved from the public Quay registry on 21
+November 2026. The `container-scan` PR job uses the pinned [Trivy action](https://github.com/aquasecurity/trivy-action) and Trivy v0.76.2 to scan that digest for high and critical package advisories. It validates and retains the JSON report as a CI artifact for 30 days, and writes the finding count to the job summary. Findings do not currently fail the job: the image is lab-only and findings require human triage against a release candidate. A scanner failure or missing report **does** fail the job. Capture the CI run, exact image digest, scanner/database versions, finding IDs, fix availability and disposition in the controlled review record. This scan does not cover a production Core/Console/model image, because none has been approved or built.
 
 The lab still uses Keycloak `start-dev` and a Docker bridge that may have egress. The added flags do not qualify production identity, network isolation, image provenance or container runtime hardening. Those are [B-03, B-06, B-08 and B-11](../blockers-and-build-queue.md).
 
 The first [CI scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/43850286761)
 found **six HIGH and zero CRITICAL** advisories in the lab image. The [21
 November scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282)
-of the same digest reports **ten HIGH and one CRITICAL**. The current
+of the same digest reports **ten HIGH and one CRITICAL**. That previous-image
 [summary record](keycloak-lab-image-scan.json) lists the IDs, package names,
 scanner status and retained report hash; it contains no vessel data. No
 finding has been accepted for release. The [package triage](keycloak-finding-triage.md)
-uses the current retained CI report and vendor references. It does not accept any finding or
+uses that retained CI report and vendor references while a rebuilt image is
+being qualified. It does not accept any finding or
 qualify the lab image for a release.
 
 ## Parser regression corpus

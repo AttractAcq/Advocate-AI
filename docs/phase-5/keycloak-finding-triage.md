@@ -9,11 +9,11 @@ reported ten HIGH and one CRITICAL finding with Trivy 0.76.2. The retained
 `keycloak-lab-trivy` JSON artifact has SHA-256
 `ff59358a55b035601955514077343bb50b380956bf86fa834d5e83a302d01530`.
 The image is Keycloak 26.8.2. Keycloak's [official downloads](https://www.keycloak.org/downloads)
-still list 26.8.2. The pinned digest remains a lab fixture, not a production
-candidate.
+still list 26.8.2. This digest is now the previous lab fixture, not a
+production candidate.
 
-The 16 November scan had six HIGH findings. All six remain in the current
-artifact:
+The 16 November scan had six HIGH findings. All six remained in the 21
+November artifact for the old digest:
 
 | Finding | Installed package in scan | Scanner status | Review action |
 |---|---|---|---|
@@ -54,6 +54,19 @@ running JVM with `jcmd` after initial start and clean recovery, and fails if
 mitigation, not a patched image or proof about a future production host.
 Every production Keycloak instance still needs its actual CPU, Java build and
 live JVM flags checked; a vendor-confirmed fixed runtime must be qualified.
+
+## Rebuilt official image candidate
+
+Keycloak's [repository announcement](https://github.com/keycloak/keycloak/discussions/55303)
+identifies `26.8.2-3` as a rebuilt official image containing Red Hat OpenJDK
+21.0.13.1 for CVE-2026-114938. The synthetic lab now pins the tag's resolved
+multi-platform digest
+`sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3`.
+The registry manifest lists amd64 and arm64 variants. An isolated local ARM64
+container at that digest reports OpenJDK 21.0.13.1, runtime build
+`Red_Hat-21.0.13.1.2-1`. Linux CI must scan the exact pinned image and run the
+Fleet identity flows before its lab result can replace the earlier finding
+record. The interim JVM flag remains enabled during this qualification.
 
 Before B-11 can close, use an approved image, rerun the scan with its exact
 digest and database version, record vendor fix or VEX evidence for each ID,

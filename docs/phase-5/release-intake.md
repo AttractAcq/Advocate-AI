@@ -44,5 +44,6 @@ contains the named digest. The candidate pack command does this for a
 Syft-generated inventory with pinned crane and signs the archive hash. The legacy
 `bundle pack` command remains a synthetic signing exercise without evidence
 preflight. Release owners must verify provenance, scan coverage and the final
-artifact set before signing. The [current pinned lab Keycloak scan](keycloak-lab-image-scan.json)
-contains ten HIGH and one CRITICAL finding and cannot pass this preflight.
+artifact set before signing. The [previous lab Keycloak scan](keycloak-lab-image-scan.json)
+contains ten HIGH and one CRITICAL finding and cannot pass this preflight;
+the rebuilt lab image requires its own exact-digest scan.

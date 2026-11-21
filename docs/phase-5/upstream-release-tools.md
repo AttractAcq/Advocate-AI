@@ -75,5 +75,6 @@ Docker save archive. The release record must use and scan the exact artifact
 digest that crane validates; a mismatch fails. A tool's ability to parse an
 archive does not authenticate its publisher, prove every package was found,
 verify licences, or approve vulnerabilities. The [ten HIGH and one CRITICAL
-finding in the lab Keycloak image](keycloak-lab-image-scan.json) remain open. A production
+finding in the previous lab Keycloak image](keycloak-lab-image-scan.json) remain open
+pending a scan of its rebuilt replacement. A production
 image, independent review, and target-host rehearsal remain B-07/B-08/B-11.
