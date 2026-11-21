@@ -426,6 +426,68 @@ class SecurityApiTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((await client.get(path, headers=admin)).status_code, 200)
                 self.assertEqual((await client.get(path, headers=admin)).status_code, 429)
 
+    async def test_explanation_uses_cited_same_source_facts_without_related_text(self):
+        fixture = json.loads(ALERTS.read_text())
+        follow = json.loads(json.dumps(fixture["hits"]["hits"][0]))
+        follow["_id"] = "doc-forti-follow-004"
+        follow["_source"]["id"] = "lab-wazuh-forti-follow-004"
+        follow["_source"]["timestamp"] = "2026-11-15T10:30:00Z"
+        follow["_source"]["rule"]["description"] = ADVERSARIAL["injected_alert_description"]
+        fixture["hits"]["hits"].append(follow)
+        path = Path(self.temp.name) / "related-alerts.json"
+        path.write_text(json.dumps(fixture))
+        app = create_app(Settings(lab_password="synthetic-test-passphrase",
+                                  synthetic_alerts=path), self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test") as client:
+            login = await client.post("/api/login", json={
+                "user_id": "lab-avit_admin-1", "password": "synthetic-test-passphrase"})
+            headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+            incident_id = f"{fixture['hits']['hits'][0]['_index']}:{fixture['hits']['hits'][0]['_id']}"
+            response = await client.post(f"/api/security/incidents/{incident_id}/explain",
+                                         headers=headers)
+            self.model.answer = "These alerts share a cause."
+            unsupported = await client.post(
+                f"/api/security/incidents/{incident_id}/explain", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["method"], "local-model")
+        self.assertIn("Bounded same-source", response.json()["confidence"])
+        self.assertEqual([entry["event_id"] for entry in response.json()["evidence"]],
+                         ["lab-wazuh-forti-001", "lab-wazuh-forti-follow-004"])
+        self.assertIn("lab-wazuh-forti-follow-004", self.model.calls[0]["question"])
+        self.assertNotIn(ADVERSARIAL["injected_alert_description"],
+                         self.model.calls[0]["question"])
+        self.assertIn("common cause", self.model.calls[0]["system_instruction"])
+        self.assertEqual(unsupported.json()["method"], "evidence-only")
+        self.assertEqual(len(unsupported.json()["evidence"]), 1)
+
+    async def test_explanation_keeps_primary_evidence_when_related_search_fails(self):
+        hit = json.loads(ALERTS.read_text())["hits"]["hits"][0]
+        app_settings = Settings(lab_password="synthetic-test-passphrase",
+                                wazuh_indexer_endpoint="https://10.40.1.10:9200",
+                                wazuh_read_token="synthetic-read-token")
+        with patch("apps.api.main.WazuhIndexerReader") as reader_type:
+            def alerts(*, incident_id=None, **kwargs):
+                if incident_id is None:
+                    raise WazuhUnavailable("synthetic related search outage")
+                return [{"index_name": hit["_index"], "index_id": hit["_id"],
+                         "source": hit["_source"]}]
+            reader_type.return_value.alerts.side_effect = alerts
+            app = create_app(app_settings, self.model)
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                login = await client.post("/api/login", json={
+                    "user_id": "lab-avit_admin-1", "password": "synthetic-test-passphrase"})
+                headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+                response = await client.post(
+                    f"/api/security/incidents/{hit['_index']}:{hit['_id']}/explain",
+                    headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([entry["event_id"] for entry in response.json()["evidence"]],
+                         ["lab-wazuh-forti-001"])
+        self.assertIn("sample was unavailable", response.json()["notice"])
+        self.assertIn('"status": "unavailable"', self.model.calls[0]["question"])
+
     async def test_ambiguous_mapping_never_reaches_model(self):
         payload = json.loads(ASSETS.read_text())
         payload["assets"].append({"asset_id": "lab-duplicate-ip", "hostname": "other-host",

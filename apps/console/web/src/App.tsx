@@ -478,7 +478,7 @@ export default function App() {
             <ul className="mt-2 list-disc pl-5 text-sm">{incident.suggested_checks.map((check) => <li key={check}>{check}</li>)}</ul>
             <p className="mt-4 text-xs text-[#5d7380]">{incident.confidence}</p>
             <button className="primary-button mt-5" disabled={pending} onClick={() => void explainIncident()}>{pending ? 'Analysing…' : 'Explain event'}</button>
-            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">{analysis.method === 'local-model' ? 'AI explanation' : 'Evidence summary'}</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
+            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">{analysis.method === 'local-model' ? 'AI explanation' : 'Evidence summary'}</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><h5 className="mt-3 text-sm font-semibold">Evidence supplied</h5><ul className="mt-1 list-disc pl-5 text-xs">{analysis.evidence.map((entry) => <li key={`${entry.index_name}:${entry.index_id}`}>{entry.event_id} · {entry.index_name} / {entry.index_id} · {entry.timestamp}</li>)}</ul><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
           </article>}
         </section>}
 
