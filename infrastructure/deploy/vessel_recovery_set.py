@@ -1101,6 +1101,14 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
                 intent["data_volume"] != value["data_volume"] or
                 intent["schema"] != (2 if value["schema"] == 3 else 1)):
             raise VesselRecoveryError("abandoned attempt differs from signed receipt")
+        if value["schema"] == 3:
+            _owner_directory(staging_parent)
+        pair_digest = _verify_activation_identity_pair(
+            value["schema"] == 3, receipt, receipt_key, staging_parent,
+            identity_pair, identity_pair_key, identity_archive,
+            identity_archive_key)
+        if marker.get("identity_pair_sha256") != pair_digest:
+            raise VesselRecoveryError("abandoned attempt differs from signed identity pair")
         _verify_stage(abandoned_root / "vessel-releases" / value["release"],
                       trusted_key, value["release"])
         active = abandoned_root / "vessel-state.json"

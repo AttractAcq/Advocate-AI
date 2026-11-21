@@ -43,7 +43,8 @@ For an OIDC `activate-recovery-set`, `finish-incomplete-restore`, or
 `--identity-pair-key`, `--identity-archive`, and `--identity-archive-key`.
 Activation verifies the pair and authenticated archive against the exact Core
 receipt before creating Docker resources. An interrupted restore records the
-pair digest; finishing requires that same pair. Lab-mode restores reject these
+pair digest; finishing or retrying an abandoned attempt requires that same pair.
+Lab-mode restores reject these
 identity arguments. These commands verify artifact binding; the operator must
 still import the checked realm and establish the live Keycloak service before
 activation.
