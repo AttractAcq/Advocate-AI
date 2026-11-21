@@ -38,7 +38,9 @@ def main(argv: list[str] | None = None) -> None:
     install.add_argument("--bundle", type=Path, required=True)
     install.add_argument("--console-config", type=Path, required=True)
     install.add_argument("--core-state", type=Path, required=True)
-    install.add_argument("--lab-password-file", type=Path, required=True)
+    install_identity = install.add_mutually_exclusive_group(required=True)
+    install_identity.add_argument("--lab-password-file", type=Path)
+    install_identity.add_argument("--identity-network")
     for command in ("status", "stop", "finish-stop", "reconcile", "recover",
                     "reconcile-install", "resume-install"):
         commands.add_parser(command, parents=[shared])
@@ -115,7 +117,9 @@ def main(argv: list[str] | None = None) -> None:
     activate.add_argument("--restic-sha256", required=True)
     activate.add_argument("--root", type=Path, required=True)
     activate.add_argument("--core-state", type=Path, required=True)
-    activate.add_argument("--lab-password-file", type=Path, required=True)
+    activate_identity = activate.add_mutually_exclusive_group(required=True)
+    activate_identity.add_argument("--lab-password-file", type=Path)
+    activate_identity.add_argument("--identity-network")
     activate.add_argument("--staging-parent", type=Path, required=True)
     finish_restore = commands.add_parser("finish-incomplete-restore")
     finish_restore.add_argument("--root", type=Path, required=True)
@@ -146,13 +150,17 @@ def main(argv: list[str] | None = None) -> None:
     retry.add_argument("--restic-sha256", required=True)
     retry.add_argument("--root", type=Path, required=True)
     retry.add_argument("--core-state", type=Path, required=True)
-    retry.add_argument("--lab-password-file", type=Path, required=True)
+    retry_identity = retry.add_mutually_exclusive_group(required=True)
+    retry_identity.add_argument("--lab-password-file", type=Path)
+    retry_identity.add_argument("--identity-network")
     retry.add_argument("--staging-parent", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "install":
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
                                 args.console_config, args.root, args.core_state,
-                                args.lab_password_file)
+                                args.lab_password_file,
+                                **({"identity_network": args.identity_network}
+                                   if args.identity_network is not None else {}))
     elif args.command == "status":
         result = status_vessel(args.root, args.trusted_key, args.crane)
     elif args.command == "stop":
@@ -211,7 +219,9 @@ def main(argv: list[str] | None = None) -> None:
             args.bundle, args.trusted_key, args.crane, args.console_config,
             args.receipt, args.receipt_key, args.password_file, args.restic,
             args.restic_sha256, args.root, args.core_state,
-            args.lab_password_file, args.staging_parent)
+            args.lab_password_file, args.staging_parent,
+            **({"identity_network": args.identity_network}
+               if args.identity_network is not None else {}))
     elif args.command == "finish-incomplete-restore":
         result = finish_incomplete_vessel_restore(
             args.root, args.trusted_key, args.crane, args.receipt,
@@ -226,7 +236,9 @@ def main(argv: list[str] | None = None) -> None:
             args.abandoned_root, args.bundle, args.trusted_key, args.crane,
             args.console_config, args.receipt, args.receipt_key,
             args.password_file, args.restic, args.restic_sha256, args.root,
-            args.core_state, args.lab_password_file, args.staging_parent)
+            args.core_state, args.lab_password_file, args.staging_parent,
+            **({"identity_network": args.identity_network}
+               if args.identity_network is not None else {}))
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
     print(json.dumps(result, sort_keys=True))

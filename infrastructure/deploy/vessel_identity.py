@@ -31,7 +31,8 @@ def _private_regular(path: Path, *, maximum: int) -> bytes:
     if not path.is_absolute():
         raise VesselIdentityError("identity file path must be absolute")
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW |
+                             os.O_NONBLOCK | os.O_CLOEXEC)
         with os.fdopen(descriptor, "rb") as stream:
             details = os.fstat(stream.fileno())
             if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
@@ -46,7 +47,7 @@ def _private_regular(path: Path, *, maximum: int) -> bytes:
         raise VesselIdentityError("vessel identity file unavailable") from exc
 
 
-def _revocations(path: Path) -> None:
+def _revocations(path: Path) -> bytes:
     raw = _private_regular(path, maximum=4 * 1024 * 1024)
     if raw and not raw.endswith(b"\n"):
         raise VesselIdentityError("truncated OIDC revocation log")
@@ -66,6 +67,19 @@ def _revocations(path: Path) -> None:
                 raise VesselIdentityError("invalid OIDC revocation record")
     except (UnicodeError, ValueError) as exc:
         raise VesselIdentityError("invalid OIDC revocation log") from exc
+    return raw
+
+
+def validated_identity_material(ca: Path, revocations: Path) -> tuple[bytes, bytes]:
+    """Return bounded private bytes for a frozen recovery copy."""
+    ca_bytes = _private_regular(ca, maximum=64 * 1024)
+    if not ca_bytes:
+        raise VesselIdentityError("empty OIDC CA")
+    try:
+        ssl.create_default_context(cadata=ca_bytes.decode("ascii"))
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise VesselIdentityError("invalid OIDC CA") from exc
+    return ca_bytes, _revocations(revocations)
 
 
 def preflight_vessel_identity(config: Path, state: Path, network_name: str) -> VesselIdentity:
@@ -79,14 +93,7 @@ def preflight_vessel_identity(config: Path, state: Path, network_name: str) -> V
         raise VesselIdentityError("vessel Core state must be owner-only")
     ca = state / "oidc-ca.pem"
     revocations = state / "oidc-revocations.jsonl"
-    ca_bytes = _private_regular(ca, maximum=64 * 1024)
-    if not ca_bytes:
-        raise VesselIdentityError("empty OIDC CA")
-    try:
-        ssl.create_default_context(cadata=ca_bytes.decode("ascii"))
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise VesselIdentityError("invalid OIDC CA") from exc
-    _revocations(revocations)
+    validated_identity_material(ca, revocations)
     if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,63}", network_name)
             or network_name.startswith("sovereign-synthetic-")):
         raise VesselIdentityError("invalid vessel identity network name")

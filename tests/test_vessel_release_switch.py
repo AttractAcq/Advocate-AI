@@ -229,6 +229,22 @@ class VesselReleaseSwitchTests(unittest.TestCase):
                 self.receipt_args[2], self.receipt_args[3],
                 self.receipt_args[4], staging, self.root), payload)
 
+    def test_oidc_switch_requires_identity_bearing_recovery_receipt(self) -> None:
+        current = {**self.current, "schema": 2,
+                   "identity": {"issuer": "https://identity.vessel.example/realms/sovereign",
+                                "ca_sha256": "a" * 64}}
+        receipt = {"installation_id": current["installation_id"],
+                   "release": current["active"],
+                   "data_volume": current["runtime"]["data_volume"],
+                   "schema": 2}
+        with patch("infrastructure.deploy.vessel_release_switch.verify_vessel_recovery_receipt",
+                   return_value=receipt):
+            with self.assertRaisesRegex(VesselInstallError, "row digest"):
+                _verify_preupdate_recovery(
+                    current, self.receipt_args[0], self.receipt_args[1],
+                    self.receipt_args[2], self.receipt_args[3],
+                    self.receipt_args[4], self.parent / "staging", self.root)
+
     def test_future_signed_contract_denies_switch_before_candidate_stage(self) -> None:
         with patch("infrastructure.deploy.vessel_release_switch._verify_stage"), \
              patch("infrastructure.deploy.vessel_release_switch._state_options"), \

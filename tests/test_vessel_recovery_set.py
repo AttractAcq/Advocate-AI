@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 from contextlib import closing
@@ -11,20 +12,28 @@ import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
 
-from cryptography.hazmat.primitives import serialization
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from infrastructure.deploy.vessel_recovery_set import (
     VesselRecoveryError, _grant_restored_knowledge, _partial_knowledge_resources,
-    _match_restored_core, _stage_core, _sign_receipt,
+    _match_restored_core, _receipt_payload, _stage_core, _sign_receipt,
     abandon_incomplete_vessel_restore,
     activate_vessel_recovery_set, finish_incomplete_vessel_restore,
     retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.container_runtime import RuntimeHandle
-from infrastructure.deploy.vessel_installer import _write_intent, _write_private_record
+from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
+from infrastructure.deploy.vessel_identity import VesselIdentity
+from infrastructure.deploy.vessel_installer import (
+    _read_state, _write_intent, _write_private_record,
+)
 from infrastructure.release.bundle import BundleError, SUPPORTED_VESSEL_COMPATIBILITY
 from scripts.synthetic_pg_fixture import fixture, put
 from services.policy.audit import AuditLog
@@ -35,6 +44,7 @@ class VesselRecoverySetTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        (self.root / "config").write_text('{"schema":1,"oidc_issuer":null}')
         self.state = self.root / "state"
         self.state.mkdir(mode=0o700)
         fixture(self.state)
@@ -62,6 +72,50 @@ class VesselRecoverySetTests(unittest.TestCase):
         with closing(sqlite3.connect(frozen / "history.db")) as database:
             self.assertEqual(database.execute("SELECT id FROM conversations").fetchone(),
                              ("synthetic",))
+
+    def test_oidc_recovery_freezes_ca_and_revocations(self) -> None:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Synthetic Vessel CA")])
+        certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+                       .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                       .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+                       .not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+                       .add_extension(x509.BasicConstraints(ca=True, path_length=None),
+                                      critical=True).sign(key, hashes.SHA256()))
+        ca = self.state / "oidc-ca.pem"
+        put(ca, certificate.public_bytes(serialization.Encoding.PEM))
+        revocations = self.state / "oidc-revocations.jsonl"
+        put(revocations, b'{"sha256":"' + b"a" * 64 + b'"}\n')
+        frozen = self.root / "frozen"
+        _stage_core(self.state, frozen, oidc=True)
+        self.assertEqual((frozen / "oidc-ca.pem").read_bytes(), ca.read_bytes())
+        self.assertEqual((frozen / "oidc-revocations.jsonl").read_bytes(),
+                         revocations.read_bytes())
+        shutil.rmtree(frozen)
+        revocations.write_bytes(revocations.read_bytes().rstrip(b"\n"))
+        with self.assertRaises(ValueError):
+            _stage_core(self.state, frozen, oidc=True)
+
+    def test_oidc_receipt_requires_identity_hashes_and_exact_file_count(self) -> None:
+        payload = {
+            "schema": 3, "installation_id": "a" * 32, "release": "b" * 24,
+            "data_volume": "sovereign-" + "a" * 32 + "-knowledge-data",
+            "snapshot_id": "c" * 64, "repository": str(self.root),
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+            "schema_version": 1, "audit_count": 1, "audit_tail_hash": "d" * 64,
+            "manifest_sha256": "e" * 64, "dump_sha256": "f" * 64,
+            "knowledge_sha256": "1" * 64, "sources": 2, "passages": 2,
+            "files": 9,
+            "identity": {"issuer": "https://identity.vessel.example/realms/sovereign",
+                         "ca_sha256": "2" * 64,
+                         "revocations_sha256": "3" * 64},
+        }
+        self.assertEqual(_receipt_payload(payload), payload)
+        with self.assertRaises(VesselRecoveryError):
+            _receipt_payload({**payload, "files": 7})
+        with self.assertRaises(VesselRecoveryError):
+            _receipt_payload({**payload, "identity": {**payload["identity"],
+                                                       "issuer": "https://outside.example/"}})
 
     def test_capture_refuses_future_core_history_format(self) -> None:
         with closing(sqlite3.connect(self.state / "history.db")) as database:
@@ -176,6 +230,117 @@ class VesselRecoverySetTests(unittest.TestCase):
                     self.root / "lab-password", staging)
         self.assertFalse((self.root / "new-install").exists())
         cleanup.assert_not_called()
+
+    def test_oidc_clean_restore_refuses_lab_mode_and_wrong_console_issuer(self) -> None:
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        payload = {"schema": 3, "release": "b" * 24,
+                   "identity": {"issuer": "https://identity.vessel.example/realms/sovereign"}}
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=payload), \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
+             patch("infrastructure.deploy.vessel_recovery_set._release_id",
+                   return_value="b" * 24):
+            with self.assertRaisesRegex(VesselRecoveryError, "identity mode"):
+                activate_vessel_recovery_set(
+                    self.root / "bundle", self.root / "key", self.root / "crane",
+                    self.root / "config", self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "c" * 64,
+                    self.root / "new-install", self.root / "new-state",
+                    self.root / "lab-password", staging, identity_network="vessel-identity")
+            with self.assertRaisesRegex(VesselRecoveryError, "Console issuer"):
+                activate_vessel_recovery_set(
+                    self.root / "bundle", self.root / "key", self.root / "crane",
+                    self.root / "config", self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "c" * 64,
+                    self.root / "new-install", self.root / "new-state",
+                    None, staging, identity_network="vessel-identity")
+        self.assertFalse((self.root / "new-install").exists())
+
+    def test_oidc_clean_restore_activates_without_lab_credential(self) -> None:
+        installation = "a" * 32
+        release = "b" * 24
+        root = self.root / "new-install"
+        core_state = self.root / "new-core"
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        stage = self.root / "signed-stage"
+        stage.mkdir(mode=0o700)
+        issuer = "https://identity.vessel.example/realms/sovereign"
+        self.root.joinpath("config").write_text(json.dumps({"schema": 1,
+                                                            "oidc_issuer": issuer}))
+        (stage / "console-config.json").write_text(
+            self.root.joinpath("config").read_text())
+        ca_bytes = b"synthetic restore trust"
+        revocation_bytes = b'{"sha256":"' + b"c" * 64 + b'"}\n'
+        put(self.state / "oidc-ca.pem", ca_bytes)
+        put(self.state / "oidc-revocations.jsonl", revocation_bytes)
+        receipt = {
+            "schema": 3, "release": release, "installation_id": installation,
+            "data_volume": f"sovereign-{installation}-knowledge-data",
+            "repository": str(self.root / "repository"), "snapshot_id": "d" * 64,
+            "sources": 2, "passages": 2, "knowledge_sha256": "e" * 64,
+            "audit_count": 1,
+            "identity": {"issuer": issuer,
+                         "ca_sha256": hashlib.sha256(ca_bytes).hexdigest(),
+                         "revocations_sha256": hashlib.sha256(revocation_bytes).hexdigest()},
+        }
+        identity = VesselIdentity(issuer, core_state / "oidc-ca.pem",
+                                  core_state / "oidc-revocations.jsonl",
+                                  "vessel-identity", "f" * 64)
+        services = RuntimeHandle("1" * 64, "2" * 64, "3" * 64,
+                                 identity.network_id, identity.network_name)
+        knowledge = KnowledgeVolumeHandle("4" * 64,
+                                          "sovereign-knowledge-" + "5" * 12 + "-socket",
+                                          receipt["data_volume"],
+                                          "sovereign-knowledge-" + "5" * 12,
+                                          installation)
+
+        def restore_files(*args):
+            restored = args[-1]
+            shutil.copytree(self.state, restored)
+            (restored / "postgres.dump").write_bytes(b"PGDMPsynthetic")
+
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value=receipt), \
+             patch("infrastructure.deploy.vessel_recovery_set.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
+             patch("infrastructure.deploy.vessel_recovery_set._release_id",
+                   return_value=release), \
+             patch("infrastructure.deploy.vessel_recovery_set._assert_missing"), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker", return_value=""), \
+             patch("infrastructure.deploy.vessel_recovery_set.restore_vessel_recovery_files",
+                   side_effect=restore_files), \
+             patch("infrastructure.deploy.vessel_recovery_set._stage",
+                   return_value=(release, stage)), \
+             patch("infrastructure.deploy.vessel_recovery_set.preflight_vessel_identity",
+                   return_value=identity), \
+             patch("infrastructure.deploy.vessel_recovery_set.start_signed_knowledge",
+                   return_value=knowledge), \
+             patch("infrastructure.deploy.vessel_recovery_set._state_options"), \
+             patch("infrastructure.deploy.vessel_recovery_set._restore"), \
+             patch("infrastructure.deploy.vessel_recovery_set._grant_restored_knowledge"), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_knowledge_schema"), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_database",
+                   return_value={"sources": 2, "passages": 2,
+                                 "knowledge_sha256": "e" * 64}), \
+             patch("infrastructure.deploy.vessel_recovery_set.start_signed_vessel_services",
+                   return_value=services) as start:
+            result = activate_vessel_recovery_set(
+                self.root / "bundle", self.root / "key", self.root / "crane",
+                self.root / "config", self.root / "receipt", self.root / "receipt-key",
+                self.root / "password", self.root / "restic", "0" * 64,
+                root, core_state, None, staging, identity_network="vessel-identity")
+        self.assertEqual(result["result"], "restored-and-activated")
+        self.assertEqual(start.call_args.kwargs["identity"], identity)
+        active = _read_state(root)
+        self.assertEqual(active["schema"], 2)
+        self.assertNotIn("lab_password_file", active)
+        self.assertEqual((core_state / "oidc-revocations.jsonl").read_bytes(),
+                         revocation_bytes)
 
     def test_clean_activation_rejects_future_contract_before_restore(self) -> None:
         staging = self.root / "staging"
@@ -374,7 +539,7 @@ class VesselRecoverySetTests(unittest.TestCase):
             "schema": 2, "snapshot_id": snapshot, "release": release,
             "installation_id": identifier,
             "restore_attempt": restore_attempt})
-        receipt = {"snapshot_id": snapshot, "release": release,
+        receipt = {"schema": 2, "snapshot_id": snapshot, "release": release,
                    "installation_id": identifier, "data_volume": data_volume}
         with self.assertRaisesRegex(VesselRecoveryError, "explicit flag"):
             abandon_incomplete_vessel_restore(
@@ -525,7 +690,7 @@ class VesselRecoverySetTests(unittest.TestCase):
         _write_private_record(install, "vessel-restore-intent.json", {
             "schema": 2, "snapshot_id": snapshot, "release": release,
             "installation_id": identifier, "restore_attempt": attempt})
-        receipt = {"snapshot_id": snapshot, "release": release,
+        receipt = {"schema": 2, "snapshot_id": snapshot, "release": release,
                    "installation_id": identifier, "data_volume": data}
         labels = {"sovereign.synthetic.install": identifier,
                   "sovereign.synthetic.role": "knowledge",
