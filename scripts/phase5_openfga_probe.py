@@ -1,4 +1,4 @@
-"""Compare a loopback OpenFGA prototype with Sovereign's synthetic role matrix."""
+"""Compare a loopback OpenFGA prototype with synthetic collection and source policy."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+
+from services.policy.decision import may_read, may_read_document
 
 VERSION = "v1.22.1"
 COLLECTIONS = ("management", "engineering", "interior", "deck", "restricted")
@@ -72,11 +74,47 @@ def probe(binary: Path, expected_sha256: str) -> dict[str, object]:
              "metadata": {"relations": {"viewer": {
                  "directly_related_user_types": [
                      {"type": "department", "relation": "member"}]}}}},
+            {"type": "source", "relations": {
+                "parent": {"this": {}},
+                "permitted": {"this": {}},
+                "blocked": {"this": {}},
+                "can_view": {"difference": {
+                    "base": {"intersection": {"child": [
+                        {"tupleToUserset": {
+                            "tupleset": {"object": "", "relation": "parent"},
+                            "computedUserset": {"object": "", "relation": "viewer"}}},
+                        {"computedUserset": {"object": "", "relation": "permitted"}},
+                    ]}},
+                    "subtract": {"computedUserset": {
+                        "object": "", "relation": "blocked"}},
+                }},
+            }, "metadata": {"relations": {
+                "parent": {"directly_related_user_types": [{"type": "document"}]},
+                "permitted": {"directly_related_user_types": [
+                    {"type": "department", "relation": "member"}]},
+                "blocked": {"directly_related_user_types": [{"type": "user"}]},
+            }}},
         ]}
         model_id = _post(base, f"/stores/{store}/authorization-models", model)[
             "authorization_model_id"]
         policy = json.loads((ROOT / "fixtures/roles.json").read_text())
         grants = policy["allow"]
+        policy["document_rules"] = {
+            "MAN-001": {"allow_roles": ["captain"],
+                        "deny_users": ["lab-captain-1"]},
+            "ENG-001": {"allow_roles": ["chief_engineer"],
+                        "deny_users": ["lab-chief_engineer-1"]},
+        }
+        sources = [
+            {"document_id": "MAN-001", "collection": "management",
+             "classification": "C0_SYNTHETIC_MANAGEMENT"},
+            {"document_id": "ENG-001", "collection": "engineering",
+             "classification": "C0_SYNTHETIC_ENGINEERING"},
+            {"document_id": "DEC-001", "collection": "deck",
+             "classification": "C0_SYNTHETIC_DECK"},
+            {"document_id": "BAD-001", "collection": "deck",
+             "classification": "UNKNOWN"},
+        ]
         tuples = []
         for role, allowed in grants.items():
             tuples.append({"user": f"user:{role}", "relation": "member",
@@ -84,32 +122,119 @@ def probe(binary: Path, expected_sha256: str) -> dict[str, object]:
             for collection in allowed:
                 tuples.append({"user": f"department:{role}#member", "relation": "viewer",
                                "object": f"document:{collection}"})
+        for user in policy["users"]:
+            if user["status"] == "active":
+                tuples.append({"user": f"user:{user['id']}", "relation": "member",
+                               "object": f"department:{user['role']}"})
+        for source in sources:
+            identifier = source["document_id"]
+            collection = source["collection"]
+            if source["classification"] == f"C0_SYNTHETIC_{collection.upper()}":
+                tuples.append({"user": f"document:{collection}", "relation": "parent",
+                               "object": f"source:{identifier}"})
+            rule = policy["document_rules"].get(identifier, {})
+            for role in rule.get("allow_roles", grants):
+                tuples.append({"user": f"department:{role}#member",
+                               "relation": "permitted", "object": f"source:{identifier}"})
+            for user_id in rule.get("deny_users", []):
+                tuples.append({"user": f"user:{user_id}", "relation": "blocked",
+                               "object": f"source:{identifier}"})
         _post(base, f"/stores/{store}/write",
               {"writes": {"tuple_keys": tuples}, "authorization_model_id": model_id})
 
-        def check(role: str, collection: str) -> bool:
+        def check(user: str, relation: str, object_id: str) -> bool:
             response = _post(base, f"/stores/{store}/check", {
-                "tuple_key": {"user": f"user:{role}", "relation": "viewer",
-                              "object": f"document:{collection}"},
+                "tuple_key": {"user": f"user:{user}", "relation": relation,
+                              "object": object_id},
                 "authorization_model_id": model_id,
                 "consistency": "HIGHER_CONSISTENCY",
             })
             return response.get("allowed") is True
 
+        def listed_sources(user: str) -> set[str]:
+            response = _post(base, f"/stores/{store}/list-objects", {
+                "user": f"user:{user}", "relation": "can_view",
+                "type": "source", "authorization_model_id": model_id,
+                "consistency": "HIGHER_CONSISTENCY",
+            })
+            objects = response.get("objects")
+            if (not isinstance(objects, list) or
+                    any(not isinstance(item, str) or not item.startswith("source:")
+                        for item in objects) or len(objects) != len(set(objects))):
+                raise RuntimeError("invalid OpenFGA source listing")
+            return set(objects)
+
         checks = 0
         for role, allowed in grants.items():
             for collection in COLLECTIONS:
-                if check(role, collection) != (collection in allowed):
+                if check(role, "viewer", f"document:{collection}") != (collection in allowed):
                     raise AssertionError(f"OpenFGA disagrees for {role}/{collection}")
                 checks += 1
+        source_checks = 0
+        for user in policy["users"]:
+            expected_sources: set[str] = set()
+            for source in sources:
+                expected = (may_read(user["id"], source["collection"], policy) and
+                            may_read_document(user["id"], source, policy))
+                if expected:
+                    expected_sources.add(f"source:{source['document_id']}")
+                if check(user["id"], "can_view",
+                         f"source:{source['document_id']}") != expected:
+                    raise AssertionError(
+                        f"OpenFGA disagrees for {user['id']}/{source['document_id']}")
+                source_checks += 1
+            if listed_sources(user["id"]) != expected_sources:
+                raise AssertionError(f"OpenFGA source listing differs for {user['id']}")
+        def change(*, writes: list[dict[str, str]] | None = None,
+                   deletes: list[dict[str, str]] | None = None) -> None:
+            body: dict[str, object] = {"authorization_model_id": model_id}
+            if writes:
+                body["writes"] = {"tuple_keys": writes}
+            if deletes:
+                body["deletes"] = {"tuple_keys": deletes}
+            _post(base, f"/stores/{store}/write", body)
+
+        def require_denied_after_delete(tuple_key: dict[str, str],
+                                        user_id: str, source_id: str) -> None:
+            if not check(user_id, "can_view", f"source:{source_id}"):
+                raise AssertionError("expected source grant is absent before revocation")
+            change(deletes=[tuple_key])
+            if check(user_id, "can_view", f"source:{source_id}"):
+                raise AssertionError("revoked source grant still permits retrieval")
+            if f"source:{source_id}" in listed_sources(user_id):
+                raise AssertionError("revoked source remains in document listing")
+            change(writes=[tuple_key])
+
+        require_denied_after_delete(
+            {"user": "user:lab-captain-2", "relation": "member",
+             "object": "department:captain"}, "lab-captain-2", "MAN-001")
+        require_denied_after_delete(
+            {"user": "department:chief_engineer#member", "relation": "permitted",
+             "object": "source:ENG-001"}, "lab-chief_engineer-2", "ENG-001")
+        require_denied_after_delete(
+            {"user": "department:chief_engineer#member", "relation": "viewer",
+             "object": "document:engineering"}, "lab-chief_engineer-2", "ENG-001")
+        denied = {"user": "user:lab-captain-1", "relation": "blocked",
+                  "object": "source:MAN-001"}
+        if check("lab-captain-1", "can_view", "source:MAN-001"):
+            raise AssertionError("document-level deny lost precedence")
+        change(deletes=[denied])
+        if not check("lab-captain-1", "can_view", "source:MAN-001"):
+            raise AssertionError("removed document deny did not restore access")
+        change(writes=[denied])
+        if check("lab-captain-1", "can_view", "source:MAN-001"):
+            raise AssertionError("restored document deny did not take effect")
         engineer = {"user": "user:chief_engineer", "relation": "member",
                     "object": "department:chief_engineer"}
-        _post(base, f"/stores/{store}/write",
-              {"deletes": {"tuple_keys": [engineer]}, "authorization_model_id": model_id})
-        if check("chief_engineer", "engineering"):
+        change(deletes=[engineer])
+        if check("chief_engineer", "viewer", "document:engineering"):
             raise AssertionError("revoked engineering membership still permits retrieval")
         return {"status": "pass", "mode": "synthetic-memory-loopback",
                 "role_collection_checks": checks, "revocation_denied": True,
+                "source_checks": source_checks,
+                "source_listing_checks": len(policy["users"]) + 3,
+                "document_deny_precedence": True,
+                "membership_collection_and_source_revocation": True,
                 "version": VERSION}
     finally:
         process.terminate()
