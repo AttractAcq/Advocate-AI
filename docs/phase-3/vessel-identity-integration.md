@@ -16,6 +16,11 @@ The Core recovery set captures CA and token revocations; Keycloak accounts,
 realm configuration and signing keys require a separate coordinated recovery
 process.
 
+A signed-image rehearsal has been added to the three-image CI path. It uses a
+fictional HTTPS JWKS service to exercise install, role denial, logout and Core
+clean restore. Its CI result is pending; it does not exercise Keycloak login,
+browser redirects or Keycloak state recovery.
+
 ## Required behavior
 
 - A strict vessel release uses one named, local HTTPS Keycloak realm for crew
