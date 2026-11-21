@@ -16,6 +16,7 @@ IMAGE_MANIFEST = ROOT / "infrastructure/lab/container-image.json"
 _IMAGE = json.loads(IMAGE_MANIFEST.read_text(encoding="utf-8"))
 IMAGE = f"{_IMAGE['name']}@{_IMAGE['digest']}"
 NAME = "sovereign-keycloak-lab"
+KEYCLOAK_BASE64_FLAG = "JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics"
 
 
 def container_create_command() -> list[str]:
@@ -23,6 +24,7 @@ def container_create_command() -> list[str]:
     return ["docker", "create", "--name", NAME, "--memory", "1g", "--pids-limit", "256",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
             "-p", "127.0.0.1:18086:8080", "--env-file", str(RUNTIME / "keycloak.env"),
+            "-e", KEYCLOAK_BASE64_FLAG,
             IMAGE, "start-dev", "--import-realm", "--hostname=http://127.0.0.1:18086"]
 
 

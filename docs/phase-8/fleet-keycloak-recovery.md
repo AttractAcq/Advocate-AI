@@ -4,6 +4,12 @@ Run `python -m scripts.phase8_fleet_keycloak_rehearsal --recovery` after buildin
 the two Fleet images and pulling the digest-pinned Keycloak lab image. CI runs
 the same command in `fleet-keycloak-interoperability`.
 
+Both initial and recovered Keycloak containers set
+`JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics`. The rehearsal queries each
+running JVM with `jcmd` and requires `UseBASE64Intrinsics = false`, following
+the [Keycloak CVE-2026-114938 interim guidance](https://www.keycloak.org/2026/11/java4shell-vulnerability-cve-2026-114938).
+This check does not qualify a production Java runtime or host CPU.
+
 The rehearsal creates only fictional users and credentials. It first saves an
 encrypted archive of the initial realm. After the existing signing-key rollover,
 it stops Keycloak before exporting the current realm and its users with

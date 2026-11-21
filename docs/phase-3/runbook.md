@@ -72,7 +72,11 @@ or credential should be placed in this lab.
    `127.0.0.1:18086`. Its realm import has named synthetic users, five roles,
    a public Console client with PKCE and a Core audience. Keycloak's
    [container guide](https://www.keycloak.org/server/containers) documents
-   the import mechanism. The `start-dev` mode and direct password grant in
+   the import mechanism. The launch sets the vendor's interim
+   `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` flag. After it starts, verify
+   the live JVM reports `UseBASE64Intrinsics = false` with
+   `docker exec sovereign-keycloak-lab jcmd io.quarkus.bootstrap.runner.QuarkusEntryPoint VM.flags -all`.
+   The `start-dev` mode and direct password grant in
    this lab realm are test-only. Production identity needs TLS, persistent
    storage, MFA, service identities and a reviewed admin process.
 
