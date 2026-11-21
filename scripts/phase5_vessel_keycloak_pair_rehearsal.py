@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -195,12 +194,15 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
         restored = json.loads((restored_root / "vessel-state.json").read_text())
         volumes.add(restored["runtime"]["data_volume"])
         restored_core = restored["runtime"]["core_id"]
+        unsigned_options = {"verify_signature": False, "verify_exp": False}
         if (recovered["result"] != "restored-and-activated" or
                 status_vessel(restored_root, trusted, crane)["result"] != "healthy" or
-                jwt.decode(engineer, options={"verify_signature": False,
-                                             "verify_exp": False})["exp"] <= time.time() or
+                jwt.decode(engineer, options=unsigned_options)["exp"] <= time.time() or
+                jwt.decode(deckhand, options=unsigned_options)["exp"] <= time.time() or
+                _api(restored_core, "/api/me", deckhand) !=
+                (200, {"id": "deckhand", "role": "deckhand"}) or
                 _api(restored_core, "/api/me", engineer)[0] != 401):
-            raise AssertionError("paired restore lost valid token revocation")
+            raise AssertionError("paired restore lost signing-key continuity or revocation")
         fresh = _flow(restored_core, password, "engineer", "chief_engineer",
                       ca_path="/var/lib/sovereign/oidc-ca.pem")
         fresh_deck = _flow(restored_core, password, "deckhand", "deckhand",
@@ -212,7 +214,9 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
             raise AssertionError("restored signed vessel lost crew role scope")
         return {"result": "pass", "identity": "real-pinned-keycloak",
                 "capture": "both-services-stopped", "pair": "signed-artifact-identities",
-                "recovery": "clean-keycloak-core-knowledge"}
+                "recovery": "clean-keycloak-core-knowledge",
+                "old_deckhand_token": "authorized-after-restore",
+                "old_engineer_token": "revoked-after-restore"}
     finally:
         for candidate in (restored_root, install_root):
             volume = _retire(candidate)
