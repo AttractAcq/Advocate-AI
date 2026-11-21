@@ -277,6 +277,8 @@ jobs:
         run: |
           docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
           .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal
+      - name: Rehearse encrypted vessel Keycloak clean recovery
+        run: .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal --recovery
 
   fleet-browser-https-rehearsal:
     if: github.event_name == 'pull_request'

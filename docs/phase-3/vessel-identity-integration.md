@@ -41,8 +41,15 @@ establish vessel TLS or zero egress.
 
 A follow-on synthetic variant requires TOTP enrollment for the fictional
 engineer, rejects an invalid code on the next login, and verifies a valid
-code reaches Core through Console. Its CI result is pending. Production factor
-choice, enrollment, recovery, site PKI and operator approval remain open.
+code reaches Core through Console. The [Chrome job passed on PR
+#203](https://github.com/AttractAcq/Advocate-AI/actions/runs/44901281996/job/136837582633);
+the full release job is still pending. Production factor choice, enrollment,
+recovery, site PKI and operator approval remain open.
+
+The [Keycloak clean recovery rehearsal](vessel-keycloak-recovery.md) is a
+separate synthetic export and encrypted archive check. Its CI result is
+pending; it does not replace a coordinated production identity database
+backup or the signed Core/Knowledge recovery set.
 
 ## Required behavior
 
