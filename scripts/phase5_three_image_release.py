@@ -56,6 +56,7 @@ from infrastructure.release.upstream import generate_resolved_sbom, validate_ima
 from scripts.phase3_pgvector_core_socket import _rehearse_verified_images
 from scripts.phase5_vessel_oidc_rehearsal import rehearse as rehearse_vessel_oidc
 from scripts.phase5_vessel_keycloak_pair_rehearsal import rehearse as rehearse_vessel_keycloak_pair
+from scripts.phase5_feed_bound_rehearsal import rehearse as rehearse_feed_bound
 from scripts.synthetic_pg_fixture import fixture as synthetic_fixture, put as private_put
 from scripts.phase5_postgres_rehearsal import _restore as restore_postgres_dump
 from infrastructure.deploy.postgres_socket import ready as postgres_ready
@@ -1224,6 +1225,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
                 result["bootstrap_reset"] = \
                     _rehearse_bootstrap_reset(bundle, trusted, crane, root)
+                result["feed_bound_clean_restore"] = rehearse_feed_bound(
+                    bundle, trusted, crane, root, restic, restic_sha256)
             (output / "result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
             return result
     except Exception:
