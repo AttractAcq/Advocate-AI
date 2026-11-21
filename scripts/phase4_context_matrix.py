@@ -76,7 +76,7 @@ async def _case(name: str, fixture: dict[str, object], incident: dict[str, objec
         if hit["_source"]["id"] in expected_citations:
             timestamp = datetime.fromisoformat(hit["_source"]["timestamp"].replace("Z", "+00:00"))
             cited_times.update((timestamp.strftime("%H:%M"), timestamp.strftime("%H:%M:%S")))
-    answer_times = re.findall(r"(?<![+-])\b(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b",
+    answer_times = re.findall(r"(?<![0-9:+-])(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b",
                               body.get("analysis", ""))
     checks = {
         "expected_http_status": response.status_code == expected_status,
