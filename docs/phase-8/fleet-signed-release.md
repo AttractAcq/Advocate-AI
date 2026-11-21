@@ -36,6 +36,11 @@ scan and inventory files are retained as CI artifacts; temporary signing keys
 and image archives are not published by the rehearsal. This is evidence of
 the software path, not approval to distribute an image.
 
+The release CI command requires `fleet_bundle: verified` to pass. A scan
+denial exits unsuccessfully, and the workflow still uploads its metadata,
+scan and inventory files for investigation. The product-image release job
+uses the same always-upload behavior when its signed rehearsal fails.
+
 [PR #60's CI evidence](https://github.com/AttractAcq/Advocate-AI/actions/runs/44091882326)
 reported `fleet_bundle: verified`: both actual synthetic Fleet images passed
 archive identity and intake with zero unresolved HIGH, CRITICAL or UNKNOWN
