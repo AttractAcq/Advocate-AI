@@ -219,8 +219,9 @@ def import_package(package: Path, store: Path, key: Ed25519PublicKey,
         target = store / "snapshot.json"
         if target.exists() or target.is_symlink():
             prior, prior_issued, _ = verify_package(_read(target, MAX_PACKAGE_BYTES), key)
-            if issued <= prior_issued or payload["feed_id"] != prior["feed_id"]:
-                raise ThreatSnapshotError("snapshot rollback or feed change")
+            if issued <= prior_issued or any(
+                    payload[field] != prior[field] for field in ("feed_id", "publisher")):
+                raise ThreatSnapshotError("snapshot rollback or provenance change")
         fd, temporary = tempfile.mkstemp(prefix=".snapshot-", dir=store)
         try:
             with os.fdopen(fd, "wb") as stream:

@@ -39,7 +39,7 @@ Use only fictional data in the local rehearsal. From the repository root:
 
 The store must exist, be owned by the importing Core user and allow no group or
 other access. Import verifies the signature and rejects future issue times,
-older or equal issue times, and a changed feed ID. It writes a new package
+older or equal issue times, and a changed feed ID or publisher label. It writes a new package
 atomically after verification. Imports take an owner-only, no-follow store
 lock while comparing the prior issue time and replacing the snapshot, so two
 concurrent approved-media imports cannot install an older package last. Core
