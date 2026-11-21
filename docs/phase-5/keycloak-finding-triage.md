@@ -67,7 +67,7 @@ multi-platform digest
 The registry manifest lists amd64 and arm64 variants. An isolated local ARM64
 container at that digest reports OpenJDK 21.0.13.1, runtime build
 `Red_Hat-21.0.13.1.2-1`. The Linux exact-image scan confirms the six remaining
-HIGH findings. The [final-head Fleet Keycloak interoperability and browser
+HIGH findings. The [Linux Fleet Keycloak interoperability and browser
 integration jobs](https://github.com/AttractAcq/Advocate-AI/actions/runs/44854798524)
 passed on x86-64. The wider signed release rehearsal is reported in the
 linked CI run. This is synthetic lab evidence, not target-host qualification. The interim JVM flag
