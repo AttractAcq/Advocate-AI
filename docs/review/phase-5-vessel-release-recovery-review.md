@@ -154,8 +154,11 @@ remain open.
 
 At the historical PR #214 implementation head, `make check` passed 467 tests
 with 16 expected skips. At the PR #225 implementation head, local `make check`
-passed 481 tests with 17 skips; its final-head CI and retained release artifact
-are pending inspection. For an independent reproduction, record the final review-pack commit and
+passed 481 tests with 17 skips. [All 13 PR #225 final-head CI jobs passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44930999111);
+its retained three-image result reports `signed-and-verified`, passing signed
+OIDC and real Keycloak paired recovery, and zero unresolved Core, Console and
+Knowledge image findings. [All 13 PR #226 final-head jobs also passed](https://github.com/AttractAcq/Advocate-AI/actions/runs/44931448108)
+for the updated reviewer package. For an independent reproduction, record the final review-pack commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
 synthetic result artifact. Inspect the artifact and command logs, not only the
