@@ -64,7 +64,7 @@
       "role": "lab-captain-1"
     },
     {
-      "answer": "The Line inspection procedure requires the following actions:\n1. Retrieve the fictional deck checklist.\n2. Notify the duty officer of any defects found.\n3. Record completion without changing any live system.\n\nSource ID and Version: [Source DEC-001 v1]",
+      "answer": "The Line inspection procedure requires the following actions:\n1. Retrieve the fictional deck checklist.\n2. Notify the duty officer of any defects found.\n3. Record completion of the inspection without changing any live system.\n\nSource ID and Version: [Source DEC-001 v1]",
       "case_id": "P-DEC-001",
       "citations": [
         {
@@ -107,11 +107,11 @@
   ],
   "model": "qwen3.5:2b",
   "schema": 1,
-  "source_commit": "87709842a0286c437f6c5842665366bc0e59060a",
+  "source_commit": "1df6cf0c0b33cec5698734e9517e4d590d2f8585",
   "summary": {
     "cases": 5,
     "expected_source_citations": 4,
     "no_answer_denials": 1
   },
-  "timestamp_utc": "2026-11-21T22:08:02.544579+00:00"
+  "timestamp_utc": "2026-11-21T22:57:01.101172+00:00"
 }

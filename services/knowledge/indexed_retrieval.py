@@ -9,7 +9,7 @@ import sqlite3
 from services.knowledge.acl import source_access
 from services.knowledge.paths import read_source_bytes
 from services.knowledge.manifest_io import load_manifest
-from services.knowledge.query_terms import terms as _terms
+from services.knowledge.query_terms import search_terms as _search_terms, terms as _terms
 from services.policy.policy_file import PolicyUnavailable, load_policy
 
 
@@ -85,7 +85,7 @@ def search_index(
         raise ValueError("query must contain 1–1000 characters")
     if not isinstance(limit, int) or not 1 <= limit <= 10:
         raise ValueError("limit must be between 1 and 10")
-    wanted = _terms(query)
+    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
     if not wanted:
         return []
     candidates = [row for row in approved_rows(root, manifest, database, user_id)
