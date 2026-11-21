@@ -23,7 +23,9 @@ Activation writes an owner-only restore intent before creating the database volu
 For a feed-backed retry, provide the new host's `--threat-feed-store` and
 `--threat-feed-key` again. The old intent's key and the new host's snapshot
 and key must match the signed feed binding. The local tests cover receipt shape, exact snapshot/key
-comparison and denial before Docker on a mismatch. A full feed-backed
-three-image restore rehearsal and target-media custody proof remain open.
+comparison and denial before Docker on a mismatch. The synthetic
+[three-image feed-backed restore rehearsal](https://github.com/AttractAcq/Advocate-AI/actions/runs/44946229877)
+passed with a schema-4 receipt, stale feed status and withheld indicator values.
+Target-media custody proof and independent review remain open.
 
 The capture is a bounded synthetic candidate: at most 120 approved sources, a 16 MiB PostgreSQL dump, 16 MiB audit trail and 256 MiB conversation database. Production recovery still needs independently reviewed credential custody, role and privilege restoration, live Keycloak import attestation, target-hardware rehearsal, and a safe in-place replacement and rollback design. Signing and restic keys remain outside the snapshot and need separate custody. A local repository is not an off-vessel copy.
