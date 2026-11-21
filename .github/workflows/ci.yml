@@ -579,6 +579,20 @@ jobs:
           systemd-analyze verify "$RUNNER_TEMP/sovereign-fleet-recover.service" \
             "$RUNNER_TEMP/sovereign-fleet-backup.service" \
             "$RUNNER_TEMP/sovereign-fleet-backup.timer"
+      - name: Validate synthetic vessel boot recovery unit syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m infrastructure.deploy.vessel_boot_service \
+            --output "$RUNNER_TEMP/sovereign-vessel-recover.service" \
+            --root /var/lib/sovereign-vessel \
+            --core-state /var/lib/sovereign-core-state \
+            --trusted-key /etc/sovereign/vessel-trusted.pem \
+            --crane /opt/sovereign/bin/crane \
+            --python /usr/bin/python3 \
+            --workdir /opt/sovereign/app \
+            --user sovereign-vessel --group sovereign-vessel
+          systemd-analyze verify "$RUNNER_TEMP/sovereign-vessel-recover.service"
       - name: Rehearse encrypted PostgreSQL dump and clean restore
         shell: bash
         run: |
