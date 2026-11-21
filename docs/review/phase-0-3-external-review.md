@@ -17,6 +17,18 @@ to its present evidence and outstanding work.
 | Phase 2 Core and Console | [G1 record](../phase-2/gate.md), [runbook](../phase-2/runbook.md), `apps/api/`, `apps/console/web/` | Review API auth, model boundary, citations, optional persistent history and source-revocation redaction, error handling and browser accessibility; separate hardware/offline items remain deferred |
 | Phase 3 Knowledge and Policy | [gate record](../phase-3/gate.md), [ingestion register](../phase-3/supported-formats.md), [identity operations design](../phase-3/identity-operations.md), [retrieval evaluation](../phase-3/evaluation.json), [generated answers](../phase-3/answer-evaluation.json), `services/knowledge/`, `services/policy/`, `tests/` | Attempt cross-role access, stale ACL, deletion, injection, source spoofing, audit tamper and token replay; judge identity controls, answer claim support, parser limits and residual risk |
 
+For the current stacked tree, include [PR #216](https://github.com/AttractAcq/Advocate-AI/pull/216),
+[PR #223](https://github.com/AttractAcq/Advocate-AI/pull/223) and
+[PR #224](https://github.com/AttractAcq/Advocate-AI/pull/224)
+in the Phase 3 review. Check malformed OIDC role claims and duplicate signing
+keys; revoke a lab and an OIDC session during source listing, preview, search
+and conversation reads; and revoke an uploader during quarantine write. Confirm
+that no document excerpt or staged blob is returned or left behind. The local
+regressions are in `tests/test_phase3_knowledge.py` and
+`tests/test_document_upload_staging.py`. Record the exact final tree SHA and
+test OIDC behavior independently; these local tests do not sign off production
+Keycloak or NAS policy propagation.
+
 ## Reproduction commands
 
 From a fresh clone on a connected preparation workstation:

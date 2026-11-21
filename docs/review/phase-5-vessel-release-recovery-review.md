@@ -9,9 +9,9 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #215](https://github.com/AttractAcq/Advocate-AI/pull/215) at a
+through [PR #225](https://github.com/AttractAcq/Advocate-AI/pull/225) at a
 recorded final commit SHA. The original brief covered PRs #151–192; the later
-OIDC and Keycloak work is included below. These are stacked, unmerged
+OIDC, Keycloak, intelligence and evidence-binding work is included below. These are stacked, unmerged
 PRs; the reviewer must identify the exact final tree tested. A green CI job is
 not a review sign-off. The main paths are:
 
@@ -31,6 +31,9 @@ not a review sign-off. The main paths are:
 | OpenFGA comparison only | [PR #192](https://github.com/AttractAcq/Advocate-AI/pull/192), `scripts/phase5_openfga_probe.py`, [adoption record](../phase-5/open-source-adoption.md) | Synthetic source-level parity, deny precedence, listing and revocation; OpenFGA is not a vessel enforcement point |
 | OIDC and local identity boundary | [PR #194](https://github.com/AttractAcq/Advocate-AI/pull/194) through [PR #206](https://github.com/AttractAcq/Advocate-AI/pull/206), `apps/api/oidc.py`, `infrastructure/deploy/vessel_identity.py`, `infrastructure/deploy/vessel_runtime.py`, [identity operations](../phase-3/identity-operations.md) | HTTPS issuer and CA, internal identity network, Core/Console login, MFA, logout revocation, signing-key rotation and outage behavior; distinguish synthetic Keycloak from an approved site service |
 | Keycloak/Core recovery binding | [PR #207](https://github.com/AttractAcq/Advocate-AI/pull/207) through [PR #215](https://github.com/AttractAcq/Advocate-AI/pull/215), `infrastructure/deploy/vessel_identity_recovery.py`, `infrastructure/deploy/vessel_recovery_set.py`, `scripts/vesselctl.py`, [paired recovery runbook](../phase-5/vessel-keycloak-paired-recovery.md) | Exact signed Core receipt and encrypted realm archive pairing; stopped synthetic capture, clean Keycloak import, signing-key and revocation continuity; pair required before activation, interrupted finish and retry |
+| Current identity and knowledge reads | [PR #216](https://github.com/AttractAcq/Advocate-AI/pull/216), [PR #223](https://github.com/AttractAcq/Advocate-AI/pull/223), [PR #224](https://github.com/AttractAcq/Advocate-AI/pull/224), `apps/api/main.py`, `apps/api/oidc.py`, `tests/test_phase3_knowledge.py`, `tests/test_document_upload_staging.py` | Malformed signed claims and duplicate signing keys; token revocation during knowledge reads and upload staging; no document response or residual quarantined upload after revocation |
+| Wazuh evidence and AV/IT scope | [PR #217](https://github.com/AttractAcq/Advocate-AI/pull/217) through [PR #220](https://github.com/AttractAcq/Advocate-AI/pull/220), [PR #222](https://github.com/AttractAcq/Advocate-AI/pull/222), `services/connectors/wazuh.py`, `services/intelligence/`, `apps/api/main.py`, [Phase 4 gate](../phase-4/gate.md) | Snapshotted CA trust, bounded same-source evidence, exact citations, model claim fallback, and token revocation during incident reads; live collection and analyst review remain separate |
+| Archive identity through release evidence | [PR #225](https://github.com/AttractAcq/Advocate-AI/pull/225), `infrastructure/release/upstream.py`, `infrastructure/release/scan.py`, [tooling record](../phase-5/upstream-release-tools.md) | Archive hash checked around crane validation and after Syft cataloging; same archive, digest and scan evidence signed into the candidate; approved binary/database provenance and media custody remain open |
 
 ## Claims to verify
 
@@ -149,8 +152,10 @@ remain open.
 | Paired Keycloak/Core clean restore | [PR #207 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44906830484), [PR #208 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44908205055), [PR #209 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44910393043) | All 13 jobs passed at each head. The downloaded PR #209 three-image artifact reports `three_image_bundle=signed-and-verified`, `signed_vessel_keycloak_pair.result=pass`, `capture=both-services-stopped`, `old_deckhand_token=authorized-after-restore` and `old_engineer_token=revoked-after-restore`. It is synthetic evidence, not a live import attestation or production database restore. |
 | Pair-enforced activation, finish and retry | [PR #214](https://github.com/AttractAcq/Advocate-AI/pull/214), [runbook](../phase-5/vessel-identity-recovery-pair.md) | Local tests require the signed pair before OIDC activation and bind its digest across interrupted finish and abandoned retry. Final-head Linux release evidence is pending; inspect the retained artifact before accepting this row. |
 
-At the PR #214 implementation head, `make check` passed 467 tests with 16
-expected skips. For an independent reproduction, record the final review-pack commit and
+At the historical PR #214 implementation head, `make check` passed 467 tests
+with 16 expected skips. At the PR #225 implementation head, local `make check`
+passed 481 tests with 17 skips; its final-head CI and retained release artifact
+are pending inspection. For an independent reproduction, record the final review-pack commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
 synthetic result artifact. Inspect the artifact and command logs, not only the
@@ -179,6 +184,9 @@ lab and retain the observed output, resource inventory and timing.
 | Interrupt stage, switch, capture, activation and rollback at each durable write | Inventory resulting files, containers and volumes; show which command can safely resume, discard or escalate. Include the three new restore windows: Knowledge container before database completion, complete database before Core/Console start, and services healthy before active record write |
 | Change the interrupted Core policy copy or a restore-attempt label before cleanup | Confirm `finish-incomplete-restore` refuses changed Core bytes and abandonment refuses a mismatched data, socket, container or network attempt label without deleting that resource |
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |
+| Revoke a user token while Wazuh, source preview, search, conversation read or upload staging is in progress | Require incident and document responses to be discarded. For staging, inspect quarantine for residual blob or metadata. Repeat with lab and OIDC identities and record audit behavior. |
+| Feed seven same-source alerts, an out-of-window alert, an unknown asset and instruction-like alert text | Check the five-related-alert model cap, exact source references, absence of related free text from the prompt, and fallback when a model invents a duration, time or causal claim. Require analyst review against actual Wazuh evidence. |
+| Change the saved image archive during crane validation or Syft cataloging | Require release evidence generation to fail before a resolved SBOM is written. Then repeat the signed release path with stable bytes and inspect the archive, manifest, SBOM and scan hashes together. |
 | Compare OpenFGA source checks and listings against the current Policy Engine | Try direct document denies, role restrictions, revoked users, invalid classifications, membership and collection changes; record any parity gap without routing vessel access through OpenFGA |
 | Remove OpenFGA or its state during a shadow test | Confirm the production Policy Engine continues to enforce source permissions; separately design and test fail-closed behavior before any proposed enforcement migration |
 | Supply a wrong OIDC issuer, CA, identity network, lab credential or Keycloak signing key | Confirm signed vessel install and recovery reject wrong configuration, external networks, missing provider or invalid claims without granting a document read |
