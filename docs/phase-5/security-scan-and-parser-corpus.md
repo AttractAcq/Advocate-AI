@@ -11,15 +11,13 @@ The only container currently declared by this repository is the **synthetic Keyc
 The lab still uses Keycloak `start-dev` and a Docker bridge that may have egress. The added flags do not qualify production identity, network isolation, image provenance or container runtime hardening. Those are [B-03, B-06, B-08 and B-11](../blockers-and-build-queue.md).
 
 The first [CI scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/43850286761)
-found **six HIGH and zero CRITICAL** advisories in the lab image. The
+found **six HIGH and zero CRITICAL** advisories in the lab image. The [21
+November scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282)
+of the same digest reports **ten HIGH and one CRITICAL**. The current
 [summary record](keycloak-lab-image-scan.json) lists the IDs, package names,
-scanner status and the retained report hash. One finding has a listed fixed
-Guava version; four SQLite findings had no fixed version in this report, and
-one Java finding was marked `will_not_fix`. No finding has been accepted for a
-release. The raw `keycloak-lab-trivy` artifact in that CI run is the evidence
-source; the committed summary contains no vessel data.
-The [follow-up package triage](keycloak-finding-triage.md) uses the latest
-retained CI report and vendor references. It does not accept any finding or
+scanner status and retained report hash; it contains no vessel data. No
+finding has been accepted for release. The [package triage](keycloak-finding-triage.md)
+uses the current retained CI report and vendor references. It does not accept any finding or
 qualify the lab image for a release.
 
 ## Parser regression corpus

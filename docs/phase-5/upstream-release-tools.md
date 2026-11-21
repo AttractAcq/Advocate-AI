@@ -74,6 +74,6 @@ An OCI index digest can differ from the single-platform manifest digest in a
 Docker save archive. The release record must use and scan the exact artifact
 digest that crane validates; a mismatch fails. A tool's ability to parse an
 archive does not authenticate its publisher, prove every package was found,
-verify licences, or approve vulnerabilities. The [six HIGH findings in the
-lab Keycloak image](keycloak-lab-image-scan.json) remain open. A production
+verify licences, or approve vulnerabilities. The [ten HIGH and one CRITICAL
+finding in the lab Keycloak image](keycloak-lab-image-scan.json) remain open. A production
 image, independent review, and target-host rehearsal remain B-07/B-08/B-11.
