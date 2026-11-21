@@ -107,6 +107,31 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(allowed.json()["citations"][0]["document_id"], "ENG-001")
         self.assertEqual(self.model.contexts[0][0]["document_id"], "ENG-001")
 
+    async def test_procedure_action_questions_retrieve_only_permitted_sources(self) -> None:
+        self.add("ENG-002", "engineering", "Title: HVAC intake procedure. Required action: Isolate the test equipment.")
+        self.add("DEC-002", "deck", "Title: Line inspection procedure. Required action: Record the inspection.")
+        self.save()
+        engineer = await self.login("engineer")
+        deckhand = await self.login("deckhand")
+        for question in ("What actions does the HVAC intake procedure require?",
+                         "What should be done for HVAC intake?"):
+            with self.subTest(question=question):
+                reply = await self.client.post("/api/chat", headers=engineer,
+                                               json={"message": question, "mode": "documents"})
+                self.assertEqual(reply.status_code, 200)
+                self.assertEqual([item["document_id"] for item in reply.json()["citations"]],
+                                 ["ENG-002"])
+                denied = await self.client.post("/api/chat", headers=deckhand,
+                                                json={"message": question, "mode": "documents"})
+                self.assertEqual(denied.json()["citations"], [])
+        deck = await self.client.post("/api/chat", headers=deckhand,
+                                      json={"message": "According to the Line inspection procedure, what actions are required?",
+                                            "mode": "documents"})
+        self.assertEqual([item["document_id"] for item in deck.json()["citations"]], ["DEC-002"])
+        broad = search_index(self.root, self.manifest, self.database, "engineer",
+                             "What should be done?")
+        self.assertEqual(broad, [])
+
     async def test_knowledge_reads_discard_results_after_mid_request_logout(self) -> None:
         engineer = await self.login("engineer")
         conversation = await self.client.post("/api/chat", headers=engineer,

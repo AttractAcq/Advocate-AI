@@ -9,22 +9,13 @@ from __future__ import annotations
 import csv
 import hashlib
 from pathlib import Path
-import re
 
 from services.knowledge.acl import source_access
 from services.knowledge.paths import read_source_bytes
+from services.knowledge.query_terms import terms as _terms
 from services.policy.policy_file import load_policy
-
-_WORDS = re.compile(r"[a-z0-9]{3,}")
-_STOPWORDS = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
-              "with", "from", "into", "about", "that", "this", "are", "can", "does", "did",
-              "tell", "please", "there", "their", "your"}
 _MAX_DOCUMENT_BYTES = 64 * 1024
 _MAX_QUERY_CHARS = 1000
-
-
-def _terms(value: str) -> set[str]:
-    return set(_WORDS.findall(value.casefold())) - _STOPWORDS
 
 
 def search_fixture_documents(
