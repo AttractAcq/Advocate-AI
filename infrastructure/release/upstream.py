@@ -30,6 +30,27 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _write_new_json(path: Path, value: dict[str, object]) -> str:
+    """Create one private evidence file without following a replaced path."""
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    identity = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        try:
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+                path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _binary(path: Path, expected_hash: str) -> None:
     if (path.is_symlink() or not path.is_file() or not _DIGEST.fullmatch(expected_hash) or
             _sha256(path) != expected_hash):
@@ -173,9 +194,9 @@ def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
         {"name": "sovereign-ai:archive-sha256", "value": identity["archive_sha256"]},
         {"name": "sovereign-ai:crane-version", "value": CRANE_VERSION},
     ])
-    output.write_text(json.dumps(sbom, sort_keys=True, separators=(",", ":")) + "\n")
+    sbom_sha256 = _write_new_json(output, sbom)
     return {"image_ref": image_ref, "archive_sha256": identity["archive_sha256"],
-            "sbom_sha256": _sha256(output), "components": len(sbom["components"]),
+            "sbom_sha256": sbom_sha256, "components": len(sbom["components"]),
             "crane_version": CRANE_VERSION, "syft_version": SYFT_VERSION}
 
 
