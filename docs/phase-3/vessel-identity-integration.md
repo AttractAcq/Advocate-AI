@@ -1,6 +1,6 @@
 # Vessel identity integration contract
 
-**Status: implementation design for synthetic validation, not an approved vessel
+**Status: partial runtime implementation for synthetic validation, not an approved vessel
 configuration.** The current signed vessel installer is a schema-1 lab path:
 it accepts only `{"schema":1,"oidc_issuer":null}`, mounts a lab password into
 Core, and records that password path in install, switch and recovery state.
@@ -8,6 +8,13 @@ Core can validate a DNS-named HTTPS Keycloak issuer and a private CA file, but
 the vessel installer does not yet supply either. An issuer in Console alone
 would produce an unusable or misleading sign-in path, so the mode transition
 must be atomic across Console, Core, status, backup and recovery.
+
+The runtime now has an opt-in OIDC branch that validates an exact HTTPS realm,
+owner-only CA and revocation files, and a labelled internal identity network.
+It mounts no lab password, connects only Core to that network, and probes the
+Console issuer and TLS JWKS. The installer cannot select this branch yet; its
+state, release switch and recovery records are still schema 1. This code is
+not evidence of an installable OIDC vessel release.
 
 ## Required behavior
 

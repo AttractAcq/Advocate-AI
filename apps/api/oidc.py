@@ -19,6 +19,37 @@ import jwt
 from services.policy.policy_file import active_user, load_policy
 
 
+def validate_keycloak_issuer(issuer: str, *, allow_https: bool = False) -> None:
+    """Accept one exact local realm URL, never a redirectable discovery URL."""
+    parsed = urlsplit(issuer)
+    realm = re.fullmatch(r"/realms/[A-Za-z0-9_-]{1,80}", parsed.path)
+    if (not realm or parsed.query or parsed.fragment or parsed.username or
+            parsed.password or issuer.endswith("/")):
+        raise ValueError("OIDC issuer must identify one Keycloak realm")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid OIDC issuer port") from exc
+    if parsed.scheme == "https" and allow_https:
+        hostname = parsed.hostname or ""
+        labels = hostname.split(".")
+        if (port is not None or len(labels) < 2 or len(hostname) > 253 or
+                hostname.replace(".", "").isdigit() or
+                any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                    for label in labels) or
+                parsed.netloc != hostname):
+            raise ValueError("HTTPS issuer must use a DNS host on port 443")
+        return
+    try:
+        address = ipaddress.ip_address(parsed.hostname or "")
+    except ValueError as exc:
+        raise ValueError("OIDC issuer must use numeric loopback in lab") from exc
+    host = f"[{address}]" if address.version == 6 else str(address)
+    if (parsed.scheme != "http" or not address.is_loopback or not port or
+            parsed.netloc != f"{host}:{port}"):
+        raise ValueError("OIDC issuer must be local Keycloak realm")
+
+
 class OidcVerifier:
     _MAX_REVOCATIONS = 4 * 1024 * 1024
 
@@ -28,35 +59,9 @@ class OidcVerifier:
                  authorized_client: str = "sovereign-console",
                  allow_https_issuer: bool = False,
                  ca_file: Path | None = None) -> None:
-        parsed = urlsplit(issuer)
-        realm = re.fullmatch(r"/realms/[A-Za-z0-9_-]{1,80}", parsed.path)
-        if (not realm or parsed.query or parsed.fragment or parsed.username or
-                parsed.password or issuer.endswith("/")):
-            raise ValueError("OIDC issuer must identify one Keycloak realm")
-        try:
-            port = parsed.port
-        except ValueError as exc:
-            raise ValueError("invalid OIDC issuer port") from exc
-        if ca_file is not None and parsed.scheme != "https":
+        if ca_file is not None and urlsplit(issuer).scheme != "https":
             raise ValueError("custom OIDC CA requires an HTTPS issuer")
-        if parsed.scheme == "https" and allow_https_issuer:
-            hostname = parsed.hostname or ""
-            labels = hostname.split(".")
-            if (port is not None or len(labels) < 2 or len(hostname) > 253 or
-                    hostname.replace(".", "").isdigit() or
-                    any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-                        for label in labels) or
-                    parsed.netloc != hostname):
-                raise ValueError("Fleet HTTPS issuer must use a DNS host on port 443")
-        else:
-            try:
-                address = ipaddress.ip_address(parsed.hostname or "")
-            except ValueError as exc:
-                raise ValueError("OIDC issuer must use numeric loopback in lab") from exc
-            host = f"[{address}]" if address.version == 6 else str(address)
-            if (parsed.scheme != "http" or not address.is_loopback or not port or
-                    parsed.netloc != f"{host}:{port}"):
-                raise ValueError("OIDC issuer must be local Keycloak realm")
+        validate_keycloak_issuer(issuer, allow_https=allow_https_issuer)
         self.issuer = issuer.rstrip("/")
         self.roles_path = roles_path
         self.audience = audience

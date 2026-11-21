@@ -31,6 +31,8 @@ class RuntimeHandle:
     network_id: str
     core_id: str
     console_id: str
+    identity_network_id: str | None = None
+    identity_network_name: str | None = None
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -256,7 +258,7 @@ def _image_id(bundle: Path, role: str, item: dict[str, str], crane: Path) -> str
     return image_id
 
 
-def _validate_console_config(path: Path) -> None:
+def _validate_console_config(path: Path, *, allow_oidc: bool = False) -> str | None:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
         raise RuntimeError("synthetic Console configuration is missing or linked")
     try:
@@ -271,19 +273,32 @@ def _validate_console_config(path: Path) -> None:
         config = json.loads(path.read_bytes(), object_pairs_hook=unique_object)
     except (ValueError, UnicodeError) as exc:
         raise RuntimeError("invalid synthetic Console configuration") from exc
-    if (not isinstance(config, dict) or
-            config != {"schema": 1, "oidc_issuer": None} or type(config["schema"]) is not int):
+    if (not isinstance(config, dict) or set(config) != {"schema", "oidc_issuer"}
+            or type(config["schema"]) is not int or config["schema"] != 1):
+        raise RuntimeError("invalid Console configuration fields")
+    issuer = config["oidc_issuer"]
+    if issuer is None:
+        return None
+    if not allow_oidc or not isinstance(issuer, str):
         raise RuntimeError("only the synthetic no-issuer Console configuration is allowed")
+    from apps.api.oidc import validate_keycloak_issuer
+    try:
+        validate_keycloak_issuer(issuer, allow_https=True)
+    except ValueError as exc:
+        raise RuntimeError("invalid Console OIDC issuer") from exc
+    if not issuer.startswith("https://"):
+        raise RuntimeError("vessel OIDC issuer must use HTTPS")
+    return issuer
 
 
-def _health(core_id: str) -> None:
+def _health(core_id: str, issuer: str | None = None) -> None:
     _docker("exec", core_id, "python", "-c",
             'import urllib.error, urllib.request; '
             'assert urllib.request.urlopen("http://127.0.0.1:18100/health", timeout=3).status == 200')
     _docker("exec", core_id, "python", "-c",
             'import json, urllib.request; '
             'r=urllib.request.urlopen("http://console:8080/console-config.json", timeout=3); '
-            'assert json.load(r)=={"schema":1,"oidc_issuer":None}; '
+            f'assert json.load(r)=={{"schema":1,"oidc_issuer":{issuer!r}}}; '
             'assert r.headers["Cache-Control"]=="no-store"')
     _docker("exec", core_id, "python", "-c",
             'import urllib.request; '
@@ -318,16 +333,35 @@ def verify_runtime_identity(handle: RuntimeHandle) -> None:
             _docker("network", "inspect", handle.network_id, "--format",
                     "{{.Internal}}") != "true"):
         raise RuntimeError("synthetic runtime network identity mismatch")
+    identity_name = handle.identity_network_name
+    identity_id = handle.identity_network_id
+    if (identity_name is None) != (identity_id is None):
+        raise RuntimeError("incomplete vessel identity network handle")
+    if identity_name is not None:
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,63}", identity_name)
+                or identity_name.startswith("sovereign-synthetic-")
+                or not re.fullmatch(r"[0-9a-f]{64}", identity_id or "")
+                or _docker("network", "inspect", identity_name, "--format", "{{.Id}}") != identity_id
+                or _docker("network", "inspect", identity_name, "--format", "{{.Internal}}") != "true"
+                or _docker("network", "inspect", identity_name, "--format",
+                           '{{index .Labels "sovereign.vessel.identity"}}') != "true"):
+            raise RuntimeError("vessel identity network changed")
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format",
                    '{{index .Config.Labels "sovereign.synthetic.run"}}') != run_name:
             raise RuntimeError("synthetic runtime container identity mismatch")
         networks = json.loads(_docker("inspect", identifier, "--format",
                                     "{{json .NetworkSettings.Networks}}"))
-        if (not isinstance(networks, dict) or len(networks) != 1 or
+        expected = {run_name} | ({identity_name} if identifier == handle.core_id
+                                 and identity_name is not None else set())
+        if (not isinstance(networks, dict) or set(networks) != expected or
                 run_name not in networks or not isinstance(networks[run_name], dict) or
                 networks[run_name].get("NetworkID") != handle.network_id):
             raise RuntimeError("synthetic runtime network attachment mismatch")
+        if identifier == handle.core_id and identity_name is not None:
+            identity = networks[identity_name]
+            if not isinstance(identity, dict) or identity.get("NetworkID") != identity_id:
+                raise RuntimeError("vessel Core identity network attachment changed")
 
 
 def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,

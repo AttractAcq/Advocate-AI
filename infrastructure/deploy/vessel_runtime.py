@@ -25,6 +25,7 @@ from infrastructure.deploy.knowledge_volume import (
     KnowledgeVolumeHandle, _credentials, probe_knowledge,
 )
 from infrastructure.deploy.postgres_socket import verify_login
+from infrastructure.deploy.vessel_identity import VesselIdentity, preflight_vessel_identity
 from infrastructure.release.bundle import (
     BundleError, require_supported_vessel_compatibility, verify_bundle,
 )
@@ -66,10 +67,11 @@ def _persistent_file(path: Path) -> None:
         raise VesselRuntimeError("invalid persistent vessel Core file")
 
 
-def _state_options(state: Path, lab_password: Path,
+def _state_options(state: Path, lab_password: Path | None,
                    knowledge_root: Path, *,
                    allow_legacy_history: bool = False,
-                   model_id: str | None = None) -> tuple[list[str], Path]:
+                   model_id: str | None = None,
+                   identity: VesselIdentity | None = None) -> tuple[list[str], Path]:
     if model_id is not None and not _MODEL_ID.fullmatch(model_id):
         raise VesselRuntimeError("invalid signed model request name")
     if (not state.is_absolute() or state.is_symlink() or not state.is_dir()
@@ -117,27 +119,41 @@ def _state_options(state: Path, lab_password: Path,
         verify_audit(audit_path, require_current_clock=True)
     except (OSError, ValueError) as exc:
         raise VesselRuntimeError("vessel audit trail is invalid") from exc
-    _private_file(lab_password)
-    if lab_password.resolve().is_relative_to(state.resolve()):
-        raise VesselRuntimeError("lab credential must be outside Core state")
-    password = lab_password.read_text(encoding="utf-8")
-    if (not 16 <= len(password.rstrip("\n")) <= 200 or
-            "\r" in password or "\n" in password.rstrip("\n")):
-        raise VesselRuntimeError("invalid lab credential length")
+    if identity is None:
+        if lab_password is None:
+            raise VesselRuntimeError("lab credential is required in lab mode")
+        _private_file(lab_password)
+        if lab_password.resolve().is_relative_to(state.resolve()):
+            raise VesselRuntimeError("lab credential must be outside Core state")
+        password = lab_password.read_text(encoding="utf-8")
+        if (not 16 <= len(password.rstrip("\n")) <= 200 or
+                "\r" in password or "\n" in password.rstrip("\n")):
+            raise VesselRuntimeError("invalid lab credential length")
+    elif lab_password is not None:
+        raise VesselRuntimeError("OIDC mode cannot mount a lab credential")
     _, _, reader, _, reader_secret = _credentials(knowledge_root, initialize=False)
     options = ["--user", f"{os.getuid()}:{os.getgid()}",
                "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign",
-               "--mount", (f"type=bind,source={lab_password.resolve()},"
-                           "target=/run/secrets/lab-password,readonly"),
                "--mount", (f"type=bind,source={reader.resolve()},"
                            "target=/run/secrets/pgpass,readonly"),
                "-e", "SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
-               "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                "-e", "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
                "-e", f"SOVEREIGN_KNOWLEDGE_DB={_READER_DSN}",
                "-e", "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                "-e", "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                "-e", "PGPASSFILE=/run/secrets/pgpass"]
+    if identity is None:
+        assert lab_password is not None
+        options += ["--mount", (f"type=bind,source={lab_password.resolve()},"
+                                "target=/run/secrets/lab-password,readonly"),
+                    "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"]
+    else:
+        if (identity.ca_file != state / "oidc-ca.pem" or
+                identity.revocations_file != state / "oidc-revocations.jsonl"):
+            raise VesselRuntimeError("OIDC material must live in Core state")
+        options += ["-e", f"SOVEREIGN_OIDC_ISSUER={identity.issuer}",
+                    "-e", "SOVEREIGN_OIDC_CA_FILE=/var/lib/sovereign/oidc-ca.pem",
+                    "-e", "SOVEREIGN_OIDC_REVOCATIONS=/var/lib/sovereign/oidc-revocations.jsonl"]
     if model_id is not None:
         options += ["-e", f"SOVEREIGN_MODEL_NAME={model_id}",
                     "-e", f"SOVEREIGN_MODEL_ENDPOINT={_MODEL_ENDPOINT}"]
@@ -155,10 +171,11 @@ def _core_database_health(core_id: str) -> None:
 
 def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
                                  console_config: Path, state: Path,
-                                 lab_password: Path, knowledge_root: Path,
+                                 lab_password: Path | None, knowledge_root: Path,
                                  knowledge: KnowledgeVolumeHandle,
                                  installation_id: str, *,
-                                 restore_attempt: str | None = None) -> RuntimeHandle:
+                                 restore_attempt: str | None = None,
+                                 identity: VesselIdentity | None = None) -> RuntimeHandle:
     """Launch verified Core and Console around the checked Knowledge socket."""
     if not _INSTALL.fullmatch(installation_id) or \
             knowledge.installation_id != installation_id:
@@ -168,12 +185,17 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
     manifest = verify_bundle(bundle, trusted_key)
     require_supported_vessel_compatibility(manifest)
     model_id = _signed_model_id(manifest)
-    _validate_console_config(console_config)
+    issuer = _validate_console_config(console_config, allow_oidc=identity is not None)
+    if issuer != (identity.issuer if identity is not None else None):
+        raise VesselRuntimeError("Core and Console OIDC issuer mismatch")
+    if identity is not None and preflight_vessel_identity(
+            console_config, state, identity.network_name) != identity:
+        raise VesselRuntimeError("vessel identity resource changed")
     if not stat.S_IMODE(console_config.stat().st_mode) & 0o004:
         raise VesselRuntimeError("Console configuration is unreadable by the image user")
     probe_knowledge(knowledge)
     options, reader = _state_options(state, lab_password, knowledge_root,
-                                     model_id=model_id)
+                                     model_id=model_id, identity=identity)
     reader_secret = _credentials(knowledge_root, initialize=False)[4]
     verify_login(knowledge.container_id, "sovereign_read", reader_secret)
     images = {role: _image_id(bundle, role, manifest["images"][role], crane)
@@ -197,6 +219,8 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
                           "--mount", (f"type=volume,source={knowledge.socket_volume},"
                                       "target=/run/postgresql,readonly"),
                           *options, images["core"])
+        if identity is not None:
+            _docker("network", "connect", identity.network_name, core_id)
         console_id = _docker("run", "-d", "--pull", "never", "--name", name + "-console",
                              *labels, "--network", name, "--network-alias", "console",
                              "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
@@ -204,11 +228,13 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
                              "--mount", (f"type=bind,source={console_config.resolve()},"
                                          "target=/srv/console-config.json,readonly"),
                              images["console"])
-        handle = RuntimeHandle(network_id, core_id, console_id)
+        handle = RuntimeHandle(network_id, core_id, console_id,
+                               identity.network_id if identity else None,
+                               identity.network_name if identity else None)
         for attempt in range(30):
             try:
                 probe_signed_vessel_services(handle, knowledge, state, lab_password,
-                                             reader, model_id=model_id)
+                                             reader, model_id=model_id, identity=identity)
                 return handle
             except (ContainerRuntimeError, VesselRuntimeError):
                 if attempt == 29:
@@ -222,11 +248,17 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
 
 def probe_signed_vessel_services(handle: RuntimeHandle,
                                  knowledge: KnowledgeVolumeHandle,
-                                 state: Path, lab_password: Path,
+                                 state: Path, lab_password: Path | None,
                                  reader_passfile: Path,
-                                 *, model_id: str | None = None) -> None:
+                                 *, model_id: str | None = None,
+                                 identity: VesselIdentity | None = None) -> None:
     """Check persisted image, network, mount and database role boundaries."""
     verify_runtime_identity(handle)
+    if ((identity is None) != (handle.identity_network_id is None) or
+            (identity is not None and
+             (handle.identity_network_id != identity.network_id or
+              handle.identity_network_name != identity.network_name))):
+        raise VesselRuntimeError("vessel identity network mode changed")
     probe_knowledge(knowledge)
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
@@ -243,12 +275,22 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
         raise VesselRuntimeError("invalid Core runtime metadata") from exc
     expected_mounts = {
         "/var/lib/sovereign": ("bind", str(state.resolve()), True),
-        "/run/secrets/lab-password": ("bind", str(lab_password.resolve()), False),
         "/run/secrets/pgpass": ("bind", str(reader_passfile.resolve()), False),
         "/run/postgresql": ("volume", knowledge.socket_volume, False),
     }
+    if identity is None:
+        if lab_password is None:
+            raise VesselRuntimeError("lab credential is missing")
+        expected_mounts["/run/secrets/lab-password"] = (
+            "bind", str(lab_password.resolve()), False)
+    elif lab_password is not None:
+        raise VesselRuntimeError("OIDC runtime has a lab credential")
     if not isinstance(mounts, list) or not isinstance(environment, list):
         raise VesselRuntimeError("invalid Core runtime metadata")
+    if identity is not None and any(
+            isinstance(item, dict) and item.get("Destination") == "/run/secrets/lab-password"
+            for item in mounts):
+        raise VesselRuntimeError("OIDC Core retained a lab credential mount")
     for destination, (kind, source, writable) in expected_mounts.items():
         matching = [item for item in mounts if isinstance(item, dict)
                     and item.get("Destination") == destination]
@@ -257,22 +299,36 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
                 or matching[0].get("RW") is not writable):
             raise VesselRuntimeError("Core runtime mount changed")
     expected_env = {"SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
-                    "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password",
                     "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/approved.json",
                     f"SOVEREIGN_KNOWLEDGE_DB={_READER_DSN}",
                     "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                     "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
                     "PGPASSFILE=/run/secrets/pgpass"}
+    if identity is None:
+        expected_env.add("SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password")
+    else:
+        expected_env.update({f"SOVEREIGN_OIDC_ISSUER={identity.issuer}",
+                             "SOVEREIGN_OIDC_CA_FILE=/var/lib/sovereign/oidc-ca.pem",
+                             "SOVEREIGN_OIDC_REVOCATIONS=/var/lib/sovereign/oidc-revocations.jsonl"})
     if model_id is not None:
         if not _MODEL_ID.fullmatch(model_id):
             raise VesselRuntimeError("invalid signed model request name")
         expected_env.update({f"SOVEREIGN_MODEL_NAME={model_id}",
                              f"SOVEREIGN_MODEL_ENDPOINT={_MODEL_ENDPOINT}"})
     checked_names = {entry.split("=", 1)[0] for entry in expected_env}
-    checked_names.update({"SOVEREIGN_MODEL_NAME", "SOVEREIGN_MODEL_ENDPOINT"})
+    checked_names.update({"SOVEREIGN_MODEL_NAME", "SOVEREIGN_MODEL_ENDPOINT",
+                          "SOVEREIGN_LAB_PASSWORD_FILE", "SOVEREIGN_OIDC_ISSUER",
+                          "SOVEREIGN_OIDC_CA_FILE", "SOVEREIGN_OIDC_REVOCATIONS"})
     selected = [item for item in environment if isinstance(item, str) and
                 item.split("=", 1)[0] in checked_names]
     if len(selected) != len(expected_env) or set(selected) != expected_env:
         raise VesselRuntimeError("Core runtime environment changed")
-    _health(handle.core_id)
+    _health(handle.core_id, issuer=identity.issuer if identity else None)
+    if identity is not None:
+        _docker("exec", handle.core_id, "python", "-c",
+                'import json, ssl, urllib.request; '
+                'ctx=ssl.create_default_context(cafile="/var/lib/sovereign/oidc-ca.pem"); '
+                f'keys=json.load(urllib.request.urlopen({identity.issuer!r} + '
+                '"/protocol/openid-connect/certs", timeout=5, context=ctx)); '
+                'assert isinstance(keys.get("keys"),list) and keys["keys"]')
     _core_database_health(handle.core_id)

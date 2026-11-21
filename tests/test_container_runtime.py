@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from infrastructure.deploy.container_runtime import (
     RuntimeError, RuntimeHandle, _archive_image_ids, _validate_console_config,
-    cleanup_orphan_runtimes,
+    cleanup_orphan_runtimes, verify_runtime_identity,
     probe_runtime, start_verified_bundle, switch_verified_bundle,
 )
 from infrastructure.release.bundle import BundleError
@@ -26,7 +26,7 @@ class ContainerRuntimeTests(unittest.TestCase):
         self.config.write_text('{"schema":1,"oidc_issuer":null}')
 
     def test_only_synthetic_config_is_accepted(self) -> None:
-        _validate_console_config(self.config)
+        self.assertIsNone(_validate_console_config(self.config))
         for raw in ('{"schema":1,"schema":1,"oidc_issuer":null}',
                     '{"schema":1,"oidc_issuer":"https://id.example/realm"}',
                     '[]', '{"schema":true,"oidc_issuer":null}'):
@@ -34,6 +34,21 @@ class ContainerRuntimeTests(unittest.TestCase):
                 self.config.write_text(raw)
                 with self.assertRaises(RuntimeError):
                     _validate_console_config(self.config)
+
+    def test_vessel_oidc_config_requires_exact_https_realm(self) -> None:
+        issuer = "https://identity.vessel.example/realms/sovereign"
+        self.config.write_text(json.dumps({"schema": 1, "oidc_issuer": issuer}))
+        self.assertEqual(_validate_console_config(self.config, allow_oidc=True), issuer)
+        with self.assertRaises(RuntimeError):
+            _validate_console_config(self.config)
+        for candidate in ("http://127.0.0.1:18086/realms/lab",
+                          "https://identity.vessel.example/realms/sovereign/",
+                          "https://identity.vessel.example:8443/realms/sovereign",
+                          "https://other.example/realms/a?redirect=https://example.com"):
+            with self.subTest(candidate=candidate):
+                self.config.write_text(json.dumps({"schema": 1, "oidc_issuer": candidate}))
+                with self.assertRaises(RuntimeError):
+                    _validate_console_config(self.config, allow_oidc=True)
 
     def test_legacy_docker_archive_is_bound_to_config_hash(self) -> None:
         config = b'{"architecture":"amd64","os":"linux"}'
@@ -149,6 +164,45 @@ class ContainerRuntimeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 probe_runtime(handle)
             health.assert_not_called()
+
+    def test_vessel_identity_network_attaches_only_core(self) -> None:
+        name = "sovereign-synthetic-123456abcdef"
+        identity = "vessel-identity"
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64,
+                               "d" * 64, identity)
+
+        def docker(*args: str) -> str:
+            if args[:2] == ("network", "inspect"):
+                if args[2] == identity:
+                    return {"{{.Id}}": handle.identity_network_id,
+                            "{{.Internal}}": "true",
+                            '{{index .Labels "sovereign.vessel.identity"}}': "true"}[args[-1]]
+                return name if "sovereign.synthetic.run" in args[-1] else "true"
+            if args[-1] == '{{index .Config.Labels "sovereign.synthetic.run"}}':
+                return name
+            if args[-1] == "{{json .NetworkSettings.Networks}}":
+                networks = {name: {"NetworkID": handle.network_id}}
+                if args[1] == handle.core_id:
+                    networks[identity] = {"NetworkID": handle.identity_network_id}
+                return json.dumps(networks)
+            raise AssertionError(args)
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            verify_runtime_identity(handle)
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=docker):
+            with self.assertRaises(RuntimeError):
+                verify_runtime_identity(RuntimeHandle(handle.network_id, handle.core_id,
+                                                      handle.console_id, None, identity))
+
+        def leaked(*args: str) -> str:
+            if args[-1] == "{{json .NetworkSettings.Networks}}" and args[1] == handle.console_id:
+                return json.dumps({name: {"NetworkID": handle.network_id},
+                                   identity: {"NetworkID": handle.identity_network_id}})
+            return docker(*args)
+
+        with patch("infrastructure.deploy.container_runtime._docker", side_effect=leaked):
+            with self.assertRaises(RuntimeError):
+                verify_runtime_identity(handle)
 
     def test_scoped_orphan_cleanup_preserves_active_runtime(self) -> None:
         installation = "1" * 32

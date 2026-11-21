@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle, _credentials
+from infrastructure.deploy.vessel_identity import VesselIdentity
 from infrastructure.deploy.vessel_runtime import (
     VesselRuntimeError, _state_options, probe_signed_vessel_services,
     start_signed_vessel_services,
@@ -53,6 +54,22 @@ class VesselRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(VesselRuntimeError, "model request name"):
             _state_options(self.state, self.lab_password, self.knowledge_root,
                            model_id="untrusted/model")
+
+    def test_oidc_core_options_exclude_lab_password(self) -> None:
+        identity = VesselIdentity(
+            "https://identity.vessel.example/realms/sovereign",
+            self.state / "oidc-ca.pem", self.state / "oidc-revocations.jsonl",
+            "vessel-identity", "a" * 64)
+        options, _ = _state_options(self.state, None, self.knowledge_root,
+                                    identity=identity)
+        self.assertIn(f"SOVEREIGN_OIDC_ISSUER={identity.issuer}", options)
+        self.assertIn("SOVEREIGN_OIDC_CA_FILE=/var/lib/sovereign/oidc-ca.pem", options)
+        self.assertIn("SOVEREIGN_OIDC_REVOCATIONS=/var/lib/sovereign/oidc-revocations.jsonl",
+                      options)
+        self.assertFalse(any("lab-password" in option for option in options))
+        with self.assertRaises(VesselRuntimeError):
+            _state_options(self.state, self.lab_password, self.knowledge_root,
+                           identity=identity)
 
     def test_status_probe_refuses_model_environment_mismatch(self) -> None:
         reader = self.knowledge_root / "knowledge-secrets/reader.pgpass"
@@ -100,6 +117,38 @@ class VesselRuntimeTests(unittest.TestCase):
                 probe_signed_vessel_services(handle, knowledge, self.state,
                                              self.lab_password, reader,
                                              model_id="synthetic-lab-model")
+            health.assert_not_called()
+
+    def test_oidc_probe_refuses_lab_credential_mount(self) -> None:
+        identity = VesselIdentity(
+            "https://identity.vessel.example/realms/sovereign",
+            self.state / "oidc-ca.pem", self.state / "oidc-revocations.jsonl",
+            "vessel-identity", "e" * 64)
+        handle = RuntimeHandle("a" * 64, "b" * 64, "c" * 64,
+                               identity.network_id, identity.network_name)
+        knowledge = KnowledgeVolumeHandle("d" * 64, "socket", "data", "run", "f" * 32)
+
+        def docker(*args: str) -> str:
+            if args[-1] == "{{.State.Running}}":
+                return "true"
+            if args[-1] == "{{json .HostConfig.PortBindings}}":
+                return "null"
+            if args[-1] == "{{json .Mounts}}":
+                return json.dumps([{"Destination": "/run/secrets/lab-password",
+                                    "Type": "bind", "Source": str(self.lab_password),
+                                    "RW": False}])
+            if args[-1] == "{{json .Config.Env}}":
+                return "[]"
+            raise AssertionError(args)
+
+        with patch("infrastructure.deploy.vessel_runtime.verify_runtime_identity"), \
+             patch("infrastructure.deploy.vessel_runtime.probe_knowledge"), \
+             patch("infrastructure.deploy.vessel_runtime._docker", side_effect=docker), \
+             patch("infrastructure.deploy.vessel_runtime._health") as health:
+            with self.assertRaisesRegex(VesselRuntimeError, "lab credential mount"):
+                probe_signed_vessel_services(handle, knowledge, self.state, None,
+                                             self.knowledge_root / "reader.pgpass",
+                                             identity=identity)
             health.assert_not_called()
 
     def test_state_and_credentials_cannot_overlap(self) -> None:
