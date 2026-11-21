@@ -9,8 +9,9 @@ keeps the separate deployment and security gates open.
 ## Exact review surface
 
 Review the stack from [PR #151](https://github.com/AttractAcq/Advocate-AI/pull/151)
-through [PR #192](https://github.com/AttractAcq/Advocate-AI/pull/192), plus this
-review-pack change, at a recorded final commit SHA. These are stacked, unmerged
+through [PR #215](https://github.com/AttractAcq/Advocate-AI/pull/215) at a
+recorded final commit SHA. The original brief covered PRs #151–192; the later
+OIDC and Keycloak work is included below. These are stacked, unmerged
 PRs; the reviewer must identify the exact final tree tested. A green CI job is
 not a review sign-off. The main paths are:
 
@@ -28,6 +29,8 @@ not a review sign-off. The main paths are:
 | Release evidence gates | [PR #182](https://github.com/AttractAcq/Advocate-AI/pull/182), [PR #184](https://github.com/AttractAcq/Advocate-AI/pull/184), `scripts/phase5_product_image_rehearsal.py`, `scripts/phase8_fleet_release_rehearsal.py`, `.github/workflows/ci.yml` | Whether a denied image finding fails the job while retaining scan evidence, rather than reporting a green skipped rehearsal |
 | Boot and identity lab candidates | [PR #185](https://github.com/AttractAcq/Advocate-AI/pull/185), [PR #188](https://github.com/AttractAcq/Advocate-AI/pull/188), `infrastructure/deploy/vessel_boot_service.py`, [Keycloak triage](../phase-5/keycloak-finding-triage.md) | Systemd syntax versus actual boot, JVM mitigation and rebuilt image findings versus production image approval |
 | OpenFGA comparison only | [PR #192](https://github.com/AttractAcq/Advocate-AI/pull/192), `scripts/phase5_openfga_probe.py`, [adoption record](../phase-5/open-source-adoption.md) | Synthetic source-level parity, deny precedence, listing and revocation; OpenFGA is not a vessel enforcement point |
+| OIDC and local identity boundary | [PR #194](https://github.com/AttractAcq/Advocate-AI/pull/194) through [PR #206](https://github.com/AttractAcq/Advocate-AI/pull/206), `apps/api/oidc.py`, `infrastructure/deploy/vessel_identity.py`, `infrastructure/deploy/vessel_runtime.py`, [identity operations](../phase-3/identity-operations.md) | HTTPS issuer and CA, internal identity network, Core/Console login, MFA, logout revocation, signing-key rotation and outage behavior; distinguish synthetic Keycloak from an approved site service |
+| Keycloak/Core recovery binding | [PR #207](https://github.com/AttractAcq/Advocate-AI/pull/207) through [PR #215](https://github.com/AttractAcq/Advocate-AI/pull/215), `infrastructure/deploy/vessel_identity_recovery.py`, `infrastructure/deploy/vessel_recovery_set.py`, `scripts/vesselctl.py`, [paired recovery runbook](../phase-5/vessel-keycloak-paired-recovery.md) | Exact signed Core receipt and encrypted realm archive pairing; stopped synthetic capture, clean Keycloak import, signing-key and revocation continuity; pair required before activation, interrupted finish and retry |
 
 ## Claims to verify
 
@@ -75,6 +78,23 @@ not a review sign-off. The main paths are:
    on fictional collection and document decisions and source listings, including
    direct denies and revocation. This comparison does not authorise replacing
    the Policy Engine or prove NAS ACL propagation or outage safety.
+9. An OIDC signed vessel installation accepts only a DNS-named HTTPS issuer,
+   owner-only CA and revocation files, and a labelled internal identity network.
+   Core must verify real Keycloak tokens against the approved audience, Console
+   client, current role and revocation log. Lab login must remain unavailable
+   in OIDC mode. A missing provider, changed signing key, invalid CA or
+   revoked token must not silently grant document access.
+10. A schema-3 Core/Knowledge receipt binds the issuer, CA and revocation
+    log. The separate signed identity pair binds that exact receipt and an
+    authenticated encrypted realm export. Clean OIDC activation must reject
+    missing, altered or mismatched pair artifacts before creating Docker
+    resources. The signed pair does not itself attest to a shared capture
+    point or live Keycloak import.
+11. An interrupted OIDC restore records the identity pair digest. Finishing
+    and retrying an abandoned attempt must require that same verified pair.
+    The real Keycloak rehearsal must demonstrate that an old unrevoked token
+    remains valid after clean restore and an old revoked token remains denied,
+    rather than treating a changed signing key as proof of revocation.
 
 These are implementation claims for the reviewer to challenge, not accepted
 security findings. The second Core image in CI has a distinct image identity
@@ -124,8 +144,12 @@ remain open.
 | Guarded boot unit | [PR #185 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44852396331) and [boot-unit procedure](../phase-5/vessel-boot-service.md) | All 12 jobs passed, including `systemd-analyze verify` for the rendered unit. No target boot, Docker socket authority or external model/identity readiness was exercised. |
 | Interrupted recovery windows | [PR #189 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44859199121), [PR #190 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44864540599), [PR #191 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44868689542) | The retained signed vessel results cover an interrupted networkless Knowledge container discarded under the matching attempt, a completed database restore finished only after Core and row-digest verification, and an orphan Core/Console runtime discarded after a post-health crash. Each run passed all 12 jobs. Inspect the retained `result.json` values and the denied wrong-attempt or tampered-Core probes; this does not prove recovery on a purchased host. |
 | OpenFGA source-permission prototype | [PR #192 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44870938985) and [adoption record](../phase-5/open-source-adoption.md) | All 12 jobs passed. The dedicated Linux job logs 30 role/collection checks, 48 user/document checks and 15 source listings, plus deny precedence and membership, collection and source revocation. This isolated in-memory comparison does not replace the current Policy Engine. |
+| Signed OIDC vessel runtime | [PR #200 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44897744319), [PR #202 browser run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44900895751), [PR #203 MFA run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44901281996) | Fictional HTTPS JWKS and real pinned Keycloak/Chrome flows exercise CA trust, Console PKCE, engineer/deckhand scope, logout, denied lab fallback and synthetic TOTP. These do not approve site PKI, enrollment or identity topology. |
+| Keycloak rotation and outage | [PR #205 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44903964000), [PR #206 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44905024197) | The local Keycloak/Core jobs exercised signing-key overlap and retirement, outage with cached tokens, revoked-token denial and cold-cache refusal. Target outage policy and key custody remain open. |
+| Paired Keycloak/Core clean restore | [PR #207 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44906830484), [PR #208 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44908205055), [PR #209 final-head run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44910393043) | All 13 jobs passed at each head. The downloaded PR #209 three-image artifact reports `three_image_bundle=signed-and-verified`, `signed_vessel_keycloak_pair.result=pass`, `capture=both-services-stopped`, `old_deckhand_token=authorized-after-restore` and `old_engineer_token=revoked-after-restore`. It is synthetic evidence, not a live import attestation or production database restore. |
+| Pair-enforced activation, finish and retry | [PR #214](https://github.com/AttractAcq/Advocate-AI/pull/214), [runbook](../phase-5/vessel-identity-recovery-pair.md) | Local tests require the signed pair before OIDC activation and bind its digest across interrupted finish and abandoned retry. Final-head Linux release evidence is pending; inspect the retained artifact before accepting this row. |
 
-At the PR #192 implementation head, `make check` passed 433 tests with 16
+At the PR #214 implementation head, `make check` passed 467 tests with 16
 expected skips. For an independent reproduction, record the final review-pack commit and
 tool versions, then run `make check`. The `upstream-release-rehearsal` job in
 `.github/workflows/ci.yml` runs the pinned actual-image script and retains its
@@ -157,6 +181,10 @@ lab and retain the observed output, resource inventory and timing.
 | Revoke a document permission before capture and after restore | Test search, retrieval, citations, cached answers and history against the current policy |
 | Compare OpenFGA source checks and listings against the current Policy Engine | Try direct document denies, role restrictions, revoked users, invalid classifications, membership and collection changes; record any parity gap without routing vessel access through OpenFGA |
 | Remove OpenFGA or its state during a shadow test | Confirm the production Policy Engine continues to enforce source permissions; separately design and test fail-closed behavior before any proposed enforcement migration |
+| Supply a wrong OIDC issuer, CA, identity network, lab credential or Keycloak signing key | Confirm signed vessel install and recovery reject wrong configuration, external networks, missing provider or invalid claims without granting a document read |
+| Present an altered Keycloak archive, stale Core receipt, wrong pair signer, missing pair or different pair after an interrupted restore | Confirm clean activation refuses before Docker resource creation, and finish or abandoned retry refuses a pair other than the one recorded by the original attempt |
+| Restore Keycloak with a different signing key or omit Core logout revocations | Check that an old unrevoked, unexpired token still authorizes only its prior source scope after a genuine paired restore, while an old revoked, unexpired token remains denied; a changed signing key alone is not revocation evidence |
+| Run Keycloak export while Core or Keycloak is still writing | Determine whether a future production capture lock spans both services and their database; the signed pair alone cannot establish a consistent common point |
 | Restore on a constrained or networked host | Measure actual disk, time and traffic behavior; compare with the proposed recovery objective |
 
 Report any test that cannot be run separately from a pass. In particular,
