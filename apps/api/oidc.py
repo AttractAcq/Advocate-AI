@@ -202,13 +202,29 @@ class OidcVerifier:
                         if len(body) + len(chunk) > 256 * 1024:
                             raise ValueError("OIDC key set is too large")
                         body.extend(chunk)
-            keys = json.loads(body)["keys"]
+            def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                value: dict[str, object] = {}
+                for name, item in pairs:
+                    if name in value:
+                        raise ValueError("duplicate OIDC key set field")
+                    value[name] = item
+                return value
+            payload = json.loads(body, object_pairs_hook=unique)
+            keys = payload.get("keys") if isinstance(payload, dict) else None
             if not isinstance(keys, list) or len(keys) > 64 or any(
                     not isinstance(item, dict) for item in keys):
                 raise ValueError("invalid OIDC key set")
-            self._keys = {item["kid"]: jwt.PyJWK.from_dict(item).key for item in keys
-                          if item.get("kty") == "RSA" and item.get("alg") == "RS256"
-                          and isinstance(item.get("kid"), str)}
+            accepted: dict[str, object] = {}
+            seen: set[str] = set()
+            for item in keys:
+                key_id = item.get("kid")
+                if (not isinstance(key_id, str) or not 0 < len(key_id) <= 256
+                        or key_id in seen):
+                    raise ValueError("invalid or duplicate OIDC key ID")
+                seen.add(key_id)
+                if item.get("kty") == "RSA" and item.get("alg") == "RS256":
+                    accepted[key_id] = jwt.PyJWK.from_dict(item).key
+            self._keys = accepted
             self._expires = time.monotonic() + 300
             return self._keys.get(kid)
 
@@ -231,8 +247,11 @@ class OidcVerifier:
                 return None
             policy = load_policy(self.roles_path)
             user = active_user(policy, username)
-            roles = claims.get("realm_access", {}).get("roles", [])
-            if user is None or not isinstance(roles, list) or user.get("role") not in roles:
+            access = claims.get("realm_access")
+            roles = access.get("roles") if isinstance(access, dict) else None
+            if (user is None or not isinstance(roles, list) or
+                    any(not isinstance(role, str) for role in roles) or
+                    user.get("role") not in roles):
                 return None
             return user
         except (jwt.PyJWTError, ValueError, KeyError, TypeError, httpx.HTTPError, OSError):
