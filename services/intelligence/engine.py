@@ -19,7 +19,9 @@ _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 _UNSAFE_ANALYSIS = re.compile(
     r"https?://|\b(?:disable|delete|modify|reconfigure|execute|run|curl|wget|"
     r"send|reveal|ignore|override|credential|password|token|api[_-]?key|"
-    r"compromised|breached|confirmed)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
+    r"compromised|breached|confirmed|cause|caused|causal|linked|coordinated|"
+    r"attributed|campaign|related|correlated|correlation)\b|"
+    r"\bsame\s+(?:incident|attack)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
     re.I,
 )
 

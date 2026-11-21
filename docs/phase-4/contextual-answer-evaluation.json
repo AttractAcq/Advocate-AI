@@ -1,0 +1,40 @@
+{
+  "automated_checks": {
+    "exact_primary_and_related_citations": true,
+    "injected_text_absent": true,
+    "local_model_answer_returned": true,
+    "out_of_window_alert_excluded": true,
+    "prompt_excludes_related_text_and_out_of_window_alert": true,
+    "unknown_source_evidence_only": true
+  },
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "limits": [
+    "Synthetic, locally generated events and lab role only.",
+    "One model run; model output and claim support need independent analyst review.",
+    "No independent Wazuh collection, target GPU, vessel data or network evidence."
+  ],
+  "model": "qwen3.5:2b",
+  "model_digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
+  "primary": {
+    "analysis": "A high-severity repeated denied connection event was reported on the lab-forti-1 firewall device with one additional alert shown at 10:30 UTC.",
+    "cited_event_ids": [
+      "lab-wazuh-forti-001",
+      "lab-wazuh-forti-follow-004"
+    ],
+    "method": "local-model",
+    "notice": "AI analysis is unverified. Same-source alerts are a bounded sample, not a common-cause finding; check every cited event before acting."
+  },
+  "schema": 1,
+  "source_commit": "3711ec291decfa0b6db6b50d7abe77871c1f8487",
+  "synthetic_fixture_sha256": "50fb7e9011f6ed8f07c31f273884759161fb8104514edb568fd6c115cd24d021",
+  "timestamp_utc": "2026-11-21T15:14:45.156923+00:00",
+  "unknown_source": {
+    "cited_event_ids": [
+      "lab-wazuh-forti-unresolved-006"
+    ],
+    "method": "evidence-only"
+  }
+}
