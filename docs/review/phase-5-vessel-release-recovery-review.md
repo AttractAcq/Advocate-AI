@@ -79,6 +79,11 @@ reached signed clean restore, then failed a stale assertion that counted only
 one conversation after the model route probe had created another. The candidate
 now compares every restored conversation ID with the encrypted pre-restore
 snapshot and checks each through Core. A full passing result is still pending.
+The next [Linux run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44840328911)
+reached the same restore check and exposed an empty conversation persisted by
+a failed model request. Core now creates a new conversation after a successful
+answer; the reviewer should challenge this on both ephemeral and persistent
+history. Full signed recovery evidence remains pending.
 
 ## Reproducible evidence
 
