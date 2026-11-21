@@ -17,11 +17,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.vessel_recovery_set import (
     VesselRecoveryError, _grant_restored_knowledge, _partial_knowledge_resources,
-    _stage_core, _sign_receipt,
+    _match_restored_core, _stage_core, _sign_receipt,
     abandon_incomplete_vessel_restore,
-    activate_vessel_recovery_set, retry_abandoned_vessel_restore,
+    activate_vessel_recovery_set, finish_incomplete_vessel_restore,
+    retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
 )
+from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.vessel_installer import _write_intent, _write_private_record
 from infrastructure.release.bundle import BundleError, SUPPORTED_VESSEL_COMPATIBILITY
 from scripts.synthetic_pg_fixture import fixture, put
@@ -214,6 +216,120 @@ class VesselRecoverySetTests(unittest.TestCase):
         self.assertEqual(sum(item.startswith("ALTER TABLE") for item in statements), 5)
         self.assertTrue(any("TO sovereign_ingest" in item for item in statements))
         self.assertTrue(any("TO sovereign_read" in item for item in statements))
+
+    def test_interrupted_core_copy_must_match_authenticated_snapshot(self) -> None:
+        restored = self.root / "restored"
+        shutil.copytree(self.state, restored)
+        (restored / "postgres.dump").write_bytes(b"PGDMP")
+        _match_restored_core(self.state, restored)
+        policy = self.state / "roles.json"
+        policy.write_text(policy.read_text().replace("engineer", "outsider"))
+        with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+            _match_restored_core(self.state, restored)
+        policy.write_bytes((restored / "roles.json").read_bytes())
+        extra = self.state / "sources" / "unlisted.txt"
+        extra.write_bytes(b"unlisted")
+        extra.chmod(0o600)
+        with self.assertRaisesRegex(VesselRecoveryError, "differs"):
+            _match_restored_core(self.state, restored)
+
+    def test_finish_incomplete_restore_requires_full_receipt_digest(self) -> None:
+        install = self.root / "partial-finish"
+        install.mkdir(mode=0o700)
+        staging = self.root / "finish-staging"
+        staging.mkdir(mode=0o700)
+        identifier, release, snapshot, attempt = (
+            "a" * 32, "b" * 24, "c" * 64, "d" * 32)
+        data = f"sovereign-{identifier}-knowledge-data"
+        socket = "sovereign-knowledge-" + "e" * 12 + "-socket"
+        container = "f" * 64
+        _write_intent(install, release, identifier, self.state,
+                      self.root / "lab-password")
+        _write_private_record(install, "vessel-restore-intent.json", {
+            "schema": 2, "snapshot_id": snapshot, "release": release,
+            "installation_id": identifier, "restore_attempt": attempt})
+        receipt = {"schema": 2, "snapshot_id": snapshot, "release": release,
+                   "installation_id": identifier, "data_volume": data,
+                   "repository": str(self.root / "repository"),
+                   "sources": 2, "passages": 2, "knowledge_sha256": "1" * 64,
+                   "audit_count": 1}
+        with patch("infrastructure.deploy.vessel_recovery_set.verify_vessel_recovery_receipt",
+                   return_value={**receipt, "schema": 1}), \
+             patch("infrastructure.deploy.vessel_recovery_set._docker") as docker:
+            with self.assertRaisesRegex(VesselRecoveryError, "row-digest receipt"):
+                finish_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "crane",
+                    self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "0" * 64,
+                    staging)
+            docker.assert_not_called()
+        def restore(*args: object) -> None:
+            destination = args[-1]
+            shutil.copytree(self.state, destination)
+            (destination / "postgres.dump").write_bytes(b"PGDMP")
+        scope = [[container], [], [data, socket]]
+        base = "infrastructure.deploy.vessel_recovery_set."
+        with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
+             patch(base + "_verify_stage"), \
+             patch(base + "_scoped_list", side_effect=scope), \
+             patch(base + "_partial_knowledge_resources", return_value=container), \
+             patch(base + "probe_knowledge"), \
+             patch(base + "restore_vessel_recovery_files", side_effect=restore), \
+             patch(base + "_state_options"), \
+             patch(base + "_verify_knowledge_schema"), \
+             patch(base + "_verify_database", return_value={
+                 "sources": 2, "passages": 2, "knowledge_sha256": "0" * 64}), \
+             patch(base + "start_signed_vessel_services") as start:
+            with self.assertRaisesRegex(VesselRecoveryError, "differs from receipt"):
+                finish_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "crane",
+                    self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "0" * 64,
+                    staging)
+            start.assert_not_called()
+        with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
+             patch(base + "_verify_stage"), \
+             patch(base + "_scoped_list", side_effect=[
+                 [container], [], [data, socket], [], [], [data, socket]]), \
+             patch(base + "_partial_knowledge_resources", return_value=container), \
+             patch(base + "probe_knowledge"), \
+             patch(base + "restore_vessel_recovery_files", side_effect=restore), \
+             patch(base + "_state_options"), \
+             patch(base + "_verify_knowledge_schema"), \
+             patch(base + "_verify_database", return_value={
+                 "sources": 2, "passages": 2, "knowledge_sha256": "1" * 64}), \
+             patch(base + "start_signed_vessel_services") as start:
+            with self.assertRaisesRegex(VesselRecoveryError, "changed during"):
+                finish_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "crane",
+                    self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "0" * 64,
+                    staging)
+            start.assert_not_called()
+        with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
+             patch(base + "_verify_stage"), \
+             patch(base + "_scoped_list", side_effect=[
+                 [container], [], [data, socket],
+                 [container], [], [data, socket]]), \
+             patch(base + "_partial_knowledge_resources", return_value=container), \
+             patch(base + "probe_knowledge"), \
+             patch(base + "restore_vessel_recovery_files", side_effect=restore), \
+             patch(base + "_state_options"), \
+             patch(base + "_verify_knowledge_schema"), \
+             patch(base + "_verify_database", return_value={
+                 "sources": 2, "passages": 2, "knowledge_sha256": "1" * 64}), \
+             patch(base + "start_signed_vessel_services",
+                   return_value=RuntimeHandle("2" * 64, "3" * 64, "4" * 64)) as start, \
+             patch(base + "_write_state") as write:
+            result = finish_incomplete_vessel_restore(
+                install, self.root / "key", self.root / "crane",
+                self.root / "receipt", self.root / "receipt-key",
+                self.root / "password", self.root / "restic", "0" * 64,
+                staging)
+            start.assert_called_once()
+            write.assert_called_once()
+        self.assertEqual(result["recovered_attempt"], attempt)
+        self.assertFalse((install / "vessel-restore-intent.json").exists())
 
     def test_partial_restore_abandon_requires_receipt_and_exact_volume(self) -> None:
         install = self.root / "partial-install"

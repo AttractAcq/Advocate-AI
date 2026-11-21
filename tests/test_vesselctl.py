@@ -11,6 +11,22 @@ from scripts.vesselctl import main
 
 
 class VesselCtlTests(unittest.TestCase):
+    def test_finish_incomplete_restore_routes_signed_inputs(self) -> None:
+        args = ["finish-incomplete-restore", "--root", "/tmp/vessel",
+                "--trusted-key", "/tmp/key", "--crane", "/tmp/crane",
+                "--receipt", "/tmp/receipt", "--receipt-key", "/tmp/receipt-key",
+                "--password-file", "/tmp/password", "--restic", "/tmp/restic",
+                "--restic-sha256", "0" * 64, "--staging-parent", "/tmp/staging"]
+        with patch("scripts.vesselctl.finish_incomplete_vessel_restore",
+                   return_value={"result": "restored-and-activated"}) as finish, \
+             redirect_stdout(StringIO()):
+            main(args)
+        finish.assert_called_once_with(
+            Path("/tmp/vessel"), Path("/tmp/key"), Path("/tmp/crane"),
+            Path("/tmp/receipt"), Path("/tmp/receipt-key"),
+            Path("/tmp/password"), Path("/tmp/restic"), "0" * 64,
+            Path("/tmp/staging"))
+
     def test_partial_stage_discard_requires_explicit_flag(self) -> None:
         args = ["discard-staged-candidate", "--root", "/tmp/vessel",
                 "--trusted-key", "/tmp/key", "--bundle", "/tmp/bundle",
