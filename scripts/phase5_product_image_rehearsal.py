@@ -513,10 +513,13 @@ def main() -> None:
         parser.add_argument("--" + name, required=True,
                             type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache", "restic"} else str)
     args = parser.parse_args()
-    print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
-                             args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache,
-                             args.restic, args.restic_sha256), sort_keys=True))
+    result = rehearse(args.output, args.crane, args.crane_sha256,
+                      args.syft, args.syft_sha256, args.trivy,
+                      args.trivy_sha256, args.trivy_cache,
+                      args.restic, args.restic_sha256)
+    print(json.dumps(result, sort_keys=True))
+    if result.get("product_bundle") != "verified":
+        parser.exit(1, "product image release: signed product rehearsal was not run\n")
 
 
 if __name__ == "__main__":

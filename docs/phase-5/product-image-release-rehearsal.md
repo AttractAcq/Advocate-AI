@@ -15,6 +15,11 @@ artifact retains the scan, inventory and result for both images. The temporary
 archives and key are discarded after the rehearsal; CI does not publish a
 release or create a trusted signing identity.
 
+The CI command exits unsuccessfully when findings prevent the signed product
+bundle and its install and recovery rehearsal. It still writes `result.json`
+and scan evidence to the retained artifact so the denial can be investigated.
+The `product_bundle: verified` result is required for a passing release job.
+
 The job also attempts the [schema-4 product bundle](multi-image-release.md)
 containing both exact archives. A finding in either image must deny that
 bundle before any product package is signed.
