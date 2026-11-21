@@ -23,6 +23,21 @@ official release to pin and test today.
 
 The scan's package presence is not proof that each vulnerable code path is
 reachable. Equally, an inferred lack of reachability is not a risk acceptance.
+
+## New vendor advisory after the retained scan
+
+On 18 November 2026, Keycloak [warned about CVE-2026-114938](https://www.keycloak.org/2026/11/java4shell-vulnerability-cve-2026-114938)
+in unpatched OpenJDK Base64 intrinsics on x86-64 hosts exposing AVX-512 VBMI.
+The vendor identifies affected OpenJDK in 26.8.2 container tags; the retained
+16 November scan predates this advisory and is not a current finding count.
+The synthetic Phase 3 and Fleet Keycloak launch commands now set
+`JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics`. Fleet's CI rehearsal checks the
+running JVM with `jcmd` after initial start and clean recovery, and fails if
+`UseBASE64Intrinsics = false` is not observed. This is the vendor's interim
+mitigation, not a patched image or proof about a future production host.
+Every production Keycloak instance still needs its actual CPU, Java build and
+live JVM flags checked; a vendor-confirmed fixed runtime must be qualified.
+
 Before B-11 can close, use an approved image, rerun the scan with its exact
 digest and database version, record vendor fix or VEX evidence for each ID,
 test identity behavior, and obtain security-owner disposition. The separate

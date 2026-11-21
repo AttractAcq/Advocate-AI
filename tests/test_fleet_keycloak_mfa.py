@@ -13,10 +13,27 @@ from unittest.mock import patch
 
 from infrastructure.backup import BackupError, generate_key
 from scripts.phase8_fleet_keycloak_rehearsal import (
-    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _run_flow, _totp)
+    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _run_flow, _totp,
+    _verify_base64_mitigation)
 
 
 class FleetKeycloakMfaTests(unittest.TestCase):
+    def test_live_jvm_mitigation_must_be_observed(self) -> None:
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   return_value="bool UseBASE64Intrinsics    = false    {product} {command line}") as command:
+            _verify_base64_mitigation("synthetic-keycloak")
+            command.assert_called_once_with(
+                "docker", "exec", "synthetic-keycloak", "jcmd",
+                "io.quarkus.bootstrap.runner.QuarkusEntryPoint", "VM.flags", "-all")
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   return_value="bool UseBASE64Intrinsics = true {product}"):
+            with self.assertRaisesRegex(AssertionError, "Base64 intrinsics"):
+                _verify_base64_mitigation("synthetic-keycloak")
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   return_value="bool UseBASE64Intrinsics = false {product} {default}"):
+            with self.assertRaisesRegex(AssertionError, "Base64 intrinsics"):
+                _verify_base64_mitigation("synthetic-keycloak")
+
     def test_rfc6238_sha1_vector_with_six_digits(self) -> None:
         # RFC 6238 uses 8 digits; the configured lab realm uses the last 6.
         encoded = base64.b32encode(b"12345678901234567890").decode()

@@ -43,6 +43,13 @@ class SecurityConfigScanTests(unittest.TestCase):
         command[command.index("127.0.0.1:18086:8080")] = "0.0.0.0:18086:8080"
         self.assertTrue(scan(self.config, self.topology, self.image, command))
 
+    def test_missing_base64_mitigation_fails(self) -> None:
+        command = self.command.copy()
+        flag = command.index("-e")
+        del command[flag:flag + 2]
+        self.assertTrue(any("Base64 JVM mitigation" in issue for issue in
+                            scan(self.config, self.topology, self.image, command)))
+
 
 if __name__ == "__main__":
     unittest.main()

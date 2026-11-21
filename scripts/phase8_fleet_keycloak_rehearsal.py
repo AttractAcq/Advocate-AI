@@ -9,12 +9,15 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import time
 import uuid
 from urllib.request import Request, urlopen
 import ssl
+
+from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG
 
 import jwt
 
@@ -29,6 +32,14 @@ def _run(*args: str, timeout: int = 120) -> str:
         raise RuntimeError(f"synthetic Docker command failed ({args[0]} {args[1]}): " +
                            result.stderr[-1200:])
     return result.stdout.strip()
+
+
+def _verify_base64_mitigation(container: str) -> None:
+    flags = _run("docker", "exec", container, "jcmd",
+                 "io.quarkus.bootstrap.runner.QuarkusEntryPoint", "VM.flags", "-all")
+    if not any(re.search(r"\bUseBASE64Intrinsics\s*=\s*false\b", line) and
+               "{command line}" in line for line in flags.splitlines()):
+        raise AssertionError("running Keycloak JVM has Base64 intrinsics enabled")
 
 
 def _realm(password: str, mfa: bool = False) -> dict[str, object]:
@@ -306,6 +317,7 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
     _run("docker", "run", "-d", "--name", keycloak,
          "--network", identity_network, "--network-alias", IDENTITY_HOST,
          "--ip", keycloak_ip,
+         "--env", KEYCLOAK_BASE64_FLAG,
          "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
          "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
          "--mount", f"type=bind,source={restored},target=/opt/keycloak/data/import,readonly",
@@ -327,6 +339,7 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
                               capture_output=True, text=True)
         raise AssertionError("restored Keycloak did not become ready: " +
                              logs.stderr[-1600:])
+    _verify_base64_mitigation(keycloak)
     _run("docker", "restart", api)
     for _ in range(20):
         probe = subprocess.run(["docker", "exec", api, "python", "-c",
@@ -530,6 +543,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         try:
             _run("docker", "run", "-d", "--name", keycloak,
                  "--network", browser_network if browser else identity_network,
+                 "--env", KEYCLOAK_BASE64_FLAG,
                  *([] if browser else ["--network-alias", IDENTITY_HOST]),
                  *(["--publish", "127.0.0.3:443:443"] if browser else []),
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
@@ -594,6 +608,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                                       capture_output=True, text=True)
                 raise AssertionError("synthetic Keycloak did not become ready: " +
                                      logs.stderr[-1600:])
+            _verify_base64_mitigation(keycloak)
             if mfa:
                 _run("docker", "exec", api, "python", "-c",
                      "import httpx; r=httpx.get('http://fleet-portal:8080/api/fleet/me', "
