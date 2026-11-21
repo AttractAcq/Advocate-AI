@@ -57,9 +57,12 @@ private install intent and active record, then carries that binding through
 status, stopped restart and release switch. A replaced store, key or invalid
 signed snapshot fails closed. Feed-backed recovery receipts bind the exact
 signed snapshot and key; clean activation and retry require those external
-inputs again, while an interrupted finish uses its pinned intent. A complete
-feed-backed three-image restore rehearsal remains W-193 in the
-[build queue](../blockers-and-build-queue.md).
+inputs again, while an interrupted finish uses its pinned intent. A feed-backed
+three-image install, capture and clean restore passed in the synthetic
+[PR #237 release rehearsal](https://github.com/AttractAcq/Advocate-AI/actions/runs/44946229877).
+Its retained result records a schema-4 receipt, stale feed status, withheld
+indicator values and a signed healthy restore. W-193 in the
+[build queue](../blockers-and-build-queue.md) tracks the remaining external gates.
 
 The focused tests sign and import a fictional package, age it past seven days,
 reject a rollback, changed signed content, duplicate JSON and a linked store
