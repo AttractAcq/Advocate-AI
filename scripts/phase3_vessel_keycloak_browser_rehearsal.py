@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG
 from scripts.phase3_vessel_keycloak_rehearsal import ISSUER, _realm, _run, _verify_base64_mitigation
+from scripts.phase8_fleet_keycloak_rehearsal import _totp
 from scripts.phase8_fleet_browser_rehearsal import certificate, driver_request, until
 from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, _identity_material
 
@@ -24,7 +25,7 @@ from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, _identity_materia
 CONSOLE_HOST = "vessel.example.invalid"
 
 
-def _browser(password: str, chromedriver: str) -> dict[str, str]:
+def _browser(password: str, chromedriver: str, *, mfa: bool = False) -> dict[str, str]:
     driver = subprocess.Popen([chromedriver, "--port=9515", "--allowed-ips=127.0.0.1"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     session = None
@@ -64,6 +65,26 @@ def _browser(password: str, chromedriver: str) -> dict[str, str]:
             document.querySelector('input[name=password]').value = arguments[1];
             document.querySelector('form#kc-form-login').requestSubmit();
         """, "args": ["lab-chief_engineer-1", password]})
+        secret = ""
+        enrollment_code = ""
+        if mfa:
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-totp-settings-form')", 45)
+            assert not driver_request("POST", f"/session/{session}/execute/sync", {
+                "script": "return location.hostname === 'vessel.example.invalid'", "args": []}), \
+                "Keycloak allowed Console before second-factor enrollment"
+            driver_request("POST", f"/session/{session}/execute/sync", {
+                "script": "document.querySelector('#mode-manual').click()", "args": []})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-totp-secret-key')", 20)
+            secret = driver_request("POST", f"/session/{session}/execute/sync", {
+                "script": "return document.querySelector('#kc-totp-secret-key').textContent.trim()",
+                "args": []})
+            assert isinstance(secret, str) and 16 <= len(secret) <= 128
+            enrollment_code = _totp(secret)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=totp]').value = arguments[0];
+                document.querySelector('input[name=userLabel]').value = 'Synthetic vessel device';
+                document.querySelector('#kc-totp-settings-form').requestSubmit();
+            """, "args": [enrollment_code]})
         until(session, "location.hostname === 'vessel.example.invalid' && document.body.textContent.includes('Chief Engineer workspace')", 60)
         cleared = driver_request("POST", f"/session/{session}/execute/sync", {
             "script": """return !location.search && !sessionStorage.getItem('sovereign_oidc_state')
@@ -94,6 +115,39 @@ def _browser(password: str, chromedriver: str) -> dict[str, str]:
         assert not driver_request("POST", f"/session/{session}/execute/sync", {
             "script": "return document.body.textContent.includes('Chief Engineer workspace')",
             "args": []}), "Console retained identity after sign-out"
+        if mfa:
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                [...document.querySelectorAll('button')]
+                  .find(button => button.textContent.includes('Continue to local sign-in')).click();
+            """, "args": []})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('form#kc-form-login input[name=username]')", 45)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=username]').value = arguments[0];
+                document.querySelector('input[name=password]').value = arguments[1];
+                document.querySelector('form#kc-form-login').requestSubmit();
+            """, "args": ["lab-chief_engineer-1", password]})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-otp-login-form input[name=otp]')", 45)
+            valid_nearby = {_totp(secret, shift) for shift in (-1, 0, 1)}
+            invalid = next(value for value in ("000000", "999999", "123456")
+                           if value not in valid_nearby)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=otp]').value = arguments[0];
+                document.querySelector('#kc-otp-login-form').requestSubmit();
+            """, "args": [invalid]})
+            until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('#kc-otp-login-form input[aria-invalid=true]')", 30)
+            deadline = time.monotonic() + 40
+            while _totp(secret) == enrollment_code:
+                if time.monotonic() >= deadline:
+                    raise AssertionError("synthetic OTP did not advance")
+                time.sleep(0.2)
+            driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+                document.querySelector('input[name=otp]').value = arguments[0];
+                document.querySelector('#kc-otp-login-form').requestSubmit();
+            """, "args": [_totp(secret)]})
+            until(session, "location.hostname === 'vessel.example.invalid' && document.body.textContent.includes('Chief Engineer workspace')", 45)
+            return {"browser_flow": "keycloak-console-mfa-enrolled-and-authorized",
+                    "invalid_otp": "denied", "api_role": "chief_engineer",
+                    "callback_state": "cleared", "source_scope": "engineering-only"}
         return {"browser_flow": "keycloak-console-pkce-sign-in-and-sign-out",
                 "callback_state": "cleared", "source_scope": "engineering-only",
                 "lab_password_input": "absent"}
@@ -107,7 +161,7 @@ def _browser(password: str, chromedriver: str) -> dict[str, str]:
         driver.wait(timeout=5)
 
 
-def rehearse(chromedriver: str) -> dict[str, str]:
+def rehearse(chromedriver: str, *, mfa: bool = False) -> dict[str, str]:
     suffix = uuid.uuid4().hex[:8]
     identity_network = "vessel-browser-identity-" + suffix
     app_network = "vessel-browser-app-" + suffix
@@ -129,7 +183,7 @@ def rehearse(chromedriver: str) -> dict[str, str]:
         password = "synthetic-" + uuid.uuid4().hex
         realm = root / "realm"
         realm.mkdir(mode=0o755)
-        (realm / "sovereign-realm.json").write_text(json.dumps(_realm(password)))
+        (realm / "sovereign-realm.json").write_text(json.dumps(_realm(password, mfa)))
         (realm / "sovereign-realm.json").chmod(0o644)
         state = root / "state"
         shutil.copytree("fixtures", state)
@@ -220,7 +274,7 @@ def rehearse(chromedriver: str) -> dict[str, str]:
                     time.sleep(0.2)
             else:
                 raise AssertionError("synthetic vessel HTTPS bridge did not become ready")
-            return _browser(password, chromedriver)
+            return _browser(password, chromedriver, mfa=mfa)
         finally:
             if proxy:
                 proxy.terminate()
@@ -234,4 +288,6 @@ def rehearse(chromedriver: str) -> dict[str, str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--chromedriver", required=True)
-    print(json.dumps(rehearse(parser.parse_args().chromedriver), sort_keys=True))
+    parser.add_argument("--mfa", action="store_true")
+    args = parser.parse_args()
+    print(json.dumps(rehearse(args.chromedriver, mfa=args.mfa), sort_keys=True))
