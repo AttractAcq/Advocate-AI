@@ -24,6 +24,7 @@ from infrastructure.deploy.vessel_recovery_set import (
     verify_vessel_recovery_receipt,
 )
 from infrastructure.deploy.vessel_runtime import _state_options, start_signed_vessel_services
+from infrastructure.deploy.vessel_threat_feed import feed_from_record
 from infrastructure.restic_repository import MANIFEST
 from services.policy.policy_file import policy_directory_lock
 
@@ -137,6 +138,8 @@ def _activate_stopped(root: Path, trusted_key: Path, crane: Path,
                       recovery: dict[str, object] | None = None) -> dict[str, object]:
     state, password, identity = _record_inputs(
         current, root, stage / "console-config.json")
+    feed_data = current.get("threat_feed")
+    feed = feed_from_record(feed_data, state, root) if feed_data is not None else None
     installation_id = current["installation_id"]
     data_volume = current["runtime"]["data_volume"]
     knowledge: KnowledgeVolumeHandle | None = None
@@ -158,10 +161,12 @@ def _activate_stopped(root: Path, trusted_key: Path, crane: Path,
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane,
                 stage / "console-config.json", state, password,
-                root, knowledge, installation_id, identity=identity)
+                root, knowledge, installation_id, identity=identity,
+                threat_feed=feed)
             payload = _state_payload(
                 identifier, installation_id, state, password, services,
-                knowledge, previous=current["active"], identity=identity)
+                knowledge, previous=current["active"], identity=identity,
+                threat_feed=feed_data)
             _write_state(root, payload)
         return {"result": result_name, "active": identifier,
                 "previous": current["active"],

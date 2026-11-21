@@ -25,7 +25,8 @@ from infrastructure.deploy.vessel_recovery_set import (
     _match_restored_core, _receipt_payload, _stage_core, _sign_receipt,
     _verify_activation_identity_pair,
     abandon_incomplete_vessel_restore,
-    activate_vessel_recovery_set, finish_incomplete_vessel_restore,
+    activate_vessel_recovery_set, create_vessel_recovery_set,
+    finish_incomplete_vessel_restore,
     retry_abandoned_vessel_restore,
     verify_vessel_recovery_receipt,
 )
@@ -61,6 +62,20 @@ class VesselRecoverySetTests(unittest.TestCase):
             database.execute("PRAGMA user_version=1")
             database.commit()
         (self.state / "history.db").chmod(0o600)
+
+    def test_feed_backed_capture_requires_signed_feed_binding(self) -> None:
+        install = self.root / "install"
+        install.mkdir(mode=0o700)
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        with patch("infrastructure.deploy.vessel_recovery_set._read_state",
+                   return_value={"threat_feed": {"store": "synthetic"}}), \
+             self.assertRaisesRegex(VesselRecoveryError, "feed binding receipt"):
+            create_vessel_recovery_set(
+                install, self.root / "trusted", self.root / "crane",
+                self.root / "repository", self.root / "password",
+                self.root / "restic", "0" * 64, staging,
+                self.root / "signing", self.root / "receipt")
 
     def test_oidc_activation_requires_all_pair_artifacts(self) -> None:
         staging = self.root / "staging"
