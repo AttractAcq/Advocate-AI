@@ -1,16 +1,19 @@
 # Keycloak lab image finding review
 
-**Status:** preliminary package triage, 16 November 2026. No vulnerability is
+**Status:** preliminary package triage, updated 21 November 2026. No vulnerability is
 accepted or released. The image is a synthetic `start-dev` lab identity server.
 
-The [latest CI scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/43880636263)
+The [21 November CI scan](https://github.com/AttractAcq/Advocate-AI/actions/runs/44850898282)
 of `quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0`
-reported six HIGH and zero CRITICAL findings with Trivy 0.76.2. The retained
+reported ten HIGH and one CRITICAL finding with Trivy 0.76.2. The retained
 `keycloak-lab-trivy` JSON artifact has SHA-256
-`29e11bdb451283d96647c386021d49983687d60ba2322d8999a43f605874ff13`.
+`ff59358a55b035601955514077343bb50b380956bf86fa834d5e83a302d01530`.
 The image is Keycloak 26.8.2. Keycloak's [official downloads](https://www.keycloak.org/downloads)
-listed 26.8.2 as the current release at this review, so there is no newer
-official release to pin and test today.
+still list 26.8.2. The pinned digest remains a lab fixture, not a production
+candidate.
+
+The 16 November scan had six HIGH findings. All six remain in the current
+artifact:
 
 | Finding | Installed package in scan | Scanner status | Review action |
 |---|---|---|---|
@@ -24,12 +27,26 @@ official release to pin and test today.
 The scan's package presence is not proof that each vulnerable code path is
 reachable. Equally, an inferred lack of reachability is not a risk acceptance.
 
-## New vendor advisory after the retained scan
+## New OpenJDK findings and interim mitigation
 
 On 18 November 2026, Keycloak [warned about CVE-2026-114938](https://www.keycloak.org/2026/11/java4shell-vulnerability-cve-2026-114938)
 in unpatched OpenJDK Base64 intrinsics on x86-64 hosts exposing AVX-512 VBMI.
-The vendor identifies affected OpenJDK in 26.8.2 container tags; the retained
-16 November scan predates this advisory and is not a current finding count.
+The vendor identifies affected OpenJDK in 26.8.2 container tags. The 21
+November scan adds these findings for the same installed
+`java-21-openjdk-headless` 1:21.0.13.0.9-1.2.el9 package:
+
+| Finding | Severity | Scanner status and listed fixed package |
+|---|---|---|
+| CVE-2026-114938 | CRITICAL | `fixed`; 1:21.0.13.1.2-1.2.el9 |
+| CVE-2026-114939 | HIGH | `fixed`; 1:21.0.13.1.2-1.2.el9 |
+| CVE-2026-114940 | HIGH | `fixed`; 1:21.0.13.1.2-1.2.el9 |
+| CVE-2026-114941 | HIGH | `fixed`; 1:21.0.13.1.2-1.2.el9 |
+| CVE-2026-114942 | HIGH | `fixed`; 1:21.0.13.1.2-1.2.el9 |
+
+The scanner's listed package version is not proof that a rebuilt official
+Keycloak image is available or qualified. Rebuild or replace the pinned image
+only after the identity owner authenticates the vendor artifact and tests the
+resulting identity flows and new exact-image scan.
 The synthetic Phase 3 and Fleet Keycloak launch commands now set
 `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics`. Fleet's CI rehearsal checks the
 running JVM with `jcmd` after initial start and clean recovery, and fails if
