@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "answer": "Based on the retrieved source text, the verification marker for the Visitor arrival procedure is **SYN-MANAGEMENT-001-ALPHA**.\n\nThis identifier appears within the document's metadata section, which lists it as the \"Unique verification marker\" associated with the fictional management custodian and the specific test document.",
+      "answer": "The verification marker in the Visitor arrival procedure is SYN-MANAGEMENT-001-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -23,7 +23,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document **MAN-002 v1**, the verification marker for the Tender schedule procedure is **SYN-MANAGEMENT-002-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Tender schedule procedure is SYN-MANAGEMENT-002-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -45,7 +45,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text, the unique verification marker for the Bridge briefing procedure (MAN-003 v1) is **SYN-MANAGEMENT-003-ALPHA**.\n\nThis document serves as a fictional test to verify retrieval and source permissions rather than granting access to private records or live vessel controls.",
+      "answer": "The verification marker in the Bridge briefing procedure is SYN-MANAGEMENT-003-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -67,7 +67,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the provided source text, the verification marker for the Port Call Collection procedure is **SYN-MANAGEMENT-004-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is explicitly stated as SYN-MANAGEMENT-004-ALPHA.",
+      "answer": "The verification marker in the Port call procedure is SYN-MANAGEMENT-004-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -89,7 +89,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the provided source text, the verification marker for the Crew roster procedure is **SYN-MANAGEMENT-005-ALPHA**.\n\nThis identifier appears in the document's metadata section under the field \"Unique verification marker,\" which is listed as SYN-MANAGEMENT-005-ALPHA.",
+      "answer": "The verification marker in the Crew roster procedure is SYN-MANAGEMENT-005-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -111,7 +111,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text, the verification marker for the Guest itinerary procedure is **SYN-MANAGEMENT-006-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within Source MAN-006 v1. Please note that this document is a fictional test sample and does not grant access to private records or live vessel controls.",
+      "answer": "The verification marker in the Guest itinerary procedure is SYN-MANAGEMENT-006-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -133,7 +133,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text, the verification marker for the Provision approval procedure is **SYN-MANAGEMENT-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within Source MAN-007 v1. Please note that this document is a fictional test sample and does not grant access to private records or live vessel controls.",
+      "answer": "The verification marker in the Provision approval procedure is SYN-MANAGEMENT-007-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -155,7 +155,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the provided source text, the unique verification marker for the Daily handover procedure (Document MAN-008 v1) is **SYN-MANAGEMENT-008-ALPHA**.\n\nSource: [Source MAN-008 v1]",
+      "answer": "The verification marker in the Daily handover procedure is SYN-MANAGEMENT-008-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -177,7 +177,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document [Source MAN-009 v1], the unique verification marker for the Emergency contact procedure is **SYN-MANAGEMENT-009-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Emergency contact procedure is SYN-MANAGEMENT-009-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -199,7 +199,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text, the verification marker for the Deck meeting procedure is **SYN-MANAGEMENT-010-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker\" alongside the document owner and version number.",
+      "answer": "The verification marker in the Deck meeting procedure is SYN-MANAGEMENT-010-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -221,7 +221,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text, the unique verification marker for the Generator inspection procedure is **SYN-ENGINEERING-001-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. The document explicitly states that this is a fictional test document used to verify retrieval and source permissions, and it serves as an example of how such markers are formatted in synthetic engineering procedures.",
+      "answer": "The verification marker in the Generator inspection procedure is SYN-ENGINEERING-001-ALPHA, as explicitly stated in the source text under the \"Unique verification marker\" field.",
       "citations": [
         {
           "citation": {
@@ -243,7 +243,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the verification marker for the Cooling pump procedure is **SYN-ENGINEERING-002-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-002 v1].",
+      "answer": "The verification marker in the Cooling pump procedure is SYN-ENGINEERING-002-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -265,7 +265,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the unique verification marker for the Battery bank procedure is **SYN-ENGINEERING-003-ALPHA**.\n\nThis information is found within the \"Unique verification marker\" field of the source document [Source ENG-003 v1].",
+      "answer": "The verification marker in the Battery bank procedure is SYN-ENGINEERING-003-ALPHA, as explicitly stated in the source text under the \"Unique verification marker\" field.",
       "citations": [
         {
           "citation": {
@@ -287,7 +287,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the verification marker for the Freshwater filter procedure is **SYN-ENGINEERING-004-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-004 v1].",
+      "answer": "Verification Marker: SYN-ENGINEERING-004-ALPHA",
       "citations": [
         {
           "citation": {
@@ -309,7 +309,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document, the unique verification marker for the Bilge alarm procedure is **SYN-ENGINEERING-005-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. Please note that this is a fictional test document from a synthetic lab environment; therefore, no actual machinery or control commands should be operated based on this text.",
+      "answer": "The verification marker in the Bilge alarm procedure is SYN-ENGINEERING-005-ALPHA, as explicitly stated in the source document's Unique verification marker field.",
       "citations": [
         {
           "citation": {
@@ -331,7 +331,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the unique verification marker for the HVAC intake procedure is **SYN-ENGINEERING-006-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-006 v1].",
+      "answer": "The verification marker in the HVAC intake procedure is SYN-ENGINEERING-006-ALPHA, as explicitly stated in the source document's Unique verification marker field.",
       "citations": [
         {
           "citation": {
@@ -353,7 +353,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the verification marker for the Hydraulic sample procedure is **SYN-ENGINEERING-007-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-007 v1].",
+      "answer": "The verification marker in the Hydraulic sample procedure is SYN-ENGINEERING-007-ALPHA, as explicitly stated in the source document's Unique verification marker field.",
       "citations": [
         {
           "citation": {
@@ -375,7 +375,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the unique verification marker for the Engine-room rounds procedure is **SYN-ENGINEERING-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. The source note accompanying this information states that the assistant may explain the procedure but must never operate machinery or issue a control command, which aligns with the safety protocols implied by the verification marker.",
+      "answer": "The verification marker in the Engine-room rounds procedure is SYN-ENGINEERING-008-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -397,7 +397,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the unique verification marker for the \"Spare parts Collection\" procedure is **SYN-ENGINEERING-009-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata. Note that this is a fictional identifier used for testing retrieval and source permissions; it does not correspond to any real-world equipment or control command.",
+      "answer": "Verification marker: SYN-ENGINEERING-009-ALPHA (Source ENG-009 v1)",
       "citations": [
         {
           "citation": {
@@ -419,7 +419,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved document text, the verification marker for the Fire door procedure is **SYN-ENGINEERING-010-ALPHA**.\n\nThis identifier appears in the \"Unique verification marker\" field within the source document [Source ENG-010 v1].",
+      "answer": "Verification marker: SYN-ENGINEERING-010-ALPHA",
       "citations": [
         {
           "citation": {
@@ -441,7 +441,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source INT-001 v1], the verification marker for the Cabin preparation procedure is **SYN-INTERIOR-001-ALPHA**.\n\nThis identifier appears within the document's metadata section, specifically listed under \"Unique verification marker.\"",
+      "answer": "The verification marker in the Cabin preparation procedure is SYN-INTERIOR-001-ALPHA, as explicitly stated in the source text under the \"Unique verification marker\" field.",
       "citations": [
         {
           "citation": {
@@ -463,7 +463,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the provided source document INT-002 v1, the verification marker for the Linen count procedure is **SYN-INTERIOR-002-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Linen count procedure is SYN-INTERIOR-002-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -485,7 +485,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source INT-003 v1], the verification marker for the Pantry stock procedure is **SYN-INTERIOR-003-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Pantry stock procedure is SYN-INTERIOR-003-ALPHA, as explicitly stated in the source text.",
       "citations": [
         {
           "citation": {
@@ -507,7 +507,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document **INT-004 v1**, the verification marker for the Service checklist procedure is **SYN-INTERIOR-004-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Service checklist procedure is SYN-INTERIOR-004-ALPHA, as explicitly stated in the source text.",
       "citations": [
         {
           "citation": {
@@ -529,7 +529,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source INT-005 v1], the unique verification marker for the Dining setup procedure is **SYN-INTERIOR-005-ALPHA**.\n\nThis document serves as a fictional test to verify retrieval and source permissions, and it explicitly states that this specific string is the Unique verification marker.",
+      "answer": "The verification marker in the Dining setup procedure is SYN-INTERIOR-005-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -551,7 +551,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the provided source text [Source INT-006 v1], the unique verification marker for the Laundry cycle procedure is **SYN-INTERIOR-006-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Laundry cycle procedure is SYN-INTERIOR-006-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -573,7 +573,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document [Source INT-007 v1], the unique verification marker for the Flower delivery procedure is **SYN-INTERIOR-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Flower delivery procedure is SYN-INTERIOR-007-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -595,7 +595,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document **INT-008 v1**, the verification marker for the Cleaning supply procedure is **SYN-INTERIOR-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Cleaning supply procedure is SYN-INTERIOR-008-ALPHA, as explicitly stated in the source text under the \"Unique verification marker\" field.",
       "citations": [
         {
           "citation": {
@@ -617,7 +617,7 @@
       "role": "captain"
     },
     {
-      "answer": "The verification marker for the Table setting procedure is **SYN-INTERIOR-009-ALPHA**.\n\nThis identifier appears in the Unique verification marker field of Source INT-009 v1, which serves as a fictional interior custodian's test document.",
+      "answer": "The verification marker in the Table setting procedure is SYN-INTERIOR-009-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -639,7 +639,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the provided source document [Source INT-010 v1], the unique verification marker for the Galley handover procedure is **SYN-INTERIOR-010-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Galley handover procedure is SYN-INTERIOR-010-ALPHA, as explicitly stated in the source text.",
       "citations": [
         {
           "citation": {
@@ -661,7 +661,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-001 v1], the verification marker for the Line Inspection procedure is **SYN-DECK-001-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line item labeled \"Unique verification marker.\" The document notes that this is a fictional fixture used to test retrieval and source permissions rather than an operational instruction for a real vessel.",
+      "answer": "The verification marker in the Line inspection procedure is SYN-DECK-001-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -683,7 +683,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-002 v1], the verification marker associated with the Fender check procedure is **SYN-DECK-002-ALPHA**.\n\nThis marker appears within the document's metadata section, specifically listed under \"Unique verification marker.\" The document notes that this is a fictional test fixture used for training purposes and does not represent an operational instruction for a real vessel.",
+      "answer": "The verification marker in the Fender check procedure is SYN-DECK-002-ALPHA, as explicitly stated in the source text under the \"Unique verification marker\" field.",
       "citations": [
         {
           "citation": {
@@ -705,7 +705,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-003 v1], the verification marker associated with the Deck wash procedure is **SYN-DECK-003-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Deck wash procedure is SYN-DECK-003-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -727,7 +727,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-004 v1], the verification marker for the Tender inventory procedure is **SYN-DECK-004-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-004-ALPHA\".",
+      "answer": "The verification marker in the Tender inventory procedure is SYN-DECK-004-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -749,7 +749,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-005 v1], the verification marker for the Mooring briefing procedure is **SYN-DECK-005-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-005-ALPHA\".",
+      "answer": "The verification marker in the Mooring briefing procedure is SYN-DECK-005-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -771,7 +771,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-006 v1], the verification marker for the Safety cone procedure is **SYN-DECK-006-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Safety cone procedure is SYN-DECK-006-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -793,7 +793,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-007 v1], the verification marker for the Gangway inspection procedure is **SYN-DECK-007-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Gangway inspection procedure is SYN-DECK-007-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -815,7 +815,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document [Source DEC-008 v1], the unique verification marker for the Lifejacket count procedure is **SYN-DECK-008-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Lifejacket count procedure is SYN-DECK-008-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -837,7 +837,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source text [Source DEC-009 v1], the verification marker for the Deck lighting procedure is **SYN-DECK-009-ALPHA**.\n\nThis identifier appears in the document's metadata section, specifically within the line: \"Unique verification marker: SYN-DECK-009-ALPHA\".",
+      "answer": "The verification marker in the Deck lighting procedure is SYN-DECK-009-ALPHA.",
       "citations": [
         {
           "citation": {
@@ -859,7 +859,7 @@
       "role": "captain"
     },
     {
-      "answer": "Based on the retrieved source document [Source DEC-010 v1], the verification marker for the Weather cover Collection procedure is **SYN-DECK-010-ALPHA**.\n\nThis marker is listed under the \"Unique verification marker\" field within the document's metadata.",
+      "answer": "The verification marker in the Weather cover procedure is SYN-DECK-010-ALPHA, as explicitly stated in the source text.",
       "citations": [
         {
           "citation": {
@@ -1003,7 +1003,7 @@
   ],
   "model": "qwen3.5:2b",
   "schema": 1,
-  "source_commit": "a0361a5b06d70461a008e6e3e9b9c5104e2eda4d",
+  "source_commit": "50e0bd5020bace6896df195c5dc3d54700d06cf3",
   "summary": {
     "allowed": 40,
     "cases": 50,
@@ -1012,5 +1012,5 @@
     "expected_source_citations": 40,
     "no_answer_denials": 10
   },
-  "timestamp_utc": "2026-11-19T13:56:23.696880+00:00"
+  "timestamp_utc": "2026-11-21T21:15:05.099577+00:00"
 }

@@ -43,7 +43,7 @@ broader, non-marker corpus before claiming improved grounding.
 
 ## Fresh Core API run
 
-A separate [Core API evaluation](core-answer-evaluation.json) on
+A separate [Core API evaluation](core-answer-evaluation-2026-11-19.json) on
 19 November 2026 used the installed local `qwen3.5:2b` model and the same
 fictional 50-question corpus. It called `/api/chat` through Core, then fetched
 every cited preview by passage ordinal. The report retains the answer, Core
@@ -64,3 +64,26 @@ to real-world equipment; and Q-DEC-010 calls “Weather cover” a “Weather co
 Collection”. The structured citations remain correct in these cases. An
 independent reviewer must assess the complete answer set and an agreed
 threshold before AT-09 can pass.
+
+## Concise-answer candidate run
+
+On 21 November 2026, a new [50-case Core API run](core-answer-evaluation.json)
+used the same fictional corpus and installed `qwen3.5:2b` model at source
+commit `50e0bd5`. The document-mode instruction now asks for the requested
+fact without extra background or inferences. Core still supplies structured
+citations independently of the model's prose. The run recorded 40/40 expected
+markers, 40/40 matching citations and previews, and 10/10 no-answer denials.
+
+I read all 40 allowed answers against their retained excerpts. They state the
+requested marker and, where present, the source title or field name. None of
+the five wording problems noted in the 19 November run appeared in this sample;
+I found no additional unsupported prose in these marker questions. This is one
+internal, synthetic model sample. It does not establish quality on longer
+procedures, scanned documents, ambiguous retrieval or vessel content, and it
+does not replace the independent AT-09 claim-support review.
+
+The separate general-chat instruction no longer implies that a source was
+retrieved. A live local Core probe returned an uncited general answer; this
+checks routing and completion, not the factual quality of general answers.
+The model adapter now rejects an answer when the inference API reports
+`finish_reason=length`, so a cut-off response is not shown as complete.
