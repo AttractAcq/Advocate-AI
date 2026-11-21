@@ -124,7 +124,7 @@ are required?” retrieved the first five deck documents solely because their
 common boilerplate matched. Shared query handling now requires a distinguishing
 term unless exactly one document was selected. Fixture, SQLite and direct Core
 tests cover generic denial, specific procedure retrieval and explicit selection;
-the pgvector integration test is scheduled in CI. A follow-up check found
+the [disposable pgvector integration test](https://github.com/AttractAcq/Advocate-AI/actions/runs/44959413290/job/137014765429) passed in PR #248 CI. A follow-up check found
 that command words such as “Show me” and “Find” had blocked a named procedure;
 those words are now removed from query terms, with direct retrieval regressions.
 A five-case local Core/Qwen rerun at source commit `1df6cf0` retains four
