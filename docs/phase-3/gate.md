@@ -12,6 +12,12 @@ boundaries have not yet been qualified.
 | T-016 identity/policy | Pinned local Keycloak lab realm, PKCE Console path, signed JWT validation, active-role and expiry checks, source-level deny rules, persistent hash-only logout revocations and hash-chained audit. The synthetic role file has bounded intake; duplicate/expired identities deny access, and role changes invalidate old lab tokens. The [audit file boundary](audit-file-boundary.md) rejects symlink/inode replacement. A [two-person offline change rehearsal](policy-change-rehearsal.md) binds approvals to exact policy bytes, blocks Core during a pending change and supports rollback. The [emergency drill](emergency-access-rehearsal.md) uses a disabled fixture identity, a separate secret, short expiry and restricted diagnostics | Enforce MFA, durable identity store, service accounts, owner-approved signer and role maps, production admin and emergency recovery actions; protect audit parent/retention and test deployment network controls |
 | T-017 non-disclosure | Automated five-role/collection matrix covering list, search, preview, chat citation, disabled download/export and removed users; revocation, deletion, history, token-signature and audit tamper tests; live engineer/deckhand Keycloak checks and restart-persistent logout check. Local API ACL change denies search, preview, chat context/citation and prior history within 60 seconds. Corrupt manifests, duplicate IDs or keys, and non-finite JSON fail closed across source, preview, search and chat APIs; malformed role policy denies authentication. Source reads are anchored to directory descriptors and reject symlink components; live retrieval rechecks bytes against the manifest | Repeat propagation and cache probing in target topology, independent QA/security execution and wider adversarial corpus |
 
+Core revalidates the requesting identity after source listing, preview, search,
+staged-document listing and conversation reads, before returning their content.
+A synthetic mid-request token revocation test covers the source, preview,
+search and conversation paths. This checks the local API behavior; the target
+identity and policy-change propagation still require independent testing.
+
 The injection fixture initially reached the local model and produced an
 unsupported description of its hex text. Core now withholds instruction-like
 passages from inference and returns an authorised citation with a review
