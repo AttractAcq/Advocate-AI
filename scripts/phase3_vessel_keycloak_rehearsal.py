@@ -26,6 +26,8 @@ def _realm(password: str) -> dict[str, object]:
         users.append({
             "username": username, "enabled": True, "emailVerified": True,
             "email": username + "@synthetic.example.invalid",
+            "firstName": "Synthetic", "lastName": "Crew",
+            "requiredActions": [],
             "realmRoles": [role],
             "credentials": [{"type": "password", "value": password,
                              "temporary": False}],
