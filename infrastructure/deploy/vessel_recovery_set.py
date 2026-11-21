@@ -531,6 +531,30 @@ def _grant_restored_knowledge(container_id: str) -> None:
         raise VesselRecoveryError("restored Knowledge role boundary changed")
 
 
+def _verify_activation_identity_pair(
+        oidc: bool, receipt: Path, receipt_key: Path, staging_parent: Path,
+        pair: Path | None, pair_key: Path | None,
+        archive: Path | None, archive_key: Path | None) -> str | None:
+    """Require a matching signed realm export before starting an OIDC restore."""
+    artifacts = (pair, pair_key, archive, archive_key)
+    if not oidc:
+        if any(item is not None for item in artifacts):
+            raise VesselRecoveryError("lab restore cannot accept identity pair")
+        return None
+    if any(item is None for item in artifacts):
+        raise VesselRecoveryError("OIDC restore requires signed identity pair and archive")
+    pair_digest = hashlib.sha256(_private_bytes(pair, 8192)).hexdigest()
+    # Import here to avoid a module cycle with the receipt verifier.
+    from infrastructure.deploy.vessel_identity_recovery import restore_paired_realm
+    with tempfile.TemporaryDirectory(prefix=".verify-identity-pair-",
+                                     dir=staging_parent) as temporary:
+        restore_paired_realm(pair, pair_key, receipt, receipt_key,
+                             archive, archive_key, Path(temporary) / "realm")
+    if hashlib.sha256(_private_bytes(pair, 8192)).hexdigest() != pair_digest:
+        raise VesselRecoveryError("identity pair changed during verification")
+    return pair_digest
+
+
 def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                                  console_config: Path, receipt: Path,
                                  receipt_key: Path, password_file: Path,
@@ -538,7 +562,11 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                                  root: Path, core_state: Path,
                                  lab_password: Path | None,
                                  staging_parent: Path,
-                                 *, identity_network: str | None = None
+                                 *, identity_network: str | None = None,
+                                 identity_pair: Path | None = None,
+                                 identity_pair_key: Path | None = None,
+                                 identity_archive: Path | None = None,
+                                 identity_archive_key: Path | None = None
                                  ) -> dict[str, object]:
     """Activate a clean synthetic host only after signed, restricted restore."""
     _owner_directory(root.parent)
@@ -574,6 +602,9 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
         if (not 16 <= len(lab_secret.rstrip("\n")) <= 200 or
                 "\r" in lab_secret or "\n" in lab_secret.rstrip("\n")):
             raise VesselRecoveryError("invalid clean recovery lab credential")
+    pair_digest = _verify_activation_identity_pair(
+        oidc, receipt, receipt_key, staging_parent, identity_pair,
+        identity_pair_key, identity_archive, identity_archive_key)
     services: RuntimeHandle | None = None
     knowledge: KnowledgeVolumeHandle | None = None
     installation_id = value["installation_id"]
@@ -610,10 +641,13 @@ def activate_vessel_recovery_set(bundle: Path, trusted_key: Path, crane: Path,
                         _sha256(identity.revocations_file) !=
                         value["identity"]["revocations_sha256"]):
                     raise VesselRecoveryError("restored identity differs from signed receipt")
-            _write_private_record(root, "vessel-restore-intent.json", {
+            marker = {
                 "schema": 2, "snapshot_id": value["snapshot_id"],
                 "release": release, "installation_id": installation_id,
-                "restore_attempt": restore_attempt})
+                "restore_attempt": restore_attempt}
+            if pair_digest is not None:
+                marker["identity_pair_sha256"] = pair_digest
+            _write_private_record(root, "vessel-restore-intent.json", marker)
             _write_intent(root, release, installation_id, core_state, lab_password,
                           identity=identity)
             knowledge = start_signed_knowledge(stage / "bundle", trusted_key,
@@ -675,8 +709,10 @@ def _read_restore_intent(root: Path) -> dict[str, object]:
     except (ValueError, UnicodeError) as exc:
         raise VesselRecoveryError("invalid vessel restore intent") from exc
     if (not isinstance(value, dict) or
-            set(value) != {"schema", "snapshot_id", "release", "installation_id",
-                           "restore_attempt"} or
+            set(value) not in ({"schema", "snapshot_id", "release", "installation_id",
+                                "restore_attempt"},
+                               {"schema", "snapshot_id", "release", "installation_id",
+                                "restore_attempt", "identity_pair_sha256"}) or
             type(value["schema"]) is not int or value["schema"] != 2 or
             not isinstance(value["snapshot_id"], str) or
             not _ID.fullmatch(value["snapshot_id"]) or
@@ -685,7 +721,10 @@ def _read_restore_intent(root: Path) -> dict[str, object]:
             not isinstance(value["installation_id"], str) or
             not _INSTALL.fullmatch(value["installation_id"]) or
             not isinstance(value["restore_attempt"], str) or
-            not _INSTALL.fullmatch(value["restore_attempt"])):
+            not _INSTALL.fullmatch(value["restore_attempt"]) or
+            ("identity_pair_sha256" in value and
+             (not isinstance(value["identity_pair_sha256"], str) or
+              not _ID.fullmatch(value["identity_pair_sha256"])))):
         raise VesselRecoveryError("invalid vessel restore intent fields")
     return value
 
@@ -783,7 +822,12 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
                                      receipt: Path, receipt_key: Path,
                                      password_file: Path, restic: Path,
                                      restic_sha256: str,
-                                     staging_parent: Path) -> dict[str, object]:
+                                     staging_parent: Path,
+                                     *, identity_pair: Path | None = None,
+                                     identity_pair_key: Path | None = None,
+                                     identity_archive: Path | None = None,
+                                     identity_archive_key: Path | None = None
+                                     ) -> dict[str, object]:
     """Finish only a fully restored, receipt-matched Knowledge candidate."""
     _owner_directory(staging_parent)
     with _operation_lock(root):
@@ -800,6 +844,12 @@ def finish_incomplete_vessel_restore(root: Path, trusted_key: Path, crane: Path,
                 intent["data_volume"] != value["data_volume"] or
                 intent["schema"] != (2 if value["schema"] == 3 else 1)):
             raise VesselRecoveryError("restore intent differs from signed receipt")
+        pair_digest = _verify_activation_identity_pair(
+            value["schema"] == 3, receipt, receipt_key, staging_parent,
+            identity_pair, identity_pair_key, identity_archive,
+            identity_archive_key)
+        if marker.get("identity_pair_sha256") != pair_digest:
+            raise VesselRecoveryError("restore intent differs from signed identity pair")
         if ((root / "vessel-state.json").exists() or
                 (root / "vessel-state.json").is_symlink() or
                 (root / "vessel-restore-abandoned.json").exists() or
@@ -1028,7 +1078,11 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
                                    root: Path, core_state: Path,
                                    lab_password: Path | None,
                                    staging_parent: Path,
-                                   *, identity_network: str | None = None
+                                   *, identity_network: str | None = None,
+                                   identity_pair: Path | None = None,
+                                   identity_pair_key: Path | None = None,
+                                   identity_archive: Path | None = None,
+                                   identity_archive_key: Path | None = None
                                    ) -> dict[str, object]:
     """Retry a terminal abandoned attempt into entirely new private paths."""
     with _operation_lock(abandoned_root):
@@ -1047,6 +1101,14 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
                 intent["data_volume"] != value["data_volume"] or
                 intent["schema"] != (2 if value["schema"] == 3 else 1)):
             raise VesselRecoveryError("abandoned attempt differs from signed receipt")
+        if value["schema"] == 3:
+            _owner_directory(staging_parent)
+        pair_digest = _verify_activation_identity_pair(
+            value["schema"] == 3, receipt, receipt_key, staging_parent,
+            identity_pair, identity_pair_key, identity_archive,
+            identity_archive_key)
+        if marker.get("identity_pair_sha256") != pair_digest:
+            raise VesselRecoveryError("abandoned attempt differs from signed identity pair")
         _verify_stage(abandoned_root / "vessel-releases" / value["release"],
                       trusted_key, value["release"])
         active = abandoned_root / "vessel-state.json"
@@ -1063,5 +1125,8 @@ def retry_abandoned_vessel_restore(abandoned_root: Path, bundle: Path,
         result = activate_vessel_recovery_set(
             bundle, trusted_key, crane, console_config, receipt, receipt_key,
             password_file, restic, restic_sha256, root, core_state,
-            lab_password, staging_parent, identity_network=identity_network)
+            lab_password, staging_parent, identity_network=identity_network,
+            identity_pair=identity_pair, identity_pair_key=identity_pair_key,
+            identity_archive=identity_archive,
+            identity_archive_key=identity_archive_key)
         return {**result, "retry_of_attempt": marker["restore_attempt"]}

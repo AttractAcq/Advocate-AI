@@ -190,7 +190,9 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
         recovered = activate_vessel_recovery_set(
             bundle, trusted, crane, config, receipt, receipt_public,
             password_file, restic, restic_sha256, restored_root,
-            restored_state, None, staging, identity_network=network)
+            restored_state, None, staging, identity_network=network,
+            identity_pair=pair, identity_pair_key=receipt_public,
+            identity_archive=archive, identity_archive_key=archive_key)
         restored = json.loads((restored_root / "vessel-state.json").read_text())
         volumes.add(restored["runtime"]["data_volume"])
         restored_core = restored["runtime"]["core_id"]

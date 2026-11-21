@@ -23,6 +23,7 @@ from cryptography.x509.oid import NameOID
 from infrastructure.deploy.vessel_recovery_set import (
     VesselRecoveryError, _grant_restored_knowledge, _partial_knowledge_resources,
     _match_restored_core, _receipt_payload, _stage_core, _sign_receipt,
+    _verify_activation_identity_pair,
     abandon_incomplete_vessel_restore,
     activate_vessel_recovery_set, finish_incomplete_vessel_restore,
     retry_abandoned_vessel_restore,
@@ -60,6 +61,16 @@ class VesselRecoverySetTests(unittest.TestCase):
             database.execute("PRAGMA user_version=1")
             database.commit()
         (self.state / "history.db").chmod(0o600)
+
+    def test_oidc_activation_requires_all_pair_artifacts(self) -> None:
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        with self.assertRaisesRegex(VesselRecoveryError, "requires signed identity pair"):
+            _verify_activation_identity_pair(True, self.root / "receipt",
+                self.root / "key", staging, None, None, None, None)
+        with self.assertRaisesRegex(VesselRecoveryError, "lab restore cannot accept"):
+            _verify_activation_identity_pair(False, self.root / "receipt",
+                self.root / "key", staging, self.root / "pair", None, None, None)
 
     def test_freezes_full_private_core_inventory(self) -> None:
         frozen = self.root / "frozen"
@@ -266,6 +277,8 @@ class VesselRecoverySetTests(unittest.TestCase):
         core_state = self.root / "new-core"
         staging = self.root / "staging"
         staging.mkdir(mode=0o700)
+        pair = self.root / "identity-pair.json"
+        put(pair, b"synthetic signed pair")
         stage = self.root / "signed-stage"
         stage.mkdir(mode=0o700)
         issuer = "https://identity.vessel.example/realms/sovereign"
@@ -310,6 +323,8 @@ class VesselRecoverySetTests(unittest.TestCase):
                                  "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
              patch("infrastructure.deploy.vessel_recovery_set._release_id",
                    return_value=release), \
+             patch("infrastructure.deploy.vessel_recovery_set._verify_activation_identity_pair",
+                   return_value="a" * 64), \
              patch("infrastructure.deploy.vessel_recovery_set._assert_missing"), \
              patch("infrastructure.deploy.vessel_recovery_set._docker", return_value=""), \
              patch("infrastructure.deploy.vessel_recovery_set.restore_vessel_recovery_files",
@@ -333,7 +348,10 @@ class VesselRecoverySetTests(unittest.TestCase):
                 self.root / "bundle", self.root / "key", self.root / "crane",
                 self.root / "config", self.root / "receipt", self.root / "receipt-key",
                 self.root / "password", self.root / "restic", "0" * 64,
-                root, core_state, None, staging, identity_network="vessel-identity")
+                root, core_state, None, staging, identity_network="vessel-identity",
+                identity_pair=pair, identity_pair_key=self.root / "pair-key",
+                identity_archive=self.root / "archive",
+                identity_archive_key=self.root / "archive-key")
         self.assertEqual(result["result"], "restored-and-activated")
         self.assertEqual(start.call_args.kwargs["identity"], identity)
         active = _read_state(root)
@@ -399,6 +417,44 @@ class VesselRecoverySetTests(unittest.TestCase):
         extra.chmod(0o600)
         with self.assertRaisesRegex(VesselRecoveryError, "inventory differs"):
             _match_restored_core(self.state, restored)
+
+    def test_oidc_finish_rejects_different_identity_pair_before_runtime(self) -> None:
+        install = self.root / "partial-oidc"
+        install.mkdir(mode=0o700)
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        identifier, release, snapshot, attempt = (
+            "a" * 32, "b" * 24, "c" * 64, "d" * 32)
+        put(self.state / "oidc-ca.pem", b"synthetic certificate")
+        put(self.state / "oidc-revocations.jsonl", b"")
+        identity = VesselIdentity(
+            "https://identity.vessel.example/realms/sovereign",
+            self.state / "oidc-ca.pem", self.state / "oidc-revocations.jsonl",
+            "vessel-identity", "f" * 64)
+        _write_intent(install, release, identifier, self.state, None,
+                      identity=identity)
+        _write_private_record(install, "vessel-restore-intent.json", {
+            "schema": 2, "snapshot_id": snapshot, "release": release,
+            "installation_id": identifier, "restore_attempt": attempt,
+            "identity_pair_sha256": "e" * 64})
+        receipt = {"schema": 3, "snapshot_id": snapshot, "release": release,
+                   "installation_id": identifier,
+                   "data_volume": f"sovereign-{identifier}-knowledge-data"}
+        base = "infrastructure.deploy.vessel_recovery_set."
+        with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
+             patch(base + "_verify_activation_identity_pair", return_value="f" * 64), \
+             patch(base + "_docker") as docker:
+            with self.assertRaisesRegex(VesselRecoveryError,
+                                        "differs from signed identity pair"):
+                finish_incomplete_vessel_restore(
+                    install, self.root / "key", self.root / "crane",
+                    self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "0" * 64,
+                    staging, identity_pair=self.root / "pair",
+                    identity_pair_key=self.root / "pair-key",
+                    identity_archive=self.root / "archive",
+                    identity_archive_key=self.root / "archive-key")
+            docker.assert_not_called()
 
     def test_finish_incomplete_restore_requires_full_receipt_digest(self) -> None:
         install = self.root / "partial-finish"
@@ -615,6 +671,51 @@ class VesselRecoverySetTests(unittest.TestCase):
             with self.assertRaisesRegex(VesselRecoveryError, "differs"):
                 retry_abandoned_vessel_restore(*args)
         activate.assert_not_called()
+
+    def test_oidc_retry_rejects_pair_changed_from_abandoned_attempt(self) -> None:
+        install = self.root / "abandoned-oidc"
+        install.mkdir(mode=0o700)
+        staging = self.root / "staging"
+        staging.mkdir(mode=0o700)
+        identifier, release, snapshot, attempt = (
+            "a" * 32, "b" * 24, "c" * 64, "d" * 32)
+        put(self.state / "oidc-ca.pem", b"synthetic certificate")
+        put(self.state / "oidc-revocations.jsonl", b"")
+        identity = VesselIdentity(
+            "https://identity.vessel.example/realms/sovereign",
+            self.state / "oidc-ca.pem", self.state / "oidc-revocations.jsonl",
+            "vessel-identity", "f" * 64)
+        _write_intent(install, release, identifier, self.state, None,
+                      identity=identity)
+        _write_private_record(install, "vessel-restore-intent.json", {
+            "schema": 2, "snapshot_id": snapshot, "release": release,
+            "installation_id": identifier, "restore_attempt": attempt,
+            "identity_pair_sha256": "e" * 64})
+        _write_private_record(install, "vessel-restore-abandoned.json", {
+            "schema": 1, "snapshot_id": snapshot, "installation_id": identifier,
+            "restore_attempt": attempt,
+            "discarded_utc": datetime.now(timezone.utc).isoformat()})
+        receipt = {"schema": 3, "snapshot_id": snapshot, "release": release,
+                   "installation_id": identifier,
+                   "data_volume": f"sovereign-{identifier}-knowledge-data"}
+        base = "infrastructure.deploy.vessel_recovery_set."
+        with patch(base + "verify_vessel_recovery_receipt", return_value=receipt), \
+             patch(base + "_verify_activation_identity_pair", return_value="f" * 64), \
+             patch(base + "activate_vessel_recovery_set") as activate:
+            with self.assertRaisesRegex(VesselRecoveryError,
+                                        "differs from signed identity pair"):
+                retry_abandoned_vessel_restore(
+                    install, self.root / "bundle", self.root / "key",
+                    self.root / "crane", self.root / "config",
+                    self.root / "receipt", self.root / "receipt-key",
+                    self.root / "password", self.root / "restic", "0" * 64,
+                    self.root / "new-install", self.root / "new-state",
+                    None, staging, identity_network="vessel-identity",
+                    identity_pair=self.root / "pair",
+                    identity_pair_key=self.root / "pair-key",
+                    identity_archive=self.root / "archive",
+                    identity_archive_key=self.root / "archive-key")
+            activate.assert_not_called()
 
     def test_partial_restore_container_requires_exact_identity(self) -> None:
         identifier = "a" * 32
