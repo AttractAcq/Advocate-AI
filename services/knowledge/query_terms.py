@@ -24,7 +24,12 @@ def terms(value: str) -> set[str]:
             if word not in _STOP}
 
 
-def search_terms(value: str, *, selected_document: bool = False) -> set[str]:
-    """Require a distinguishing term unless the caller named a document."""
+def search_terms(value: str) -> set[str]:
+    """Keep a query only when it identifies more than generic document framing."""
     wanted = terms(value)
-    return wanted if selected_document or wanted - _GENERIC else set()
+    return wanted if wanted - _GENERIC else set()
+
+
+def selected_overview(wanted: set[str], document_ids: set[str] | None) -> bool:
+    """An otherwise generic request may inspect one explicitly selected source."""
+    return not wanted and document_ids is not None and len(document_ids) == 1

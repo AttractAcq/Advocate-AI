@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.auth import LabRateLimiter, LabSessions
-from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable
+from apps.api.model import MAX_ANSWER_CHARS, LocalModel, ModelTimeout, ModelUnavailable
 from apps.api.oidc import OidcVerifier
 from services.knowledge.acl import source_access
 from services.knowledge.retrieval import search_fixture_documents
@@ -29,6 +29,7 @@ from services.knowledge.paths import read_source_bytes
 from services.knowledge.indexed_retrieval import SourceManifestError, approved_rows, preview_index, search_index
 from services.knowledge.embedding import LocalEmbedder, vector_search
 from services.knowledge.injection import instruction_like
+from services.knowledge.query_terms import search_terms as _search_terms
 from services.knowledge.upload_staging import discard_upload, list_uploads, stage_upload
 from services.knowledge.ingestion import MAX_BYTES
 from services.policy.audit import AuditLog, verify as verify_audit
@@ -729,6 +730,8 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
         if conversation_id and len(stored.turns) >= 20:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "conversation limit reached")
 
+        selected_overview = (request.mode == "documents" and len(request.selected_documents) == 1
+                             and not _search_terms(request.message))
         context: list[dict[str, object]] = []
         if request.mode == "documents":
             try:
@@ -763,6 +766,12 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
                 raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
             except ModelUnavailable as exc:
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+            if selected_overview:
+                notice = "Based on the first permitted excerpts; later parts of the document may be omitted. "
+                if len(notice) + len(answer) > MAX_ANSWER_CHARS:
+                    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                        "model answer exceeds response limit")
+                answer = notice + answer
         revalidate_identity(identity)
         citations = [{"document_id": item["document_id"], "version": item["version"],
                       "collection": item["collection"], "sha256": item["sha256"],

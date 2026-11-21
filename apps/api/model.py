@@ -83,7 +83,8 @@ class LocalModel:
                 "Answer the specific question using only facts explicitly stated in the sources. "
                 "For a requested value, give that value directly with its source ID and version. "
                 "Do not add background, comparisons, inferred purpose, or claims about omissions "
-                "unless the source explicitly states them. Keep document titles separate from field names."
+                "unless the source explicitly states them. Keep document titles separate from field names. "
+                "Supplied excerpts may omit later passages; do not claim to have reviewed the whole document."
             )
         source_text = "\n\n".join(
             f"[Source {item['document_id']} v{item['version']}]\n{item['excerpt']}"

@@ -12,7 +12,9 @@ from pathlib import Path
 
 from services.knowledge.acl import source_access
 from services.knowledge.paths import read_source_bytes
-from services.knowledge.query_terms import search_terms as _search_terms, terms as _terms
+from services.knowledge.query_terms import (search_terms as _search_terms,
+                                            selected_overview as _selected_overview,
+                                            terms as _terms)
 from services.policy.policy_file import load_policy
 _MAX_DOCUMENT_BYTES = 64 * 1024
 _MAX_QUERY_CHARS = 1000
@@ -39,8 +41,9 @@ def search_fixture_documents(
     base = fixture_root.resolve(strict=True)
     manifest = base / "manifest.csv"
     policy = load_policy(base / "roles.json")
-    wanted = _search_terms(query, selected_document=document_ids is not None and len(document_ids) == 1)
-    if not wanted:
+    wanted = _search_terms(query)
+    overview = _selected_overview(wanted, document_ids)
+    if not wanted and not overview:
         return []
 
     matches: list[tuple[int, str, dict[str, object]]] = []
@@ -67,7 +70,7 @@ def search_fixture_documents(
             except UnicodeDecodeError:
                 continue
             present = _terms(body)
-            if not wanted.issubset(present):
+            if wanted and not wanted.issubset(present):
                 continue
             score = len(wanted)
             hit: dict[str, object] = {

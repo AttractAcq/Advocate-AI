@@ -147,6 +147,17 @@ class PostgresKnowledgeTests(unittest.TestCase):
         self.assertEqual([hit["document_id"] for hit in vector_search(
             self.root, self.manifest, self.dsn, "engineer", question, ConstantEmbedder(),
             document_ids={"ENG-002"})], ["ENG-002"])
+        overview = "Summarize this"
+        self.assertEqual(search_index(self.root, self.manifest, self.dsn,
+                                      "engineer", overview), [])
+        self.assertEqual([hit["document_id"] for hit in search_index(
+            self.root, self.manifest, self.dsn, "engineer", overview,
+            document_ids={"ENG-002"})], ["ENG-002"])
+        self.assertEqual([hit["document_id"] for hit in vector_search(
+            self.root, self.manifest, self.dsn, "engineer", overview, ConstantEmbedder(),
+            document_ids={"ENG-002"})], ["ENG-002"])
+        self.assertEqual(search_index(self.root, self.manifest, self.dsn,
+                                      "deckhand", overview, document_ids={"ENG-002"}), [])
 
     def test_manifest_failure_and_replacement_invalidate_results(self) -> None:
         original = dict(self.rows[0])
