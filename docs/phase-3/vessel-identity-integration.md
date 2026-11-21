@@ -21,6 +21,15 @@ fictional HTTPS JWKS service to exercise install, role denial, logout and Core
 clean restore. Its CI result is pending; it does not exercise Keycloak login,
 browser redirects or Keycloak state recovery.
 
+A separate Docker CI rehearsal now starts the pinned lab Keycloak image on an
+internal identity network, imports fictional crew and Console client records,
+and exchanges PKCE authorization codes for engineer and deckhand tokens. The
+built Core image validates those tokens against the Keycloak JWKS and current
+local policy, limits visible source collections, refuses the lab credential
+path and rejects a logged-out token. This is protocol and API evidence only;
+the vessel browser, real accounts, MFA, Keycloak clean recovery, approved PKI
+and target network remain untested.
+
 ## Required behavior
 
 - A strict vessel release uses one named, local HTTPS Keycloak realm for crew
@@ -96,9 +105,12 @@ audit copy. Protect and independently anchor that state before a pilot.
    Keycloak JWKS over the approved TLS route, role-denial behavior and Console
    configuration before writing the active release record. A reachable JWKS
    does not prove that login, MFA or issuer continuity works.
-4. On Keycloak outage or CA/issuer mismatch, refuse new authentication and
-   report identity unavailable without falling back to lab sessions or a
-   remote issuer. Do not mark an unhealthy candidate active.
+4. On CA/issuer mismatch or a required JWKS refresh that cannot reach
+   Keycloak, refuse authentication without falling back to lab sessions or a
+   remote issuer. Core currently caches verified JWKS keys for up to five
+   minutes, so an already signed token can still be presented during a
+   shorter Keycloak outage. Define and test the vessel's acceptable outage
+   window before pilot acceptance. Do not mark an unhealthy candidate active.
 5. Switch, rollback, stop/recover and clean restore must carry the same mode
    and check the exact CA, revocation and network resources. Restore identity
    service state before accepting crew tokens; if identity recovery is
