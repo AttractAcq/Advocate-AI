@@ -21,6 +21,7 @@ from infrastructure.deploy.vessel_release_switch import (
     discard_stopped_vessel_stage, rollback_stopped_vessel_release,
     switch_stopped_vessel_release,
 )
+from infrastructure.deploy.vessel_runtime import ThreatFeedMount
 from infrastructure.deploy.vessel_history_migration import (
     migrate_stopped_vessel_history, verify_vessel_history_migration_backup,
     verify_vessel_history_migration_receipt,
@@ -50,6 +51,8 @@ def main(argv: list[str] | None = None) -> None:
     install_identity = install.add_mutually_exclusive_group(required=True)
     install_identity.add_argument("--lab-password-file", type=Path)
     install_identity.add_argument("--identity-network")
+    install.add_argument("--threat-feed-store", type=Path)
+    install.add_argument("--threat-feed-key", type=Path)
     for command in ("status", "stop", "finish-stop", "reconcile", "recover",
                     "reconcile-install", "resume-install"):
         commands.add_parser(command, parents=[shared])
@@ -189,9 +192,14 @@ def main(argv: list[str] | None = None) -> None:
         if (value := getattr(args, name, None)) is not None
     }
     if args.command == "install":
+        if bool(args.threat_feed_store) != bool(args.threat_feed_key):
+            parser.error("--threat-feed-store and --threat-feed-key must be supplied together")
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
                                 args.console_config, args.root, args.core_state,
                                 args.lab_password_file,
+                                **({"threat_feed": ThreatFeedMount(args.threat_feed_store,
+                                                                   args.threat_feed_key)}
+                                   if args.threat_feed_store else {}),
                                 **({"identity_network": args.identity_network}
                                    if args.identity_network is not None else {}))
     elif args.command == "status":
