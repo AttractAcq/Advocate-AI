@@ -49,7 +49,11 @@ The Security view shows only metadata and a freshness warning.
 
 The focused tests sign and import a fictional package, age it past seven days,
 reject a rollback, changed signed content, duplicate JSON and a linked store
-file, and exercise direct API role denial and tamper failure. To close AT-22,
+file, and exercise direct API role denial and tamper failure. The synthetic
+Keycloak/Console browser rehearsal also imports an eight-day-old
+package, signs in as AV/IT, checks the visible stale warning and publisher,
+and checks that the indicator value is absent from the page. This is a browser
+software test, not a target network trace. To close AT-22,
 the target lab must repeat import and aging with approved media, verify the
 publisher and key custody, capture packet/route evidence proving no covert
 download, and have an independent reviewer decide the feed cadence and result.
