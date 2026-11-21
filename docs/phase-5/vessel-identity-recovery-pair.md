@@ -38,6 +38,15 @@ exact archive bytes, authenticates the encrypted export and admits only one
 realm file matching the Core issuer. The synthetic realm JSON is capped at
 32 MiB before parsing. It removes only output that it created on failure.
 The realm must then be imported through an approved Keycloak recovery process.
+For an OIDC `activate-recovery-set`, `finish-incomplete-restore`, or
+`retry-abandoned-restore`, pass all four of `--identity-pair`,
+`--identity-pair-key`, `--identity-archive`, and `--identity-archive-key`.
+Activation verifies the pair and authenticated archive against the exact Core
+receipt before creating Docker resources. An interrupted restore records the
+pair digest; finishing requires that same pair. Lab-mode restores reject these
+identity arguments. These commands verify artifact binding; the operator must
+still import the checked realm and establish the live Keycloak service before
+activation.
 The pair itself does **not** prove a shared capture point, Keycloak database
 consistency, live imported account state or a successful Core/Knowledge
 activation. The current production identity topology, signing-key custody,

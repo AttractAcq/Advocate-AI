@@ -30,6 +30,12 @@ from infrastructure.deploy.vessel_identity_recovery import (
 )
 
 
+def _identity_pair_arguments(parser: argparse.ArgumentParser) -> None:
+    for name in ("identity-pair", "identity-pair-key", "identity-archive",
+                 "identity-archive-key"):
+        parser.add_argument("--" + name, type=Path)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     shared = argparse.ArgumentParser(add_help=False)
@@ -140,6 +146,7 @@ def main(argv: list[str] | None = None) -> None:
     activate_identity.add_argument("--lab-password-file", type=Path)
     activate_identity.add_argument("--identity-network")
     activate.add_argument("--staging-parent", type=Path, required=True)
+    _identity_pair_arguments(activate)
     finish_restore = commands.add_parser("finish-incomplete-restore")
     finish_restore.add_argument("--root", type=Path, required=True)
     finish_restore.add_argument("--trusted-key", type=Path, required=True)
@@ -150,6 +157,7 @@ def main(argv: list[str] | None = None) -> None:
     finish_restore.add_argument("--restic", type=Path, required=True)
     finish_restore.add_argument("--restic-sha256", required=True)
     finish_restore.add_argument("--staging-parent", type=Path, required=True)
+    _identity_pair_arguments(finish_restore)
     abandon = commands.add_parser("abandon-incomplete-restore")
     abandon.add_argument("--root", type=Path, required=True)
     abandon.add_argument("--trusted-key", type=Path, required=True)
@@ -173,7 +181,13 @@ def main(argv: list[str] | None = None) -> None:
     retry_identity.add_argument("--lab-password-file", type=Path)
     retry_identity.add_argument("--identity-network")
     retry.add_argument("--staging-parent", type=Path, required=True)
+    _identity_pair_arguments(retry)
     args = parser.parse_args(argv)
+    identity_pair_options = {
+        name: value for name in ("identity_pair", "identity_pair_key",
+                                 "identity_archive", "identity_archive_key")
+        if (value := getattr(args, name, None)) is not None
+    }
     if args.command == "install":
         result = install_vessel(args.bundle, args.trusted_key, args.crane,
                                 args.console_config, args.root, args.core_state,
@@ -250,12 +264,14 @@ def main(argv: list[str] | None = None) -> None:
             args.restic_sha256, args.root, args.core_state,
             args.lab_password_file, args.staging_parent,
             **({"identity_network": args.identity_network}
-               if args.identity_network is not None else {}))
+               if args.identity_network is not None else {}),
+            **identity_pair_options)
     elif args.command == "finish-incomplete-restore":
         result = finish_incomplete_vessel_restore(
             args.root, args.trusted_key, args.crane, args.receipt,
             args.receipt_key, args.password_file, args.restic,
-            args.restic_sha256, args.staging_parent)
+            args.restic_sha256, args.staging_parent,
+            **identity_pair_options)
     elif args.command == "abandon-incomplete-restore":
         result = abandon_incomplete_vessel_restore(
             args.root, args.trusted_key, args.receipt, args.receipt_key,
@@ -267,7 +283,8 @@ def main(argv: list[str] | None = None) -> None:
             args.password_file, args.restic, args.restic_sha256, args.root,
             args.core_state, args.lab_password_file, args.staging_parent,
             **({"identity_network": args.identity_network}
-               if args.identity_network is not None else {}))
+               if args.identity_network is not None else {}),
+            **identity_pair_options)
     else:
         result = recover_vessel(args.root, args.trusted_key, args.crane)
     print(json.dumps(result, sort_keys=True))

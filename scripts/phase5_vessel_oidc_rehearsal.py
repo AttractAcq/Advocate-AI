@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from infrastructure.deploy.container_runtime import RuntimeHandle, stop_runtime
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle, stop_knowledge
 from infrastructure.deploy.vessel_installer import install_vessel, status_vessel, stop_vessel
+from infrastructure.backup import generate_key
+from infrastructure.deploy.vessel_identity_recovery import create_identity_recovery_pair
 from infrastructure.deploy.vessel_recovery_set import (
     activate_vessel_recovery_set, create_vessel_recovery_set,
     verify_vessel_recovery_receipt,
@@ -181,12 +183,28 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
         if (captured["schema"] != 3 or
                 verify_vessel_recovery_receipt(receipt, receipt_public) != captured):
             raise AssertionError("signed OIDC recovery receipt is incomplete")
+        # The fictional IdP has no database export. Bind a synthetic realm
+        # inventory to the receipt to exercise the activation contract.
+        realm = recovery / "sovereign-realm.json"
+        put(realm, json.dumps({"realm": "sovereign", "users": [
+            {"username": "engineer"}, {"username": "deckhand"}]}).encode())
+        archive_key = recovery / "archive.key"
+        generate_key(archive_key)
+        archive = recovery / "realm.svbk"
+        from scripts.phase3_vessel_keycloak_rehearsal import _backup_realm
+        checkpoint = _backup_realm(realm, recovery, archive, archive_key)
+        pair = recovery / "identity-pair.json"
+        create_identity_recovery_pair(receipt, receipt_public, archive,
+                                      archive_key, checkpoint, receipt_private,
+                                      pair)
         _run("docker", "volume", "rm", runtime["data_volume"])
         volumes.discard(runtime["data_volume"])
         recovered = activate_vessel_recovery_set(
             bundle, trusted, crane, config, receipt, receipt_public, password,
             restic, restic_sha256, restored_root, restored_state, None,
-            staging, identity_network=network)
+            staging, identity_network=network, identity_pair=pair,
+            identity_pair_key=receipt_public, identity_archive=archive,
+            identity_archive_key=archive_key)
         restored = json.loads((restored_root / "vessel-state.json").read_text())
         volumes.add(restored["runtime"]["data_volume"])
         if (recovered["result"] != "restored-and-activated" or

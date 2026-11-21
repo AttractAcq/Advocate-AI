@@ -27,6 +27,26 @@ class VesselCtlTests(unittest.TestCase):
             Path("/tmp/password"), Path("/tmp/restic"), "0" * 64,
             Path("/tmp/staging"))
 
+    def test_finish_oidc_restore_routes_identity_pair(self) -> None:
+        args = ["finish-incomplete-restore", "--root", "/tmp/vessel",
+                "--trusted-key", "/tmp/key", "--crane", "/tmp/crane",
+                "--receipt", "/tmp/receipt", "--receipt-key", "/tmp/receipt-key",
+                "--password-file", "/tmp/password", "--restic", "/tmp/restic",
+                "--restic-sha256", "0" * 64, "--staging-parent", "/tmp/staging",
+                "--identity-pair", "/tmp/pair", "--identity-pair-key", "/tmp/pair-key",
+                "--identity-archive", "/tmp/archive",
+                "--identity-archive-key", "/tmp/archive-key"]
+        with patch("scripts.vesselctl.finish_incomplete_vessel_restore",
+                   return_value={"result": "restored-and-activated"}) as finish, \
+             redirect_stdout(StringIO()):
+            main(args)
+        self.assertEqual(finish.call_args.kwargs, {
+            "identity_pair": Path("/tmp/pair"),
+            "identity_pair_key": Path("/tmp/pair-key"),
+            "identity_archive": Path("/tmp/archive"),
+            "identity_archive_key": Path("/tmp/archive-key"),
+        })
+
     def test_partial_stage_discard_requires_explicit_flag(self) -> None:
         args = ["discard-staged-candidate", "--root", "/tmp/vessel",
                 "--trusted-key", "/tmp/key", "--bundle", "/tmp/bundle",
