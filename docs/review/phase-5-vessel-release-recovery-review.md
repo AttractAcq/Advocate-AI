@@ -84,6 +84,10 @@ reached the same restore check and exposed an empty conversation persisted by
 a failed model request. Core now creates a new conversation after a successful
 answer; the reviewer should challenge this on both ephemeral and persistent
 history. Full signed recovery evidence remains pending.
+The [next run](https://github.com/AttractAcq/Advocate-AI/actions/runs/44841909742)
+passed clean restore and reached the interrupted-restore retry, which still
+assumed one conversation. That retry now compares the complete ID set with
+the same encrypted snapshot and checks every turn through Core.
 
 ## Reproducible evidence
 

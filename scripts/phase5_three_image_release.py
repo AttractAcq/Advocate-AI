@@ -685,15 +685,21 @@ def _rehearse_interrupted_restore_abandon(bundle: Path, trusted: Path,
             recovery / "staging")
         retry_status = status_vessel(retry_root, trusted, crane)
         retry_record = json.loads((retry_root / "vessel-state.json").read_text())
+        with closing(sqlite3.connect(recovery / "restored" / "history.db")) as database:
+            expected_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
         with closing(sqlite3.connect(retry_state / "history.db")) as database:
-            history_ids = database.execute("SELECT id FROM conversations").fetchall()
+            history_ids = [row[0] for row in database.execute(
+                "SELECT id FROM conversations ORDER BY id")]
+        if len(expected_ids) < 2 or history_ids != expected_ids:
+            raise AssertionError("receipt-verified retry changed conversation history")
+        histories = [_probe_vessel_history(retry_record["runtime"]["core_id"], identifier)
+                     for identifier in expected_ids]
         if (retried["result"] != "restored-and-activated" or
                 retried["retry_of_attempt"] != restore_attempt or
                 retry_status["result"] != "healthy" or
                 retry_record["installation_id"] != value["installation_id"] or
-                len(history_ids) != 1 or
-                _probe_vessel_history(retry_record["runtime"]["core_id"],
-                                      history_ids[0][0])["turns"] != 1 or
+                any(history["turns"] != 1 for history in histories) or
                 (retry_state / "postgres.dump").exists()):
             raise AssertionError("receipt-verified retry did not restore healthy vessel")
         return {"result": "pass", "volume": "checked-and-discarded",
