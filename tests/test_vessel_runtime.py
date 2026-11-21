@@ -6,12 +6,14 @@ import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle, _credentials
 from infrastructure.deploy.vessel_identity import VesselIdentity
 from infrastructure.deploy.vessel_runtime import (
-    VesselRuntimeError, _state_options, probe_signed_vessel_services,
+    ThreatFeedMount, VesselRuntimeError, _state_options, probe_signed_vessel_services,
     start_signed_vessel_services,
 )
 from infrastructure.release.bundle import BundleError
@@ -54,6 +56,35 @@ class VesselRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(VesselRuntimeError, "model request name"):
             _state_options(self.state, self.lab_password, self.knowledge_root,
                            model_id="untrusted/model")
+
+    def test_threat_feed_uses_separate_read_only_mounts(self) -> None:
+        store = self.root / "feed-store"
+        store.mkdir(mode=0o700)
+        key = self.root / "feed-key.pem"
+        key.write_bytes(Ed25519PrivateKey.generate().public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+        key.chmod(0o600)
+        feed = ThreatFeedMount(store, key)
+        options, _ = _state_options(self.state, self.lab_password,
+                                    self.knowledge_root, threat_feed=feed)
+        self.assertIn(f"type=bind,source={store.resolve()},target=/run/sovereign-threat,readonly",
+                      options)
+        self.assertIn(f"type=bind,source={key.resolve()},target=/run/secrets/threat-snapshot-key,readonly",
+                      options)
+        self.assertIn("SOVEREIGN_THREAT_SNAPSHOT_STORE=/run/sovereign-threat", options)
+        self.assertIn("SOVEREIGN_THREAT_SNAPSHOT_KEY=/run/secrets/threat-snapshot-key", options)
+        with self.assertRaisesRegex(VesselRuntimeError, "separate"):
+            _state_options(self.state, self.lab_password, self.knowledge_root,
+                           threat_feed=ThreatFeedMount(self.state, key))
+        linked = self.root / "feed-link"
+        linked.symlink_to(store)
+        with self.assertRaisesRegex(VesselRuntimeError, "owner-only"):
+            _state_options(self.state, self.lab_password, self.knowledge_root,
+                           threat_feed=ThreatFeedMount(linked, key))
+        key.chmod(0o644)
+        with self.assertRaisesRegex(VesselRuntimeError, "private"):
+            _state_options(self.state, self.lab_password, self.knowledge_root,
+                           threat_feed=feed)
 
     def test_oidc_core_options_exclude_lab_password(self) -> None:
         identity = VesselIdentity(
@@ -117,6 +148,11 @@ class VesselRuntimeTests(unittest.TestCase):
                 probe_signed_vessel_services(handle, knowledge, self.state,
                                              self.lab_password, reader,
                                              model_id="synthetic-lab-model")
+            mounts.append({"Destination": "/run/sovereign-threat", "Type": "bind",
+                           "Source": str(self.root / "unexpected-feed"), "RW": False})
+            with self.assertRaisesRegex(VesselRuntimeError, "unconfigured threat feed"):
+                probe_signed_vessel_services(handle, knowledge, self.state,
+                                             self.lab_password, reader)
             health.assert_not_called()
 
     def test_oidc_probe_refuses_lab_credential_mount(self) -> None:

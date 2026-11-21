@@ -46,9 +46,12 @@ is visible as `missing`; invalid or tampered content returns 503. Set both
 `SOVEREIGN_THREAT_SNAPSHOT_STORE` and `SOVEREIGN_THREAT_SNAPSHOT_KEY` in the
 local Core environment. If neither is set, the AV/IT view says `unconfigured`.
 The Security view shows only metadata and a freshness warning.
-The signed vessel installer does not yet persist and mount a separately
-controlled read-only feed store and trusted key; that software integration is
-tracked as W-193 in the [build queue](../blockers-and-build-queue.md).
+The vessel runtime now has an opt-in `ThreatFeedMount` that checks owner-only,
+separate host inputs and mounts the feed store and trusted key read-only for
+Core. Its status probe checks the mount identity and feed environment. The
+signed vessel installer does not yet persist those inputs across restart,
+release switch or recovery; that integration remains W-193 in the
+[build queue](../blockers-and-build-queue.md).
 
 The focused tests sign and import a fictional package, age it past seven days,
 reject a rollback, changed signed content, duplicate JSON and a linked store

@@ -8,6 +8,7 @@ coordinated database recovery belong to the installer.
 from __future__ import annotations
 
 from contextlib import closing
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ from services.knowledge.manifest_io import load_manifest
 from services.policy.audit import verify as verify_audit
 from services.policy.policy_file import load_policy
 from apps.api.auth import _history_shape, verify_history_format
+from services.intelligence.threat_snapshot import ThreatSnapshotReader
 
 
 class VesselRuntimeError(ValueError):
@@ -44,6 +46,40 @@ _INSTALL = re.compile(r"[0-9a-f]{32}\Z")
 _DOCKER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 _MODEL_ENDPOINT = "http://127.0.0.1:11434/v1"
+_FEED_STORE = "/run/sovereign-threat"
+_FEED_KEY = "/run/secrets/threat-snapshot-key"
+
+
+@dataclass(frozen=True)
+class ThreatFeedMount:
+    store: Path
+    trusted_key: Path
+
+
+def _feed_options(feed: ThreatFeedMount, state: Path,
+                  knowledge_root: Path | None) -> list[str]:
+    store, key = feed.store, feed.trusted_key
+    if (not store.is_absolute() or store.is_symlink() or not store.is_dir()
+            or store.stat().st_uid != os.getuid()
+            or stat.S_IMODE(store.stat().st_mode) & 0o077):
+        raise VesselRuntimeError("threat feed store must be an owner-only directory")
+    _private_file(key)
+    if key.stat().st_nlink != 1:
+        raise VesselRuntimeError("threat feed key must have one link")
+    for source in (state, *([knowledge_root] if knowledge_root is not None else [])):
+        if (store.resolve().is_relative_to(source.resolve()) or
+                source.resolve().is_relative_to(store.resolve()) or
+                key.resolve().is_relative_to(source.resolve())):
+            raise VesselRuntimeError("threat feed must be separate from writable state")
+    if key.resolve().is_relative_to(store.resolve()):
+        raise VesselRuntimeError("threat feed key must be outside its store")
+    # Core verifies the signature again on every status read. This preflight
+    # rejects a corrupt package before starting a new signed runtime.
+    ThreatSnapshotReader(store, key).status()
+    return ["--mount", f"type=bind,source={store.resolve()},target={_FEED_STORE},readonly",
+            "--mount", f"type=bind,source={key.resolve()},target={_FEED_KEY},readonly",
+            "-e", f"SOVEREIGN_THREAT_SNAPSHOT_STORE={_FEED_STORE}",
+            "-e", f"SOVEREIGN_THREAT_SNAPSHOT_KEY={_FEED_KEY}"]
 
 
 def _signed_model_id(manifest: dict[str, object]) -> str | None:
@@ -71,7 +107,8 @@ def _state_options(state: Path, lab_password: Path | None,
                    knowledge_root: Path, *,
                    allow_legacy_history: bool = False,
                    model_id: str | None = None,
-                   identity: VesselIdentity | None = None) -> tuple[list[str], Path]:
+                   identity: VesselIdentity | None = None,
+                   threat_feed: ThreatFeedMount | None = None) -> tuple[list[str], Path]:
     if model_id is not None and not _MODEL_ID.fullmatch(model_id):
         raise VesselRuntimeError("invalid signed model request name")
     if (not state.is_absolute() or state.is_symlink() or not state.is_dir()
@@ -157,6 +194,8 @@ def _state_options(state: Path, lab_password: Path | None,
     if model_id is not None:
         options += ["-e", f"SOVEREIGN_MODEL_NAME={model_id}",
                     "-e", f"SOVEREIGN_MODEL_ENDPOINT={_MODEL_ENDPOINT}"]
+    if threat_feed is not None:
+        options += _feed_options(threat_feed, state, knowledge_root)
     return options, reader
 
 
@@ -175,7 +214,8 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
                                  knowledge: KnowledgeVolumeHandle,
                                  installation_id: str, *,
                                  restore_attempt: str | None = None,
-                                 identity: VesselIdentity | None = None) -> RuntimeHandle:
+                                 identity: VesselIdentity | None = None,
+                                 threat_feed: ThreatFeedMount | None = None) -> RuntimeHandle:
     """Launch verified Core and Console around the checked Knowledge socket."""
     if not _INSTALL.fullmatch(installation_id) or \
             knowledge.installation_id != installation_id:
@@ -195,7 +235,8 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
         raise VesselRuntimeError("Console configuration is unreadable by the image user")
     probe_knowledge(knowledge)
     options, reader = _state_options(state, lab_password, knowledge_root,
-                                     model_id=model_id, identity=identity)
+                                     model_id=model_id, identity=identity,
+                                     threat_feed=threat_feed)
     reader_secret = _credentials(knowledge_root, initialize=False)[4]
     verify_login(knowledge.container_id, "sovereign_read", reader_secret)
     images = {role: _image_id(bundle, role, manifest["images"][role], crane)
@@ -234,7 +275,8 @@ def start_signed_vessel_services(bundle: Path, trusted_key: Path, crane: Path,
         for attempt in range(30):
             try:
                 probe_signed_vessel_services(handle, knowledge, state, lab_password,
-                                             reader, model_id=model_id, identity=identity)
+                                             reader, model_id=model_id, identity=identity,
+                                             threat_feed=threat_feed)
                 return handle
             except (ContainerRuntimeError, VesselRuntimeError):
                 if attempt == 29:
@@ -251,7 +293,8 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
                                  state: Path, lab_password: Path | None,
                                  reader_passfile: Path,
                                  *, model_id: str | None = None,
-                                 identity: VesselIdentity | None = None) -> None:
+                                 identity: VesselIdentity | None = None,
+                                 threat_feed: ThreatFeedMount | None = None) -> None:
     """Check persisted image, network, mount and database role boundaries."""
     verify_runtime_identity(handle)
     if ((identity is None) != (handle.identity_network_id is None) or
@@ -285,8 +328,16 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
             "bind", str(lab_password.resolve()), False)
     elif lab_password is not None:
         raise VesselRuntimeError("OIDC runtime has a lab credential")
+    if threat_feed is not None:
+        _feed_options(threat_feed, state, None)
+        expected_mounts[_FEED_STORE] = ("bind", str(threat_feed.store.resolve()), False)
+        expected_mounts[_FEED_KEY] = ("bind", str(threat_feed.trusted_key.resolve()), False)
     if not isinstance(mounts, list) or not isinstance(environment, list):
         raise VesselRuntimeError("invalid Core runtime metadata")
+    if threat_feed is None and any(
+            isinstance(item, dict) and item.get("Destination") in {_FEED_STORE, _FEED_KEY}
+            for item in mounts):
+        raise VesselRuntimeError("unconfigured threat feed mount")
     if identity is not None and any(
             isinstance(item, dict) and item.get("Destination") == "/run/secrets/lab-password"
             for item in mounts):
@@ -315,10 +366,14 @@ def probe_signed_vessel_services(handle: RuntimeHandle,
             raise VesselRuntimeError("invalid signed model request name")
         expected_env.update({f"SOVEREIGN_MODEL_NAME={model_id}",
                              f"SOVEREIGN_MODEL_ENDPOINT={_MODEL_ENDPOINT}"})
+    if threat_feed is not None:
+        expected_env.update({f"SOVEREIGN_THREAT_SNAPSHOT_STORE={_FEED_STORE}",
+                             f"SOVEREIGN_THREAT_SNAPSHOT_KEY={_FEED_KEY}"})
     checked_names = {entry.split("=", 1)[0] for entry in expected_env}
     checked_names.update({"SOVEREIGN_MODEL_NAME", "SOVEREIGN_MODEL_ENDPOINT",
                           "SOVEREIGN_LAB_PASSWORD_FILE", "SOVEREIGN_OIDC_ISSUER",
-                          "SOVEREIGN_OIDC_CA_FILE", "SOVEREIGN_OIDC_REVOCATIONS"})
+                          "SOVEREIGN_OIDC_CA_FILE", "SOVEREIGN_OIDC_REVOCATIONS",
+                          "SOVEREIGN_THREAT_SNAPSHOT_STORE", "SOVEREIGN_THREAT_SNAPSHOT_KEY"})
     selected = [item for item in environment if isinstance(item, str) and
                 item.split("=", 1)[0] in checked_names]
     if len(selected) != len(expected_env) or set(selected) != expected_env:
