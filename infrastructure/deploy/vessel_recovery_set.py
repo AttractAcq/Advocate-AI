@@ -652,19 +652,21 @@ def _partial_knowledge_resources(installation_id: str, data_volume: str,
 def _match_restored_core(state: Path, restored: Path) -> None:
     """Require the interrupted Core copy to equal the authenticated snapshot."""
     _owner_directory(state)
-    def inventory(root: Path, *, exclude_dump: bool) -> dict[str, Path]:
+    def inventory(root: Path, *, snapshot: bool) -> dict[str, Path]:
         found: dict[str, Path] = {}
         for item in root.rglob("*"):
             name = item.relative_to(root).as_posix()
-            if exclude_dump and name == "postgres.dump":
+            # Restore verifies these receipt-bound artifacts, but the normal
+            # activation copies neither into the running Core state.
+            if snapshot and name in ("postgres.dump", "sovereign-snapshot-manifest.json"):
                 continue
             if len(found) >= 1024:
                 raise VesselRecoveryError("partial Core inventory is oversized")
             found[name] = item
         return found
 
-    expected = inventory(restored, exclude_dump=True)
-    actual = inventory(state, exclude_dump=False)
+    expected = inventory(restored, snapshot=True)
+    actual = inventory(state, snapshot=False)
     if set(actual) != set(expected):
         raise VesselRecoveryError("partial Core inventory differs from recovery snapshot")
     for name, item in actual.items():

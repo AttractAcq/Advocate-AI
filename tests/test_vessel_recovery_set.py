@@ -222,6 +222,7 @@ class VesselRecoverySetTests(unittest.TestCase):
         restored = self.root / "restored"
         shutil.copytree(self.state, restored)
         (restored / "postgres.dump").write_bytes(b"PGDMP")
+        (restored / "sovereign-snapshot-manifest.json").write_bytes(b"verified")
         _match_restored_core(self.state, restored)
         policy = self.state / "roles.json"
         policy.write_text(policy.read_text().replace("engineer", "outsider"))
