@@ -124,7 +124,9 @@ are required?” retrieved the first five deck documents solely because their
 common boilerplate matched. Shared query handling now requires a distinguishing
 term unless exactly one document was selected. Fixture, SQLite and direct Core
 tests cover generic denial, specific procedure retrieval and explicit selection;
-the pgvector integration test is scheduled in CI. A five-case local Core/Qwen
-rerun at source commit `26bc8d3` retains four exact-source citations and one
-deckhand denial. The deck “retrieve” wording expansion persists, so this
+the pgvector integration test is scheduled in CI. A follow-up check found
+that command words such as “Show me” and “Find” had blocked a named procedure;
+those words are now removed from query terms, with direct retrieval regressions.
+A five-case local Core/Qwen rerun at source commit `1df6cf0` retains four
+exact-source citations and one deckhand denial. The deck “retrieve” wording expansion persists, so this
 change does not close the independent claim-support assessment.
