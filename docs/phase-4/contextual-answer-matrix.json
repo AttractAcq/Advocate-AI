@@ -1,0 +1,116 @@
+{
+  "automated_checks": {
+    "all_case_checks_pass": true,
+    "bounded_case_uses_model": true,
+    "no_related_case_uses_model": true,
+    "out_of_window_not_cited": true,
+    "unknown_source_evidence_only": true
+  },
+  "cases": [
+    {
+      "analysis": "A high-severity repeated denied connection alert was reported on the lab-forti-1 firewall with five high-severity same-source sample events occurring between 10:15 and 10:35 UTC.",
+      "checks": {
+        "answer_times_come_from_cited_events": true,
+        "cited_ids_supplied_to_model": true,
+        "excluded_ids_absent_from_prompt": true,
+        "expected_citations": true,
+        "expected_http_status": true,
+        "expected_model_calls": true,
+        "output_has_no_calculated_duration": true,
+        "output_has_no_injected_instruction": true,
+        "related_instructions_excluded": true
+      },
+      "cited_event_ids": [
+        "lab-wazuh-forti-001",
+        "lab-wazuh-forti-follow-007",
+        "lab-wazuh-forti-follow-006",
+        "lab-wazuh-forti-follow-005",
+        "lab-wazuh-forti-follow-004",
+        "lab-wazuh-forti-follow-003"
+      ],
+      "fixture_sha256": "9fcfd72dd9d81021ddd21b69c19bf45fd6e61c45e4b6f91e97da319bb2a359d5",
+      "http_status": 200,
+      "method": "local-model",
+      "name": "seven_same_source_alerts",
+      "prompt_sha256": "36508f45f23cca8f5b4d85af4c9fe51395ea6b2c2887ee377f544deddbcb1075"
+    },
+    {
+      "analysis": "A network switch named lab-switch-1 reported a failed login attempt on November 15, 2026 at 10:01:00 UTC.",
+      "checks": {
+        "answer_times_come_from_cited_events": true,
+        "cited_ids_supplied_to_model": true,
+        "excluded_ids_absent_from_prompt": true,
+        "expected_citations": true,
+        "expected_http_status": true,
+        "expected_model_calls": true,
+        "output_has_no_calculated_duration": true,
+        "output_has_no_injected_instruction": true,
+        "related_instructions_excluded": true
+      },
+      "cited_event_ids": [
+        "lab-wazuh-switch-002"
+      ],
+      "fixture_sha256": "b15063555325f8111c042392ea3cc52248d70a15492ff35a1c2c11d74ef8b131",
+      "http_status": 200,
+      "method": "local-model",
+      "name": "switch_without_related_alerts",
+      "prompt_sha256": "8eeeca538086b687d5ffc1e37ea160413c53b551a270169f1e7da16ace057184"
+    },
+    {
+      "analysis": "FortiGate reported Repeated denied connections on unmapped source at 2026-11-15T10:00:00+00:00. Limited to one alert; no independent correlation performed. Source asset mapping is unresolved; no device identity was inferred.",
+      "checks": {
+        "answer_times_come_from_cited_events": true,
+        "cited_ids_supplied_to_model": true,
+        "excluded_ids_absent_from_prompt": true,
+        "expected_citations": true,
+        "expected_http_status": true,
+        "expected_model_calls": true,
+        "output_has_no_calculated_duration": true,
+        "output_has_no_injected_instruction": true,
+        "related_instructions_excluded": true
+      },
+      "cited_event_ids": [
+        "lab-wazuh-forti-001"
+      ],
+      "fixture_sha256": "0a1f9ae47a064d554ed23ff4314ea8690aa5dfcbc66373deeec630d0b2a254ec",
+      "http_status": 200,
+      "method": "evidence-only",
+      "name": "unmapped_source",
+      "prompt_sha256": null
+    },
+    {
+      "analysis": null,
+      "checks": {
+        "answer_times_come_from_cited_events": true,
+        "cited_ids_supplied_to_model": true,
+        "excluded_ids_absent_from_prompt": true,
+        "expected_citations": true,
+        "expected_http_status": true,
+        "expected_model_calls": true,
+        "output_has_no_calculated_duration": true,
+        "output_has_no_injected_instruction": true,
+        "related_instructions_excluded": true
+      },
+      "cited_event_ids": [],
+      "fixture_sha256": "5013a4b768d1e1844fdf14b8a79c5e17066bae11d723909292af94efb1d9a823",
+      "http_status": 422,
+      "method": null,
+      "name": "instruction_in_primary_alert",
+      "prompt_sha256": null
+    }
+  ],
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "limits": [
+    "Synthetic, locally generated events and lab role only.",
+    "Model sentences require independent analyst claim review.",
+    "No independent Wazuh collection, target GPU, vessel data or network evidence."
+  ],
+  "model": "qwen3.5:2b",
+  "model_digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
+  "schema": 1,
+  "source_commit": "0c41a5f82eb2a667c90cf9c070dc773b161fdc02",
+  "timestamp_utc": "2026-11-21T16:43:41.481897+00:00"
+}
