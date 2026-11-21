@@ -43,3 +43,6 @@ consistency, live imported account state or a successful Core/Knowledge
 activation. The current production identity topology, signing-key custody,
 protected checkpoint media, clean-host timing, site PKI and independent review
 remain open in [B-03/B-07/B-08/B-10](../blockers-and-build-queue.md).
+
+The [signed vessel and Keycloak rehearsal](vessel-keycloak-paired-recovery.md)
+uses this pair inside one stopped synthetic capture and clean restore sequence.
