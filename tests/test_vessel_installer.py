@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from infrastructure.deploy.container_runtime import RuntimeHandle
 from infrastructure.deploy.knowledge_volume import KnowledgeVolumeHandle
+from infrastructure.deploy.vessel_identity import VesselIdentity
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _cleanup_failed_install, _ingest, _read_intent, _read_state,
     _remove_scoped_orphans,
@@ -30,6 +31,7 @@ class VesselInstallerTests(unittest.TestCase):
         self.parent = Path(temporary.name)
         self.parent.chmod(0o700)
         self.root = self.parent / "new-install"
+        (self.parent / "config").write_text('{"schema":1,"oidc_issuer":null}')
 
     def test_restore_orphan_cleanup_requires_attempt_on_every_runtime(self) -> None:
         installation = "a" * 32
@@ -259,6 +261,51 @@ class VesselInstallerTests(unittest.TestCase):
         self.assertFalse((self.root / "vessel-intent.json").exists())
         self.assertEqual(_read_state(self.root)["installation_id"], installation_id)
 
+    def test_oidc_install_records_no_lab_credential(self) -> None:
+        installation_id = "f" * 32
+        state = self.parent / "state"
+        state.mkdir(mode=0o700)
+        ca = state / "oidc-ca.pem"
+        ca.write_bytes(b"synthetic test trust")
+        ca.chmod(0o600)
+        identity = VesselIdentity(
+            "https://identity.vessel.example/realms/sovereign",
+            ca, state / "oidc-revocations.jsonl", "vessel-identity", "e" * 64)
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64,
+                                 identity.network_id, identity.network_name)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "1" * 12 + "-socket",
+                                          f"sovereign-{installation_id}-knowledge-data",
+                                          "sovereign-knowledge-" + "1" * 12,
+                                          installation_id)
+        with patch("infrastructure.deploy.vessel_installer.secrets.token_hex",
+                   return_value=installation_id), \
+             patch("infrastructure.deploy.vessel_installer.verify_bundle",
+                   return_value={"schema": 6, "target": "vessel",
+                                 "compatibility": SUPPORTED_VESSEL_COMPATIBILITY}), \
+             patch("infrastructure.deploy.vessel_installer.preflight_vessel_identity",
+                   return_value=identity) as preflight, \
+             patch("infrastructure.deploy.vessel_installer._stage",
+                   return_value=("6" * 24, self.parent)), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_knowledge",
+                   return_value=knowledge), \
+             patch("infrastructure.deploy.vessel_installer._state_options"), \
+             patch("infrastructure.deploy.vessel_installer._ingest",
+                   return_value={"indexed": 1, "unchanged": 0}), \
+             patch("infrastructure.deploy.vessel_installer.start_signed_vessel_services",
+                   return_value=services) as start:
+            result = install_vessel(self.parent, self.parent / "key",
+                                    self.parent / "crane", self.parent / "config",
+                                    self.root, state, None,
+                                    identity_network="vessel-identity")
+        self.assertEqual(result["result"], "activated")
+        preflight.assert_called_once_with(self.parent / "config", state,
+                                          "vessel-identity")
+        self.assertEqual(start.call_args.kwargs["identity"], identity)
+        active = _read_state(self.root)
+        self.assertEqual(active["schema"], 2)
+        self.assertNotIn("lab_password_file", active)
+
     def test_install_intent_rejects_duplicate_fields(self) -> None:
         self.root.mkdir(mode=0o700)
         _write_intent(self.root, "6" * 24, "f" * 32,
@@ -437,6 +484,37 @@ class VesselInstallerTests(unittest.TestCase):
             _read_state(self.root)
         path.write_text(json.dumps({**payload, "runtime": {**payload["runtime"],
                                                        "data_volume": "other"}}))
+        with self.assertRaises(VesselInstallError):
+            _read_state(self.root)
+
+    def test_oidc_state_and_intent_never_record_lab_password(self) -> None:
+        self.root.mkdir(mode=0o700)
+        state = self.parent / "state"
+        state.mkdir(mode=0o700)
+        ca = state / "oidc-ca.pem"
+        ca.write_bytes(b"synthetic test trust")
+        ca.chmod(0o600)
+        identity = VesselIdentity(
+            "https://identity.vessel.example/realms/sovereign",
+            ca, state / "oidc-revocations.jsonl", "vessel-identity", "e" * 64)
+        services = RuntimeHandle("a" * 64, "b" * 64, "c" * 64,
+                                 identity.network_id, identity.network_name)
+        knowledge = KnowledgeVolumeHandle("d" * 64,
+                                          "sovereign-knowledge-" + "1" * 12 + "-socket",
+                                          "sovereign-" + "f" * 32 + "-knowledge-data",
+                                          "sovereign-knowledge-" + "1" * 12, "f" * 32)
+        payload = _state_payload("2" * 24, "f" * 32, state, None, services,
+                                 knowledge, identity=identity)
+        self.assertEqual(payload["schema"], 2)
+        self.assertNotIn("lab_password_file", payload)
+        _write_state(self.root, payload)
+        self.assertEqual(_read_state(self.root), payload)
+        _write_intent(self.root, "2" * 24, "f" * 32, state, None,
+                      identity=identity)
+        intent = _read_intent(self.root)
+        self.assertEqual(intent["schema"], 2)
+        self.assertNotIn("lab_password_file", intent)
+        _write_state(self.root, {**payload, "lab_password_file": str(self.parent / "password")})
         with self.assertRaises(VesselInstallError):
             _read_state(self.root)
 

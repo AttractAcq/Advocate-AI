@@ -1,20 +1,20 @@
 # Vessel identity integration contract
 
-**Status: partial runtime implementation for synthetic validation, not an approved vessel
-configuration.** The current signed vessel installer is a schema-1 lab path:
-it accepts only `{"schema":1,"oidc_issuer":null}`, mounts a lab password into
-Core, and records that password path in install, switch and recovery state.
-Core can validate a DNS-named HTTPS Keycloak issuer and a private CA file, but
-the vessel installer does not yet supply either. An issuer in Console alone
-would produce an unusable or misleading sign-in path, so the mode transition
-must be atomic across Console, Core, status, backup and recovery.
+**Status: synthetic software candidate, not an approved vessel configuration.**
+The signed vessel installer has separate schema-1 lab and schema-2 OIDC paths.
+OIDC mode requires one exact HTTPS realm, owner-only CA and revocation files,
+and a labelled internal identity network. It records no lab password, connects
+only Core to the identity network, and probes the Console issuer and TLS JWKS.
+The same mode is carried through status, stopped release switch, rollback,
+encrypted recovery receipt schema 3, clean restore and interrupted restore.
+The existing schema-1 lab path remains supported.
 
-The runtime now has an opt-in OIDC branch that validates an exact HTTPS realm,
-owner-only CA and revocation files, and a labelled internal identity network.
-It mounts no lab password, connects only Core to that network, and probes the
-Console issuer and TLS JWKS. The installer cannot select this branch yet; its
-state, release switch and recovery records are still schema 1. This code is
-not evidence of an installable OIDC vessel release.
+This is local software evidence. Signed-image OIDC installation, browser login,
+Keycloak state backup and clean restore, site PKI and network routes, MFA and
+independent security assessment are still required before pilot acceptance.
+The Core recovery set captures CA and token revocations; Keycloak accounts,
+realm configuration and signing keys require a separate coordinated recovery
+process.
 
 ## Required behavior
 

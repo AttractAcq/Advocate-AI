@@ -105,6 +105,24 @@ class VesselCtlTests(unittest.TestCase):
                                         Path("/tmp/password"))
         self.assertEqual(json.loads(output.getvalue())["result"], "activated")
 
+    def test_oidc_install_requires_network_instead_of_lab_password(self) -> None:
+        command = ["install", "--root", "/tmp/vessel", "--trusted-key", "/tmp/key",
+                   "--crane", "/tmp/crane", "--bundle", "/tmp/bundle",
+                   "--console-config", "/tmp/config", "--core-state", "/tmp/state"]
+        with patch("scripts.vesselctl.install_vessel",
+                   return_value={"result": "activated"}) as install, \
+             redirect_stdout(StringIO()):
+            main(command + ["--identity-network", "vessel-identity"])
+        install.assert_called_once_with(
+            Path("/tmp/bundle"), Path("/tmp/key"), Path("/tmp/crane"),
+            Path("/tmp/config"), Path("/tmp/vessel"), Path("/tmp/state"), None,
+            identity_network="vessel-identity")
+        with patch("scripts.vesselctl.install_vessel") as install, \
+             redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            main(command + ["--identity-network", "vessel-identity",
+                            "--lab-password-file", "/tmp/password"])
+        install.assert_not_called()
+
     def test_recover_routes_to_existing_root(self) -> None:
         output = StringIO()
         with patch("scripts.vesselctl.recover_vessel",

@@ -16,7 +16,7 @@ from infrastructure.deploy.history_migration import _fingerprint
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _candidate_release_id, _cleanup_failed_install,
     _operation_lock, _owner_directory,
-    _read_state, _recovery_inventory, _release_id, _stage, _state_payload,
+    _read_state, _record_inputs, _recovery_inventory, _release_id, _stage, _state_payload,
     _verify_knowledge_schema, _verify_stage, _write_state,
 )
 from infrastructure.deploy.vessel_recovery_set import (
@@ -68,8 +68,12 @@ def _verify_preupdate_recovery(current: dict[str, object],
             payload["release"] != current["active"] or
             payload["data_volume"] != current["runtime"]["data_volume"]):
         raise VesselInstallError("pre-update recovery receipt names another installation")
-    if payload["schema"] != 2:
+    if payload["schema"] != (3 if current["schema"] == 2 else 2):
         raise VesselInstallError("pre-update recovery receipt lacks Knowledge row digest")
+    if current["schema"] == 2 and (
+            payload["identity"]["issuer"] != current["identity"]["issuer"] or
+            payload["identity"]["ca_sha256"] != current["identity"]["ca_sha256"]):
+        raise VesselInstallError("pre-update recovery identity differs from active vessel")
     state = Path(current["core_state"])
     repository = Path(payload["repository"])
     _owner_directory(staging_parent)
@@ -91,7 +95,8 @@ def _verify_preupdate_recovery(current: dict[str, object],
                                       restic, restic_sha256, restored)
         with policy_directory_lock(state / "roles.json", exclusive=True):
             sources, checkpoint, manifest_sha256 = _stage_core(
-                state, workspace / "live")
+                state, workspace / "live",
+                **({"oidc": True} if current["schema"] == 2 else {}))
         if (sources != payload["sources"] or
                 checkpoint != (payload["audit_count"], payload["audit_tail_hash"]) or
                 manifest_sha256 != payload["manifest_sha256"] or
@@ -110,9 +115,10 @@ def discard_stopped_vessel_stage(root: Path, trusted_key: Path, bundle: Path,
         current = _read_state(root)
         active = current["active"]
         _verify_stage(root / "vessel-releases" / active, trusted_key, active)
-        state = Path(current["core_state"])
-        password = Path(current["lab_password_file"])
-        _state_options(state, password, root)
+        state, password, identity = _record_inputs(
+            current, root, root / "vessel-releases" / current["active"] /
+            "console-config.json")
+        _state_options(state, password, root, identity=identity)
         _recovery_inventory(current["installation_id"], current["runtime"])
         identifier = _candidate_release_id(bundle, trusted_key, console_config)
         if identifier in (active, current.get("previous")):
@@ -129,8 +135,8 @@ def _activate_stopped(root: Path, trusted_key: Path, crane: Path,
                       current: dict[str, object], identifier: str,
                       stage: Path, result_name: str,
                       recovery: dict[str, object] | None = None) -> dict[str, object]:
-    state = Path(current["core_state"])
-    password = Path(current["lab_password_file"])
+    state, password, identity = _record_inputs(
+        current, root, stage / "console-config.json")
     installation_id = current["installation_id"]
     data_volume = current["runtime"]["data_volume"]
     knowledge: KnowledgeVolumeHandle | None = None
@@ -152,10 +158,10 @@ def _activate_stopped(root: Path, trusted_key: Path, crane: Path,
             services = start_signed_vessel_services(
                 stage / "bundle", trusted_key, crane,
                 stage / "console-config.json", state, password,
-                root, knowledge, installation_id)
+                root, knowledge, installation_id, identity=identity)
             payload = _state_payload(
                 identifier, installation_id, state, password, services,
-                knowledge, previous=current["active"])
+                knowledge, previous=current["active"], identity=identity)
             _write_state(root, payload)
         return {"result": result_name, "active": identifier,
                 "previous": current["active"],
@@ -190,8 +196,9 @@ def switch_stopped_vessel_release(root: Path, trusted_key: Path, crane: Path,
         current = _read_state(root)
         old = current["active"]
         _verify_stage(root / "vessel-releases" / old, trusted_key, old)
-        state, password = Path(current["core_state"]), Path(current["lab_password_file"])
-        _state_options(state, password, root)
+        state, password, identity = _record_inputs(
+            current, root, root / "vessel-releases" / old / "console-config.json")
+        _state_options(state, password, root, identity=identity)
         _recovery_inventory(current["installation_id"], current["runtime"])
         recovery = _verify_preupdate_recovery(
             current, receipt, receipt_key, password_file, restic,
@@ -220,8 +227,10 @@ def rollback_stopped_vessel_release(root: Path, trusted_key: Path,
                       trusted_key, current["active"])
         stage = root / "vessel-releases" / previous
         _verify_stage(stage, trusted_key, previous)
-        state, password = Path(current["core_state"]), Path(current["lab_password_file"])
-        _state_options(state, password, root)
+        state, password, identity = _record_inputs(
+            current, root, root / "vessel-releases" / current["active"] /
+            "console-config.json")
+        _state_options(state, password, root, identity=identity)
         _recovery_inventory(current["installation_id"], current["runtime"])
         recovery = _verify_preupdate_recovery(
             current, receipt, receipt_key, password_file, restic,

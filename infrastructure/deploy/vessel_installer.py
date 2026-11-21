@@ -33,6 +33,10 @@ from infrastructure.deploy.vessel_runtime import (
     _signed_model_id, _state_options, probe_signed_vessel_services,
     start_signed_vessel_services,
 )
+from infrastructure.deploy.vessel_identity import (
+    VesselIdentity, identity_from_record, identity_record,
+    preflight_vessel_identity, validate_identity_record_shape,
+)
 from infrastructure.release.bundle import (
     BundleError, require_supported_vessel_compatibility, verify_bundle,
 )
@@ -72,7 +76,7 @@ def _release_id(bundle: Path, config: Path) -> str:
 def _candidate_release_id(bundle: Path, trusted_key: Path, config: Path) -> str:
     manifest = verify_bundle(bundle, trusted_key)
     require_supported_vessel_compatibility(manifest)
-    _validate_console_config(config)
+    _validate_console_config(config, allow_oidc=True)
     if not stat.S_IMODE(config.stat().st_mode) & 0o004:
         raise VesselInstallError("Console configuration is unreadable by the image user")
     return _release_id(bundle, config)
@@ -120,7 +124,7 @@ def _verify_stage(stage: Path, trusted_key: Path, identifier: str) -> None:
     manifest = verify_bundle(stage / "bundle", trusted_key)
     require_supported_vessel_compatibility(manifest)
     config = stage / "console-config.json"
-    _validate_console_config(config)
+    _validate_console_config(config, allow_oidc=True)
     if _release_id(stage / "bundle", config) != identifier:
         raise VesselInstallError("staged vessel release identity mismatch")
 
@@ -182,17 +186,18 @@ print(json.dumps({'indexed':len(result['indexed']),'unchanged':len(result['uncha
 
 
 def _state_payload(identifier: str, installation_id: str,
-                   core_state: Path, lab_password: Path,
+                   core_state: Path, lab_password: Path | None,
                    services: RuntimeHandle,
                    knowledge: KnowledgeVolumeHandle,
-                   *, previous: str | None = None) -> dict[str, object]:
+                   *, previous: str | None = None,
+                   identity: VesselIdentity | None = None) -> dict[str, object]:
     if previous is not None and (not _IDENTIFIER.fullmatch(previous)
                                  or previous == identifier):
         raise VesselInstallError("invalid previous vessel release")
     payload = {
-        "schema": 1, "active": identifier, "installation_id": installation_id,
+        "schema": 2 if identity is not None else 1,
+        "active": identifier, "installation_id": installation_id,
         "core_state": str(core_state.resolve()),
-        "lab_password_file": str(lab_password.resolve()),
         "runtime": {"network_id": services.network_id,
                     "core_id": services.core_id,
                     "console_id": services.console_id,
@@ -201,6 +206,16 @@ def _state_payload(identifier: str, installation_id: str,
                     "socket_volume": knowledge.socket_volume,
                     "data_volume": knowledge.data_volume},
     }
+    if identity is None:
+        if lab_password is None or services.identity_network_id is not None:
+            raise VesselInstallError("invalid lab installation identity")
+        payload["lab_password_file"] = str(lab_password.resolve())
+    else:
+        if (lab_password is not None or
+                services.identity_network_id != identity.network_id or
+                services.identity_network_name != identity.network_name):
+            raise VesselInstallError("invalid OIDC installation identity")
+        payload["identity"] = identity_record(identity)
     if previous is not None:
         payload["previous"] = previous
     return payload
@@ -241,13 +256,23 @@ def _write_state(root: Path, payload: dict[str, object]) -> None:
 
 
 def _write_intent(root: Path, identifier: str, installation_id: str,
-                  core_state: Path, lab_password_file: Path) -> None:
-    _write_private_record(root, "vessel-intent.json", {
-        "schema": 1, "release": identifier, "installation_id": installation_id,
+                  core_state: Path, lab_password_file: Path | None,
+                  *, identity: VesselIdentity | None = None) -> None:
+    payload = {
+        "schema": 2 if identity is not None else 1,
+        "release": identifier, "installation_id": installation_id,
         "core_state": str(core_state.resolve()),
-        "lab_password_file": str(lab_password_file.resolve()),
         "data_volume": f"sovereign-{installation_id}-knowledge-data",
-    })
+    }
+    if identity is None:
+        if lab_password_file is None:
+            raise VesselInstallError("lab credential is required")
+        payload["lab_password_file"] = str(lab_password_file.resolve())
+    else:
+        if lab_password_file is not None:
+            raise VesselInstallError("OIDC install cannot record a lab credential")
+        payload["identity"] = identity_record(identity)
+    _write_private_record(root, "vessel-intent.json", payload)
 
 
 def _read_intent(root: Path) -> dict[str, object]:
@@ -262,10 +287,13 @@ def _read_intent(root: Path) -> dict[str, object]:
         value = json.loads(path.read_bytes(), object_pairs_hook=_unique)
     except (ValueError, UnicodeError) as exc:
         raise VesselInstallError("invalid vessel install intent JSON") from exc
+    lab_keys = {"schema", "release", "installation_id", "core_state",
+                "lab_password_file", "data_volume"}
+    oidc_keys = (lab_keys - {"lab_password_file"}) | {"identity"}
     if (not isinstance(value, dict) or
-            set(value) != {"schema", "release", "installation_id", "core_state",
-                           "lab_password_file", "data_volume"} or
-            type(value["schema"]) is not int or value["schema"] != 1 or
+            set(value) not in (lab_keys, oidc_keys) or
+            type(value["schema"]) is not int or
+            value["schema"] != (1 if set(value) == lab_keys else 2) or
             not isinstance(value["release"], str) or
             not _IDENTIFIER.fullmatch(value["release"]) or
             not isinstance(value["installation_id"], str) or
@@ -274,10 +302,37 @@ def _read_intent(root: Path) -> dict[str, object]:
             f"sovereign-{value['installation_id']}-knowledge-data" or
             not isinstance(value["core_state"], str) or
             not Path(value["core_state"]).is_absolute() or
-            not isinstance(value["lab_password_file"], str) or
-            not Path(value["lab_password_file"]).is_absolute()):
+            (value["schema"] == 1 and
+             (not isinstance(value["lab_password_file"], str) or
+              not Path(value["lab_password_file"]).is_absolute()))):
         raise VesselInstallError("invalid vessel install intent fields")
+    if value["schema"] == 2:
+        validate_identity_record_shape(value["identity"], Path(value["core_state"]))
     return value
+
+
+def _record_inputs(record: dict[str, object], root: Path,
+                   config: Path, *, live_identity: bool = True
+                   ) -> tuple[Path, Path | None, VesselIdentity | None]:
+    """Bind a persisted mode to the staged Console and external Core inputs."""
+    state = Path(record["core_state"])
+    if state.resolve().is_relative_to(root.resolve()):
+        raise VesselInstallError("Core state must be external to installation root")
+    if record["schema"] == 1:
+        password = Path(record["lab_password_file"])
+        if password.resolve().is_relative_to(root.resolve()):
+            raise VesselInstallError("lab credential must be external")
+        return state, password, None
+    if live_identity:
+        identity = identity_from_record(record["identity"], config, state)
+    else:
+        fields = validate_identity_record_shape(record["identity"], state)
+        if _validate_console_config(config, allow_oidc=True) != fields["issuer"]:
+            raise VesselInstallError("staged Console issuer differs from identity record")
+        identity = VesselIdentity(fields["issuer"], Path(fields["ca_file"]),
+                                  Path(fields["revocations_file"]),
+                                  fields["network_name"], fields["network_id"])
+    return state, None, identity
 
 
 def _cleanup_failed_install(installation_id: str, services: RuntimeHandle | None,
@@ -312,13 +367,25 @@ def _cleanup_failed_install(installation_id: str, services: RuntimeHandle | None
 
 def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
                    console_config: Path, root: Path, core_state: Path,
-                   lab_password_file: Path) -> dict[str, object]:
+                   lab_password_file: Path | None,
+                   *, identity_network: str | None = None) -> dict[str, object]:
     """Create one new signed synthetic installation and activate after health."""
     if (not root.is_absolute() or root.exists() or root.is_symlink()):
         raise VesselInstallError("first vessel installation requires a new absolute root")
     _owner_directory(root.parent)
     manifest = verify_bundle(bundle, trusted_key)
     require_supported_vessel_compatibility(manifest)
+    if core_state.resolve().is_relative_to(root.resolve()):
+        raise VesselInstallError("Core state must be external to installation root")
+    identity = (preflight_vessel_identity(console_config, core_state,
+                                          identity_network)
+                if identity_network is not None else None)
+    if (identity is None and lab_password_file is None) or \
+            (identity is not None and lab_password_file is not None):
+        raise VesselInstallError("select exactly one vessel identity mode")
+    if identity is None and _validate_console_config(console_config,
+                                                     allow_oidc=True) is not None:
+        raise VesselInstallError("lab installation cannot use OIDC Console")
     root.mkdir(mode=0o700)
     services = None
     knowledge = None
@@ -327,17 +394,19 @@ def install_vessel(bundle: Path, trusted_key: Path, crane: Path,
     try:
         identifier, stage = _stage(root, bundle, trusted_key, console_config)
         _write_intent(root, identifier, installation_id, core_state,
-                      lab_password_file)
+                      lab_password_file, identity=identity)
         knowledge = start_signed_knowledge(stage / "bundle", trusted_key, crane,
                                            root, installation_id, initialize=True)
-        _state_options(core_state, lab_password_file, root)
+        _state_options(core_state, lab_password_file, root, identity=identity)
         ingestion = _ingest(stage / "bundle", trusted_key, crane, core_state,
                             root, knowledge)
         services = start_signed_vessel_services(
             stage / "bundle", trusted_key, crane, stage / "console-config.json",
-            core_state, lab_password_file, root, knowledge, installation_id)
+            core_state, lab_password_file, root, knowledge, installation_id,
+            identity=identity)
         payload = _state_payload(identifier, installation_id, core_state,
-                                 lab_password_file, services, knowledge)
+                                 lab_password_file, services, knowledge,
+                                 identity=identity)
         _write_state(root, payload)
         try:
             (root / "vessel-intent.json").unlink(missing_ok=True)
@@ -378,19 +447,24 @@ def _read_state(root: Path) -> dict[str, object]:
         value = json.loads(path.read_bytes(), object_pairs_hook=_unique)
     except (ValueError, UnicodeError) as exc:
         raise VesselInstallError("invalid vessel active state JSON") from exc
+    common = {"schema", "active", "installation_id", "core_state", "runtime"}
+    lab_keys = common | {"lab_password_file"}
+    oidc_keys = common | {"identity"}
+    keys = set(value) if isinstance(value, dict) else set()
     if (not isinstance(value, dict) or
-            set(value) not in (
-                {"schema", "active", "installation_id", "core_state",
-                 "lab_password_file", "runtime"},
-                {"schema", "active", "installation_id", "core_state",
-                 "lab_password_file", "runtime", "previous"}) or
-            type(value["schema"]) is not int or value["schema"] != 1 or
+            keys not in (lab_keys, lab_keys | {"previous"},
+                         oidc_keys, oidc_keys | {"previous"}) or
+            type(value["schema"]) is not int or
+            value["schema"] != (1 if "lab_password_file" in keys else 2) or
             not isinstance(value["active"], str) or
             not _IDENTIFIER.fullmatch(value["active"]) or
             not isinstance(value["installation_id"], str) or
             not _INSTALL.fullmatch(value["installation_id"]) or
             not isinstance(value["core_state"], str) or
-            not isinstance(value["lab_password_file"], str) or
+            not Path(value["core_state"]).is_absolute() or
+            (value["schema"] == 1 and
+             (not isinstance(value["lab_password_file"], str) or
+              not Path(value["lab_password_file"]).is_absolute())) or
             not isinstance(value["runtime"], dict) or
             ("previous" in value and
              (not isinstance(value["previous"], str) or
@@ -400,6 +474,8 @@ def _read_state(root: Path) -> dict[str, object]:
                                       "knowledge_id", "knowledge_run",
                                       "socket_volume", "data_volume"}):
         raise VesselInstallError("invalid vessel active state fields")
+    if value["schema"] == 2:
+        validate_identity_record_shape(value["identity"], Path(value["core_state"]))
     runtime = value["runtime"]
     if (any(not isinstance(runtime[key], str) or not _DOCKER_ID.fullmatch(runtime[key])
             for key in ("network_id", "core_id", "console_id", "knowledge_id")) or
@@ -427,16 +503,15 @@ def status_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, objec
                                       runtime["knowledge_run"],
                                       value["installation_id"])
     services = RuntimeHandle(runtime["network_id"], runtime["core_id"],
-                             runtime["console_id"])
-    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
-    if (state.resolve().is_relative_to(root.resolve()) or
-            password.resolve().is_relative_to(root.resolve())):
-        raise VesselInstallError("Core state and lab credential must be external")
-    _, reader = _state_options(state, password, root)
+                             runtime["console_id"],
+                             value["identity"]["network_id"] if value["schema"] == 2 else None,
+                             value["identity"]["network_name"] if value["schema"] == 2 else None)
+    state, password, identity = _record_inputs(value, root, stage / "console-config.json")
+    _, reader = _state_options(state, password, root, identity=identity)
     probe_knowledge(knowledge)
     _verify_knowledge_schema(knowledge)
     probe_signed_vessel_services(services, knowledge, state, password, reader,
-                                 model_id=_signed_model_id(manifest))
+                                 model_id=_signed_model_id(manifest), identity=identity)
     try:
         console_mounts = json.loads(_docker("inspect", services.console_id,
                                             "--format", "{{json .Mounts}}"))
@@ -535,8 +610,9 @@ def finish_vessel_stop(root: Path, trusted_key: Path, crane: Path) -> dict[str, 
     stage = root / "vessel-releases" / identifier
     _verify_stage(stage, trusted_key, identifier)
     manifest = verify_bundle(stage / "bundle", trusted_key)
-    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
-    _state_options(state, password, root)
+    state, password, identity = _record_inputs(value, root, stage / "console-config.json",
+                                               live_identity=False)
+    _state_options(state, password, root, identity=identity)
     installation_id = value["installation_id"]
     runtime = value["runtime"]
     scope = f"label=sovereign.synthetic.install={installation_id}"
@@ -855,17 +931,15 @@ def resume_first_install(root: Path, trusted_key: Path,
                 recorded["active"] != intent["release"] or
                 recorded["installation_id"] != intent["installation_id"] or
                 recorded["core_state"] != intent["core_state"] or
-                recorded["lab_password_file"] != intent["lab_password_file"] or
+                recorded.get("lab_password_file") != intent.get("lab_password_file") or
+                recorded.get("identity") != intent.get("identity") or
                 recorded["runtime"]["data_volume"] != intent["data_volume"]):
             raise VesselInstallError("active vessel does not match first-install intent")
         (root / "vessel-intent.json").unlink()
         return {"result": "already-activated", "active": intent["release"]}
     stage = _intent_stage(root, trusted_key, intent)
-    state = Path(intent["core_state"])
-    password = Path(intent["lab_password_file"])
-    if (state.resolve().is_relative_to(root.resolve()) or
-            password.resolve().is_relative_to(root.resolve())):
-        raise VesselInstallError("first-install state and credential must be external")
+    state, password, identity = _record_inputs(
+        intent, root, stage / "console-config.json")
     installation_id = intent["installation_id"]
     data_volume = intent["data_volume"]
     scope = f"label=sovereign.synthetic.install={installation_id}"
@@ -893,14 +967,14 @@ def resume_first_install(root: Path, trusted_key: Path,
         knowledge = start_signed_knowledge(stage / "bundle", trusted_key, crane,
                                            root, installation_id,
                                            initialize=initialize)
-        _state_options(state, password, root)
+        _state_options(state, password, root, identity=identity)
         ingestion = _ingest(stage / "bundle", trusted_key, crane, state,
                             root, knowledge)
         services = start_signed_vessel_services(
             stage / "bundle", trusted_key, crane, stage / "console-config.json",
-            state, password, root, knowledge, installation_id)
+            state, password, root, knowledge, installation_id, identity=identity)
         payload = _state_payload(intent["release"], installation_id, state,
-                                 password, services, knowledge)
+                                 password, services, knowledge, identity=identity)
         _write_state(root, payload)
         try:
             (root / "vessel-intent.json").unlink(missing_ok=True)
@@ -928,8 +1002,10 @@ def reconcile_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, in
     value = _read_state(root)
     identifier = value["active"]
     _verify_stage(root / "vessel-releases" / identifier, trusted_key, identifier)
-    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
-    _state_options(state, password, root)
+    state, password, identity = _record_inputs(
+        value, root, root / "vessel-releases" / identifier / "console-config.json",
+        live_identity=False)
+    _state_options(state, password, root, identity=identity)
     installation_id = value["installation_id"]
     runtime = value["runtime"]
     for kind, old_id in (("container", runtime["core_id"]),
@@ -953,7 +1029,9 @@ def stop_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]:
     value = _read_state(root)
     runtime = value["runtime"]
     services = RuntimeHandle(runtime["network_id"], runtime["core_id"],
-                             runtime["console_id"])
+                             runtime["console_id"],
+                             value["identity"]["network_id"] if value["schema"] == 2 else None,
+                             value["identity"]["network_name"] if value["schema"] == 2 else None)
     knowledge = KnowledgeVolumeHandle(runtime["knowledge_id"],
                                       runtime["socket_volume"],
                                       runtime["data_volume"],
@@ -978,11 +1056,8 @@ def recover_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]
     identifier = value["active"]
     stage = root / "vessel-releases" / identifier
     _verify_stage(stage, trusted_key, identifier)
-    state, password = Path(value["core_state"]), Path(value["lab_password_file"])
-    if (state.resolve().is_relative_to(root.resolve()) or
-            password.resolve().is_relative_to(root.resolve())):
-        raise VesselInstallError("Core state and lab credential must be external")
-    _state_options(state, password, root)
+    state, password, identity = _record_inputs(value, root, stage / "console-config.json")
+    _state_options(state, password, root, identity=identity)
     installation_id = value["installation_id"]
     data_volume = value["runtime"]["data_volume"]
     _recovery_inventory(installation_id, value["runtime"])
@@ -995,10 +1070,10 @@ def recover_vessel(root: Path, trusted_key: Path, crane: Path) -> dict[str, str]
         _verify_knowledge_schema(knowledge)
         services = start_signed_vessel_services(
             stage / "bundle", trusted_key, crane, stage / "console-config.json",
-            state, password, root, knowledge, installation_id)
+            state, password, root, knowledge, installation_id, identity=identity)
         payload = _state_payload(identifier, installation_id, state, password,
                                  services, knowledge,
-                                 previous=value.get("previous"))
+                                 previous=value.get("previous"), identity=identity)
         _write_state(root, payload)
         return {"result": "recovered", "active": identifier}
     except Exception as exc:
