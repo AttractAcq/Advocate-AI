@@ -114,7 +114,10 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         engineer = await self.login("engineer")
         deckhand = await self.login("deckhand")
         for question in ("What actions does the HVAC intake procedure require?",
-                         "What should be done for HVAC intake?"):
+                         "What should be done for HVAC intake?",
+                         "Show me the HVAC intake procedure",
+                         "Find the HVAC intake procedure",
+                         "Summarize the HVAC intake procedure"):
             with self.subTest(question=question):
                 reply = await self.client.post("/api/chat", headers=engineer,
                                                json={"message": question, "mode": "documents"})
