@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "answer": "According to the Visitor arrival procedure (Source MAN-001 v1), the following actions are required:\n*   Record the request in the fictional command log.\n*   Obtain the duty officer's approval.\n*   Confirm completion at the next handover.",
+      "answer": "According to the Visitor arrival procedure (Source MAN-001 v1), the following actions are required:\n\n*   Record the request in the fictional command log.\n*   Obtain the duty officer's approval.\n*   Confirm completion at the next handover.",
       "case_id": "P-MAN-001",
       "citations": [
         {
@@ -22,7 +22,7 @@
       "role": "lab-captain-1"
     },
     {
-      "answer": "The HVAC intake procedure requires the following actions:\n1. Open a fictional maintenance ticket.\n2. Isolate the test equipment under the approved lab procedure.\n3. Have the chief engineer review the result.\n\nSource ID: ENG-006 v1",
+      "answer": "The HVAC intake procedure requires the following actions:\n1. Open a fictional maintenance ticket.\n2. Isolate the test equipment under the approved lab procedure.\n3. Have the chief engineer review the result.\n\nSource ID and Version: [Source ENG-006 v1]",
       "case_id": "P-ENG-006",
       "citations": [
         {
@@ -64,7 +64,7 @@
       "role": "lab-captain-1"
     },
     {
-      "answer": "The Line inspection procedure requires the following actions:\n1. Retrieve the fictional deck checklist.\n2. Notify the duty officer of any defects found.\n3. Record completion without changing any live system.\n\nSource ID and Version: [Source DEC-001 v1]",
+      "answer": "The Line inspection procedure requires the following actions:\n1. Retrieve the fictional deck checklist.\n2. Notify the duty officer of any defects found.\n3. Record completion of the inspection without changing any live system.\n\nSource ID and Version: [Source DEC-001 v1]",
       "case_id": "P-DEC-001",
       "citations": [
         {
@@ -107,11 +107,11 @@
   ],
   "model": "qwen3.5:2b",
   "schema": 1,
-  "source_commit": "87709842a0286c437f6c5842665366bc0e59060a",
+  "source_commit": "26bc8d396e5227fcf392551067ffda072c6df83c",
   "summary": {
     "cases": 5,
     "expected_source_citations": 4,
     "no_answer_denials": 1
   },
-  "timestamp_utc": "2026-11-21T22:08:02.544579+00:00"
+  "timestamp_utc": "2026-11-21T22:52:35.249106+00:00"
 }
