@@ -36,6 +36,7 @@ from infrastructure.deploy.vessel_recovery_set import (
 )
 from infrastructure.deploy.vessel_installer import (
     VesselInstallError, _ingest, _release_id, _stage, _write_intent, _write_private_record,
+    _scoped_list,
     finish_vessel_stop, install_vessel,
     reconcile_first_install, reconcile_vessel, recover_vessel,
     reset_first_install, resume_first_install, status_vessel,
@@ -816,6 +817,55 @@ def _rehearse_completed_restore_finish(bundle: Path, trusted: Path,
                 discard_partial_data=True)
 
 
+def _rehearse_post_start_restore_abandon(bundle: Path, trusted: Path,
+                                         crane: Path, root: Path,
+                                         restic: Path,
+                                         restic_sha256: str) -> dict[str, str]:
+    """Simulate process loss after all services pass health, before active write."""
+    recovery = root / "vessel-recovery"
+    install = root / "post-start-recovery-install"
+    state = root / "post-start-recovery-state"
+    receipt = recovery / "receipt.json"
+    receipt_key = recovery / "receipt-public.pem"
+    value = verify_vessel_recovery_receipt(receipt, receipt_key)
+    with patch("infrastructure.deploy.vessel_recovery_set._write_state",
+               side_effect=SystemExit("synthetic post-start process loss")):
+        try:
+            activate_vessel_recovery_set(
+                bundle, trusted, crane, root / "console-config.json",
+                receipt, receipt_key, recovery / "restic-password",
+                restic, restic_sha256, install, state,
+                root / "lab-password", recovery / "staging")
+        except SystemExit as exc:
+            if str(exc) != "synthetic post-start process loss":
+                raise
+        else:
+            raise AssertionError("post-start restore interruption was not triggered")
+    if (install / "vessel-state.json").exists():
+        raise AssertionError("post-start interruption wrote active state")
+    scope = f"label=sovereign.synthetic.install={value['installation_id']}"
+    before = (_scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet"),
+              _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                           "--quiet"),
+              _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                           volume=True))
+    if tuple(map(len, before)) != (3, 1, 2):
+        raise AssertionError("post-start resource inventory is incomplete")
+    abandoned = abandon_incomplete_vessel_restore(
+        install, trusted, receipt, receipt_key, discard_partial_data=True)
+    after = (_scoped_list("ps", "-a", "--no-trunc", "--filter", scope, "--quiet"),
+             _scoped_list("network", "ls", "--no-trunc", "--filter", scope,
+                          "--quiet"),
+             _scoped_list("volume", "ls", "--filter", scope, "--quiet",
+                          volume=True))
+    if (abandoned["result"] != "abandoned" or any(after) or
+            not (install / "vessel-restore-abandoned.json").is_file() or
+            not state.is_dir()):
+        raise AssertionError("post-start restore cleanup was not complete")
+    return {"result": "pass", "orphan_runtime": "checked-and-discarded",
+            "evidence": "retained"}
+
+
 def _rehearse_first_install_resume(bundle: Path, trusted: Path, crane: Path,
                                     root: Path) -> dict[str, str]:
     """Simulate process loss before first activation and resume from intent."""
@@ -1160,6 +1210,9 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         bundle, trusted, crane, root, restic, restic_sha256)
                 result["completed_restore_finish"] = \
                     _rehearse_completed_restore_finish(
+                        bundle, trusted, crane, root, restic, restic_sha256)
+                result["post_start_restore_abandon"] = \
+                    _rehearse_post_start_restore_abandon(
                         bundle, trusted, crane, root, restic, restic_sha256)
                 result["interrupted_first_install"] = \
                     _rehearse_first_install_resume(bundle, trusted, crane, root)
