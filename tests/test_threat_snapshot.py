@@ -71,6 +71,17 @@ class ThreatSnapshotTests(unittest.TestCase):
         import_package(second, self.store, trusted_key(self.public), now=self.now)
         self.assertEqual(reader.status(now=self.now)["status"], "current")
 
+    def test_newer_package_cannot_silently_change_publisher(self) -> None:
+        first = self.package(self.payload(issued=self.now - timedelta(hours=2)), "publisher-first")
+        imported = import_package(first, self.store, trusted_key(self.public), now=self.now)
+        changed = self.payload(issued=self.now - timedelta(hours=1))
+        changed["publisher"] = "other-lab"
+        second = self.package(changed, "publisher-changed")
+        with self.assertRaisesRegex(ThreatSnapshotError, "provenance change"):
+            import_package(second, self.store, trusted_key(self.public), now=self.now)
+        self.assertEqual(ThreatSnapshotReader(self.store, self.public).status(now=self.now)["sha256"],
+                         imported["sha256"])
+
     def test_tamper_duplicate_invalid_and_linked_input_fail_closed(self) -> None:
         original = self.package(self.payload(), "original")
         import_package(original, self.store, trusted_key(self.public), now=self.now)
