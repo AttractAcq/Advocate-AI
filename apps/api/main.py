@@ -458,17 +458,20 @@ def create_app(settings: Settings | None = None, model: LocalModel | None = None
 
     @app.get("/api/security/incidents")
     def security_list(since: datetime | None = None, until: datetime | None = None,
-                      _: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
+                      identity: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
         incidents = security_incidents(since=since, until=until)
-        return {"incidents": [{"incident_id": item["incident_id"], "summary": item["summary"],
-                               "severity": item["event"]["severity"], "timestamp": item["event"]["timestamp"]}
-                              for item in incidents], "source": "Wazuh indexer" if wazuh else "synthetic fixture"}
+        result = {"incidents": [{"incident_id": item["incident_id"], "summary": item["summary"],
+                                 "severity": item["event"]["severity"], "timestamp": item["event"]["timestamp"]}
+                                for item in incidents], "source": "Wazuh indexer" if wazuh else "synthetic fixture"}
+        revalidate_identity(identity)
+        return result
 
     @app.get("/api/security/incidents/{incident_id}")
     def security_detail(incident_id: str,
-                        _: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
+                        identity: tuple[str, dict[str, str]] = Depends(security_identity)) -> dict[str, object]:
         for item in security_incidents(incident_id=incident_id):
             if item["incident_id"] == incident_id:
+                revalidate_identity(identity)
                 return item
         raise HTTPException(status.HTTP_404_NOT_FOUND, "incident not found")
 
