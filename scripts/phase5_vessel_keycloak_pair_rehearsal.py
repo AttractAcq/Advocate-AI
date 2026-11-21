@@ -120,9 +120,9 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
         volumes.add(runtime["data_volume"])
         core = runtime["core_id"]
         engineer = _flow(core, password, "engineer", "chief_engineer",
-                         ca_path="/state/oidc-ca.pem")
+                         ca_path="/var/lib/sovereign/oidc-ca.pem")
         deckhand = _flow(core, password, "deckhand", "deckhand",
-                         ca_path="/state/oidc-ca.pem")
+                         ca_path="/var/lib/sovereign/oidc-ca.pem")
         engineer_sources = _api(core, "/api/sources", engineer)
         deck_sources = _api(core, "/api/sources", deckhand)
         if (engineer_sources[0] != 200 or deck_sources[0] != 200 or
@@ -202,9 +202,9 @@ def rehearse(bundle: Path, trusted: Path, crane: Path, root: Path,
                 _api(restored_core, "/api/me", engineer)[0] != 401):
             raise AssertionError("paired restore lost valid token revocation")
         fresh = _flow(restored_core, password, "engineer", "chief_engineer",
-                      ca_path="/state/oidc-ca.pem")
+                      ca_path="/var/lib/sovereign/oidc-ca.pem")
         fresh_deck = _flow(restored_core, password, "deckhand", "deckhand",
-                           ca_path="/state/oidc-ca.pem")
+                           ca_path="/var/lib/sovereign/oidc-ca.pem")
         if (_api(restored_core, "/api/me", fresh) !=
                 (200, {"id": "engineer", "role": "chief_engineer"}) or
                 "ENG-001" in {row["document_id"] for row in
