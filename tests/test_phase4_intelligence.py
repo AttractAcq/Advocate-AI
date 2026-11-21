@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import ssl
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import tempfile
+from threading import Thread
 import unittest
 from unittest.mock import patch
 
@@ -48,6 +51,67 @@ class FakeModel:
 
 
 class IntelligenceTests(unittest.TestCase):
+    def test_wazuh_ca_snapshot_works_over_real_loopback_tls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,
+                                                "Synthetic loopback indexer")])
+            certificate = (x509.CertificateBuilder().subject_name(name)
+                           .issuer_name(name).public_key(key.public_key())
+                           .serial_number(x509.random_serial_number())
+                           .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+                           .not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+                           .add_extension(x509.BasicConstraints(ca=True, path_length=None),
+                                          critical=True)
+                           .add_extension(x509.SubjectAlternativeName([
+                               x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+                               critical=False).sign(key, hashes.SHA256()))
+            ca = root / "indexer-ca.pem"
+            ca.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+            ca.chmod(0o600)
+            private_key = root / "indexer-key.pem"
+            private_key.write_bytes(key.private_bytes(
+                serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption()))
+            private_key.chmod(0o600)
+
+            class SyntheticIndexer(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    self.rfile.read(int(self.headers["Content-Length"]))
+                    response = ALERTS.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(response)))
+                    self.end_headers()
+                    self.wfile.write(response)
+
+                def log_message(self, format, *args):
+                    pass
+
+            try:
+                server = HTTPServer(("127.0.0.1", 0), SyntheticIndexer)
+            except PermissionError:
+                self.skipTest("loopback bind unavailable in the local sandbox")
+            server_tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            server_tls.load_cert_chain(ca, private_key)
+            server.socket = server_tls.wrap_socket(server.socket, server_side=True)
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                endpoint = f"https://127.0.0.1:{server.server_port}"
+                reader = WazuhIndexerReader(endpoint, "synthetic-read-token", ca_bundle=ca)
+                self.assertEqual(len(reader.alerts(limit=3)), 3)
+                ca.unlink()
+                ca.symlink_to(root / "missing-ca.pem")
+                self.assertEqual(len(reader.alerts(limit=3)), 3)
+                with self.assertRaises(ValueError):
+                    WazuhIndexerReader(endpoint, "synthetic-read-token", ca_bundle=ca)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_wazuh_ca_is_private_and_snapshotted_before_request(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
