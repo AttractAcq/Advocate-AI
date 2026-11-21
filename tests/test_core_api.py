@@ -403,6 +403,21 @@ class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ModelUnavailable, "truncated"):
             await model.complete("Explain hashes", [], general=True)
 
+    async def test_oversized_model_response_and_answer_are_rejected(self) -> None:
+        oversized = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(
+                200, content=b"{" + b" " * (64 * 1024))))
+        with self.assertRaisesRegex(ModelUnavailable, "response is too large"):
+            await oversized.complete("Explain hashes", [], general=True)
+        long_answer = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
+                "choices": [{"message": {"content": "x" * 8001},
+                             "finish_reason": "stop"}]})))
+        with self.assertRaisesRegex(ModelUnavailable, "answer is too long"):
+            await long_answer.complete("Explain hashes", [], general=True)
+
     async def test_timeout_is_distinct(self) -> None:
         def timeout(_: httpx.Request) -> httpx.Response:
             raise httpx.ReadTimeout("synthetic timeout")
