@@ -13,6 +13,12 @@ archive. Both binaries must match approved SHA-256 values supplied from a
 controlled release record. The adapter disables Syft's update check and gives
 neither tool a registry source.
 
+The adapter compares the archive SHA-256 before and after crane validation,
+then checks it again after Syft cataloging before writing the SBOM. A changed
+archive is rejected. The Trivy adapter likewise checks its archive and
+database hashes after scanning. These comparisons detect a changed artifact
+between the recorded stages; release media custody remains a separate control.
+
 For an already saved, approved local image archive:
 
 ```sh
