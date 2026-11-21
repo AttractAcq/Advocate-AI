@@ -86,4 +86,8 @@ The separate general-chat instruction no longer implies that a source was
 retrieved. A live local Core probe returned an uncited general answer; this
 checks routing and completion, not the factual quality of general answers.
 The model adapter now rejects an answer when the inference API reports
-`finish_reason=length`, so a cut-off response is not shown as complete.
+`finish_reason=length`, so a cut-off response is not shown as complete. It also
+streams at most 64 KiB of completion JSON and rejects answers over 8,000
+characters instead of silently slicing them. A live local Qwen request and
+focused oversized-response tests exercise this boundary; they do not measure
+answer quality on vessel material.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import ipaddress
+import json
 from urllib.parse import urlsplit
 
 import httpx
@@ -15,6 +16,10 @@ class ModelUnavailable(Exception):
 
 class ModelTimeout(ModelUnavailable):
     pass
+
+
+MAX_COMPLETION_RESPONSE_BYTES = 64 * 1024
+MAX_ANSWER_CHARS = 8000
 
 
 def validate_local_endpoint(endpoint: str) -> str:
@@ -99,9 +104,15 @@ class LocalModel:
         }
         try:
             async with httpx.AsyncClient(timeout=self.timeout, trust_env=False, transport=self.transport) as client:
-                response = await client.post(f"{self.endpoint}/chat/completions", json=payload)
-                response.raise_for_status()
-                choice = response.json()["choices"][0]
+                async with client.stream("POST", f"{self.endpoint}/chat/completions",
+                                         json=payload) as response:
+                    response.raise_for_status()
+                    raw = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        raw.extend(chunk)
+                        if len(raw) > MAX_COMPLETION_RESPONSE_BYTES:
+                            raise ModelUnavailable("local inference response is too large")
+                choice = json.loads(raw)["choices"][0]
                 answer = choice["message"]["content"]
                 if choice.get("finish_reason") == "length":
                     raise ModelUnavailable("local inference output was truncated")
@@ -111,4 +122,7 @@ class LocalModel:
             raise ModelUnavailable("local inference unavailable") from exc
         if not isinstance(answer, str) or not answer.strip():
             raise ModelUnavailable("local inference returned no answer")
-        return answer.strip()[:8000]
+        answer = answer.strip()
+        if len(answer) > MAX_ANSWER_CHARS:
+            raise ModelUnavailable("local inference answer is too long")
+        return answer
