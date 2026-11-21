@@ -769,6 +769,21 @@ def _rehearse_completed_restore_finish(bundle: Path, trusted: Path,
         if ((install / "vessel-state.json").exists() or
                 not (install / "vessel-restore-intent.json").is_file()):
             raise AssertionError("interrupted restore has unexpected active state")
+        with tempfile.TemporaryDirectory(prefix=".synthetic-finish-inspect-",
+                                         dir=recovery / "staging") as temporary:
+            comparison = Path(temporary) / "restored"
+            restore_vessel_recovery_files(
+                receipt, receipt_key, recovery / "restic-password",
+                restic, restic_sha256, comparison)
+            expected = {item.relative_to(comparison).as_posix()
+                        for item in comparison.rglob("*")
+                        if item.relative_to(comparison).as_posix() != "postgres.dump"}
+            actual = {item.relative_to(state).as_posix() for item in state.rglob("*")}
+            if expected != actual:
+                print("synthetic partial Core inventory difference:",
+                      {"only_state": sorted(actual - expected)[:12],
+                       "only_snapshot": sorted(expected - actual)[:12]},
+                      flush=True)
         policy = state / "roles.json"
         original = policy.read_bytes()
         policy.write_bytes(original + b"\n")
