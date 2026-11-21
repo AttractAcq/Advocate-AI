@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -15,11 +16,15 @@ import time
 import uuid
 from urllib.request import Request, urlopen
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG
 from scripts.phase3_vessel_keycloak_rehearsal import ISSUER, _realm, _run, _verify_base64_mitigation
 from scripts.phase8_fleet_keycloak_rehearsal import _totp
 from scripts.phase8_fleet_browser_rehearsal import certificate, driver_request, until
 from scripts.phase8_fleet_oidc_rehearsal import IDENTITY_HOST, _identity_material
+from services.intelligence.threat_snapshot import import_package, sign_payload, trusted_key
 
 
 CONSOLE_HOST = "vessel.example.invalid"
@@ -148,9 +153,32 @@ def _browser(password: str, chromedriver: str, *, mfa: bool = False) -> dict[str
             return {"browser_flow": "keycloak-console-mfa-enrolled-and-authorized",
                     "invalid_otp": "denied", "api_role": "chief_engineer",
                     "callback_state": "cleared", "source_scope": "engineering-only"}
+        driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+            [...document.querySelectorAll('button')]
+              .find(button => button.textContent.includes('Continue to local sign-in')).click();
+        """, "args": []})
+        until(session, "location.hostname === 'identity.fleet' && !!document.querySelector('form#kc-form-login input[name=username]')", 45)
+        driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+            document.querySelector('input[name=username]').value = arguments[0];
+            document.querySelector('input[name=password]').value = arguments[1];
+            document.querySelector('form#kc-form-login').requestSubmit();
+        """, "args": ["lab-avit_admin-1", password]})
+        until(session, "location.hostname === 'vessel.example.invalid' && document.body.textContent.includes('AV/IT Administrator workspace')", 45)
+        driver_request("POST", f"/session/{session}/execute/sync", {"script": """
+            [...document.querySelectorAll('nav[aria-label="Workspace"] button')]
+              .find(button => button.textContent === 'Security').click();
+        """, "args": []})
+        until(session, "document.body.textContent.includes('Offline threat intelligence: stale')", 30)
+        assert driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": "return document.body.textContent.includes('synthetic-feed') && document.body.textContent.includes('Offline threat intelligence is stale')",
+            "args": []}), "Console did not show signed feed provenance and stale warning"
+        assert not driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": "return document.body.textContent.includes('203.0.113.7')",
+            "args": []}), "Console exposed threat indicator value"
         return {"browser_flow": "keycloak-console-pkce-sign-in-and-sign-out",
                 "callback_state": "cleared", "source_scope": "engineering-only",
-                "lab_password_input": "absent"}
+                "lab_password_input": "absent",
+                "threat_snapshot": "stale-warning-withheld-values"}
     finally:
         if session:
             try:
@@ -183,7 +211,16 @@ def rehearse(chromedriver: str, *, mfa: bool = False) -> dict[str, str]:
         password = "synthetic-" + uuid.uuid4().hex
         realm = root / "realm"
         realm.mkdir(mode=0o755)
-        (realm / "sovereign-realm.json").write_text(json.dumps(_realm(password, mfa)))
+        realm_payload = _realm(password, mfa)
+        realm_payload["roles"]["realm"].append({"name": "avit_admin"})
+        realm_payload["users"].append({
+            "username": "lab-avit_admin-1", "enabled": True, "emailVerified": True,
+            "email": "lab-avit_admin-1@synthetic.example.invalid",
+            "firstName": "Synthetic", "lastName": "AVIT", "requiredActions": [],
+            "realmRoles": ["avit_admin"],
+            "credentials": [{"type": "password", "value": password, "temporary": False}],
+        })
+        (realm / "sovereign-realm.json").write_text(json.dumps(realm_payload))
         (realm / "sovereign-realm.json").chmod(0o644)
         state = root / "state"
         shutil.copytree("fixtures", state)
@@ -193,6 +230,28 @@ def rehearse(chromedriver: str, *, mfa: bool = False) -> dict[str, str]:
         (state / "ca.pem").chmod(0o600)
         (state / "revoked.jsonl").write_bytes(b"")
         (state / "revoked.jsonl").chmod(0o600)
+        threat_store = state / "threat-intel"
+        threat_store.mkdir(mode=0o700)
+        signer = Ed25519PrivateKey.generate()
+        signing_key = root / "threat-signer.pem"
+        signing_key.write_bytes(signer.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption()))
+        signing_key.chmod(0o600)
+        trusted = threat_store / "trusted.pem"
+        trusted.write_bytes(signer.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+        issued = datetime.now(timezone.utc) - timedelta(days=8)
+        payload = root / "threat-payload.json"
+        payload.write_text(json.dumps({
+            "schema": 1, "feed_id": "synthetic-feed", "publisher": "synthetic-lab",
+            "issued_at": issued.isoformat(),
+            "expires_at": (issued + timedelta(days=14)).isoformat(),
+            "indicators": [{"id": "fictional-1", "kind": "ipv4", "value": "203.0.113.7"}],
+        }))
+        package = root / "threat-package.json"
+        sign_payload(payload, signing_key, package)
+        import_package(package, threat_store, trusted_key(trusted))
         config = root / "console-config.json"
         config.write_text(json.dumps({"schema": 1, "oidc_issuer": ISSUER}))
         config.chmod(0o644)
@@ -228,6 +287,8 @@ def rehearse(chromedriver: str, *, mfa: bool = False) -> dict[str, str]:
                  "-e", "SOVEREIGN_OIDC_ISSUER=" + ISSUER,
                  "-e", "SOVEREIGN_OIDC_CA_FILE=/state/ca.pem",
                  "-e", "SOVEREIGN_OIDC_REVOCATIONS=/state/revoked.jsonl",
+                 "-e", "SOVEREIGN_THREAT_SNAPSHOT_STORE=/state/threat-intel",
+                 "-e", "SOVEREIGN_THREAT_SNAPSHOT_KEY=/state/threat-intel/trusted.pem",
                  "sovereign-core:synthetic")
             _run("docker", "network", "connect", identity_network, core)
             _run("docker", "run", "-d", "--name", console,
