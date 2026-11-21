@@ -35,6 +35,15 @@ not a review sign-off. The main paths are:
 | Wazuh evidence and AV/IT scope | [PR #217](https://github.com/AttractAcq/Advocate-AI/pull/217) through [PR #220](https://github.com/AttractAcq/Advocate-AI/pull/220), [PR #222](https://github.com/AttractAcq/Advocate-AI/pull/222), `services/connectors/wazuh.py`, `services/intelligence/`, `apps/api/main.py`, [Phase 4 gate](../phase-4/gate.md) | Snapshotted CA trust, bounded same-source evidence, exact citations, model claim fallback, and token revocation during incident reads; live collection and analyst review remain separate |
 | Archive identity through release evidence | [PR #225](https://github.com/AttractAcq/Advocate-AI/pull/225), [PR #228](https://github.com/AttractAcq/Advocate-AI/pull/228), [PR #229](https://github.com/AttractAcq/Advocate-AI/pull/229), `infrastructure/release/upstream.py`, `infrastructure/release/scan.py`, [tooling record](../phase-5/upstream-release-tools.md) | Archive hash checked around crane validation and after Syft cataloging; Trivy raw output isolated in a private temporary directory, final evidence files created exclusively, and generated JSON bounded to the intake limit with duplicate-key rejection; same archive, digest and scan evidence signed into the candidate; approved binary/database provenance and media custody remain open |
 
+The exact-head [PR #227](https://github.com/AttractAcq/Advocate-AI/actions/runs/44934518565),
+[PR #228](https://github.com/AttractAcq/Advocate-AI/actions/runs/44935262125)
+and [PR #229](https://github.com/AttractAcq/Advocate-AI/actions/runs/44936010096)
+CI runs each passed 13 jobs. Their downloaded three-image `result.json` SHA-256
+values are recorded in W-188–W-190 of the blocker index. Each reports a
+signed and verified synthetic bundle, passing OIDC and real Keycloak paired
+recovery, and zero unresolved Core, Console and Knowledge image findings.
+These results do not establish production image approval or independent review.
+
 ## Claims to verify
 
 1. A switch starts only from a signed, stopped installation with the expected
