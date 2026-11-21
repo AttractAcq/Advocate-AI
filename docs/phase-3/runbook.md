@@ -60,7 +60,8 @@ or credential should be placed in this lab.
    not a substitute for target NAS identity and ACL qualification.
 
 4. Prepare and start synthetic Keycloak on loopback. The script creates random
-   test passwords in ignored runtime files; it does not print them:
+   test passwords and an empty private logout revocation log in ignored runtime
+   files; it does not print the passwords:
 
    ```sh
    .venv/bin/python -m scripts.phase3_identity prepare
@@ -79,6 +80,9 @@ or credential should be placed in this lab.
    The `start-dev` mode and direct password grant in
    this lab realm are test-only. Production identity needs TLS, persistent
    storage, MFA, service identities and a reviewed admin process.
+   If a previously prepared lab is missing its revocation log, preparation
+   refuses the partial state. Inspect the lab files before rebuilding the
+   fictional realm; Core denies OIDC tokens while the log is absent.
 
 5. Start Core and Console with the Phase 3 index and local identity:
 
