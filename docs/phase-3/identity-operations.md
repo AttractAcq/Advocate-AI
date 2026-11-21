@@ -21,8 +21,9 @@ administrative role; evaluate WebAuthn or local TOTP against the vessel's
 offline device and recovery constraints. Disable password grant, self-service
 registration and unreviewed role assignment in the deployed realm. Keep
 Keycloak storage, signing keys and local TLS under the deployment's protected
-backup and recovery process. The synthetic realm intentionally keeps direct
-password grant for scripted tests; it must not be copied into production.
+backup and recovery process. The synthetic realm uses browser authorization
+code plus PKCE and disables direct password grants; its fictional users and
+development-mode server configuration must not be copied into production.
 
 Core can now be configured with `SOVEREIGN_OIDC_ISSUER` and a private
 `SOVEREIGN_OIDC_CA_FILE` for a DNS-named HTTPS Keycloak realm on port 443. The
@@ -33,8 +34,10 @@ issuer, or a CA file paired with lab HTTP is refused at startup. The existing
 loopback HTTP realm remains available for fictional lab tests. Token validation
 still requires the Core audience, Console client, current local role and
 active user. The signed vessel installer now checks an owner-only Core-state
-CA file, mounts it read-only into Core, and verifies the configured Keycloak
-JWKS through that CA before OIDC activation. The synthetic signed-image
+CA file, mounts the protected Core state read-write into Core for audit,
+history and revocation persistence, and verifies the
+configured Keycloak JWKS through that CA before OIDC activation. The
+synthetic signed-image
 rehearsals cover fictional TLS JWKS and a pinned local Keycloak. The installer
 does not provision Keycloak, a production TLS ingress, MFA enrollment,
 persistent identity storage or certificate renewal. Those need a reviewed
