@@ -47,8 +47,9 @@ now captures the database with its manifest, policy and source bytes and
 checks a clean restore. An [actual Core image rehearsal](../phase-5/pgvector-core-socket-runtime.md)
 connects to a networkless pgvector container over a private Unix socket. This
 is a software candidate, not the Phase 3 target
-gate. PostgreSQL is not yet included in the signed vessel runtime or
-coordinated full-stack recovery set. Index ownership, database credentials,
+gate. Later [signed vessel installation](../phase-5/signed-vessel-first-install.md)
+and the [coordinated recovery set](../phase-5/vessel-recovery-set.md) now include
+PostgreSQL and pgvector in synthetic actual-image rehearsals. Index ownership, database credentials,
 extension migration, target backup and restore, failure handling, target network isolation, NAS access propagation,
 semantic quality and independent security review remain open. The current
 vector query uses exact pgvector cosine ranking on policy-filtered candidate

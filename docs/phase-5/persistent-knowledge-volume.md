@@ -21,9 +21,11 @@ the same signed image and data volume with a new socket, and confirms the
 marker and vector extension remain. It then removes the disposable data
 volume. The metadata-only result records `persistent_knowledge_restart=pass`.
 
-This is a lab building block. The product installer still needs to record the
-Knowledge container and data volume, attach the socket and reader passfile to
-Core, run migrations and ingestion with a separate authority, and coordinate
-database snapshots and clean restore with the existing recovery receipt.
-Credential rotation, volume encryption, host boot recovery, target-host
-capacity and independent review remain open.
+This page records the earlier persistent-volume building block. The later
+[signed vessel installer](signed-vessel-first-install.md) records the Knowledge
+container and volume, mounts the private socket and reader passfile into Core,
+and uses separate migration and ingestion credentials. The
+[coordinated recovery set](vessel-recovery-set.md) captures and clean-restores
+the database with Core state in the synthetic actual-image rehearsal.
+Credential rotation, volume encryption, target-host boot and capacity checks,
+and independent review remain open.

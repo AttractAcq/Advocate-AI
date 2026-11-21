@@ -1,5 +1,10 @@
 # Signed three-image runtime with persistent Knowledge
 
+This page records the earlier schema-6 runtime candidate. The later
+[first-install path](signed-vessel-first-install.md) and
+[signed model artifact](model-artifact-bundle.md) extend it; use those records
+for the current synthetic installation contract.
+
 The vessel runtime candidate starts Core and Console only from their archives
 in a verified schema-6 vessel bundle. It requires a running Knowledge handle
 created from the same signed bundle. Knowledge keeps its database on a labelled
@@ -19,8 +24,9 @@ ingestion passfile, stops and restarts the signed Knowledge container, then
 starts Core and Console against the restarted database. It records the live
 result in the metadata-only three-image evidence artifact.
 
-The product installer has not yet adopted this runtime. It still needs an
-atomic active-release record covering all three containers and both volumes,
-safe update and rollback behavior, separate migration authority, and a
-coordinated encrypted PostgreSQL recovery set. Target-host boot, encryption,
-licensing and independent review also remain open.
+The product installer now records all three containers and the labelled
+Knowledge and socket volumes in its active state. It uses separate migration
+and ingestion authority; [stopped release switching](vessel-release-switch.md)
+and a [coordinated encrypted recovery set](vessel-recovery-set.md) have synthetic
+actual-image rehearsals. Target-host boot, storage encryption, approved model
+and identity provisioning, licensing and independent review remain open.
