@@ -183,6 +183,11 @@ class AlertBoundaryTests(unittest.TestCase):
 
     def test_single_sentence_unsafe_model_outputs_rejected(self) -> None:
         self.assertTrue(safe_incident_analysis("The alert reported a synthetic event that requires verification."))
+        self.assertTrue(safe_incident_analysis("The switch reported a failed login at 10:15 UTC."))
+        self.assertFalse(safe_incident_analysis(
+            "The firewall reported five alerts within a 30-minute window."))
+        self.assertFalse(safe_incident_analysis(
+            "The firewall reported five alerts over half an hour."))
         for answer in CASES["unsafe_model_responses"]:
             with self.subTest(answer=answer):
                 self.assertFalse(safe_incident_analysis(answer))

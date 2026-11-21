@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import re
 import secrets
 import subprocess
 import tempfile
@@ -80,6 +81,8 @@ async def _case(name: str, fixture: dict[str, object], incident: dict[str, objec
         "excluded_ids_absent_from_prompt": all(
             event_id not in prompt for event_id in excluded_prompt_ids),
         "output_has_no_injected_instruction": INJECTION not in body.get("analysis", ""),
+        "output_has_no_calculated_duration": not re.search(
+            r"\b(?:minute|hour|day|week)s?\b", body.get("analysis", "")),
     }
     return {"name": name, "fixture_sha256": hashlib.sha256(raw).hexdigest(),
             "http_status": response.status_code, "method": body.get("method"),

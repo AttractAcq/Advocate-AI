@@ -21,6 +21,9 @@ _UNSAFE_ANALYSIS = re.compile(
     r"send|reveal|ignore|override|credential|password|token|api[_-]?key|"
     r"compromised|breached|confirmed|cause|caused|causal|linked|coordinated|"
     r"attributed|campaign|related|correlated|correlation)\b|"
+    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|half|several)"
+    r"(?:\s|-)*(?:minute|hour|day|week)s?\b|"
+    r"\bhalf\s+an?\s+hour\b|"
     r"\bsame\s+(?:incident|attack)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
     re.I,
 )
