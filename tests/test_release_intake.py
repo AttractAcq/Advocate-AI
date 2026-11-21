@@ -9,9 +9,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from infrastructure.release.intake import IntakeError, verify_intake
+from infrastructure.release.intake import IntakeError, MAX_EVIDENCE_BYTES, verify_intake
 from infrastructure.release.scan import generate_archive_scan
-from infrastructure.release.upstream import (UpstreamError, generate_resolved_sbom,
+from infrastructure.release.upstream import (UpstreamError, _read_generated_json,
+                                             _write_new_json, generate_resolved_sbom,
                                              validate_image_archive)
 
 
@@ -27,6 +28,24 @@ class ArchiveStabilityTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.archive = self.root / "image.tar"
         self.archive.write_bytes(b"original synthetic archive")
+
+    def test_generated_evidence_rejects_oversize_duplicate_keys_and_links(self) -> None:
+        raw = self.root / "raw.json"
+        with raw.open("wb") as stream:
+            stream.seek(MAX_EVIDENCE_BYTES)
+            stream.write(b"x")
+        with self.assertRaisesRegex(UpstreamError, "exceeds size limit"):
+            _read_generated_json(raw)
+        raw.write_bytes(b'{"version":1,"version":2}')
+        with self.assertRaisesRegex(UpstreamError, "duplicate generated evidence key"):
+            _read_generated_json(raw)
+        linked = self.root / "linked.json"
+        linked.symlink_to(raw)
+        with self.assertRaises(OSError):
+            _read_generated_json(linked)
+        with self.assertRaisesRegex(UpstreamError, "exceeds size limit"):
+            _write_new_json(self.root / "evidence.json", {"blob": "x" * MAX_EVIDENCE_BYTES})
+        self.assertFalse((self.root / "evidence.json").exists())
 
     def test_crane_validation_rejects_archive_changed_during_digest_read(self) -> None:
         def run(argv, **kwargs):

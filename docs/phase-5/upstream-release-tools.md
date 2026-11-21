@@ -23,6 +23,9 @@ scan and SBOM files are created exclusively without following a replaced
 output path, with private permissions; their returned hashes cover the bytes
 written. Local regressions insert links during both tool runs and verify that
 an unrelated file is not overwritten.
+Generated raw JSON is read only from regular files without following links,
+with the same 20 MiB limit as release intake. Duplicate JSON keys and a final
+annotated report above that limit are rejected before evidence publication.
 
 For an already saved, approved local image archive:
 
