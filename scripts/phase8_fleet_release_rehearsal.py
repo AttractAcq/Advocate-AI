@@ -364,9 +364,12 @@ def main() -> None:
                             type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache"}
                             else str)
     args = parser.parse_args()
-    print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
-                             args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache), sort_keys=True))
+    result = rehearse(args.output, args.crane, args.crane_sha256,
+                      args.syft, args.syft_sha256, args.trivy,
+                      args.trivy_sha256, args.trivy_cache)
+    print(json.dumps(result, sort_keys=True))
+    if result.get("fleet_bundle") != "verified":
+        parser.exit(1, "Fleet image release: signed Fleet rehearsal was not run\n")
 
 
 if __name__ == "__main__":
