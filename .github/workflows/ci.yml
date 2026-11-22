@@ -335,13 +335,22 @@ jobs:
           set -euo pipefail
           driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
           test -n "$driver"
-          .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --chromedriver "$driver"
+          .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --chromedriver "$driver" \
+            --screenshot-output "$RUNNER_TEMP/fleet-mobile.png"
       - name: Require and exercise Fleet OTP in Chrome
         run: |
           set -euo pipefail
           driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
           test -n "$driver"
           .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --mfa --chromedriver "$driver"
+      - name: Retain synthetic Fleet mobile screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-fleet-mobile-review
+          path: ${{ runner.temp }}/fleet-mobile.png
+          if-no-files-found: ignore
+          retention-days: 30
 
   vessel-keycloak-browser-integration:
     if: github.event_name == 'pull_request'

@@ -385,7 +385,8 @@ def _totp(secret: str, offset: int = 0, at: float | None = None) -> str:
     return f"{number % 1_000_000:06d}"
 
 
-def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[str, str]:
+def browser_flow(password: str, chromedriver: str, mfa: bool = False,
+                 screenshot_output: Path | None = None) -> dict[str, str]:
     driver = subprocess.Popen([chromedriver, "--port=9515", "--allowed-ips=127.0.0.1"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     session = None
@@ -460,6 +461,15 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
         assert (mobile["narrow"] and mobile["visible"] and mobile["inWidth"] and
                 mobile["pageFits"] and mobile["width"] >= 44 and
                 mobile["height"] >= 44), f"mobile sign-out is unreachable: {mobile}"
+        if screenshot_output is not None:
+            encoded = driver_request("GET", f"/session/{session}/screenshot")
+            if not isinstance(encoded, str) or len(encoded) > 14_000_000:
+                raise AssertionError("Fleet mobile screenshot is missing or oversized")
+            screenshot = base64.b64decode(encoded, validate=True)
+            if not screenshot.startswith(b"\x89PNG\r\n\x1a\n") or len(screenshot) > 10_000_000:
+                raise AssertionError("Fleet mobile screenshot is not a bounded PNG")
+            with screenshot_output.open("xb") as stream:
+                stream.write(screenshot)
         driver_request("POST", f"/session/{session}/execute/sync", {
             "script": "document.querySelector('.sidebar nav button:last-of-type').focus()",
             "args": []})
@@ -536,9 +546,12 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
 
 
 def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
-             mfa: bool = False, recovery: bool = False) -> dict[str, str]:
+             mfa: bool = False, recovery: bool = False,
+             screenshot_output: Path | None = None) -> dict[str, str]:
     if mfa and not browser:
         raise ValueError("MFA rehearsal requires the browser")
+    if screenshot_output is not None and not browser:
+        raise ValueError("Fleet screenshot requires the browser")
     if recovery and (mfa or browser):
         raise ValueError("clean recovery uses the non-browser fictional realm")
     image = json.loads(Path("infrastructure/lab/container-image.json").read_text())
@@ -722,7 +735,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                         time.sleep(0.2)
                 else:
                     raise RuntimeError(f"Fleet HTTPS bridge did not become ready: {last_error}")
-                outcome.update(browser_flow(password, chromedriver, mfa))
+                outcome.update(browser_flow(password, chromedriver, mfa,
+                                            screenshot_output))
             return outcome
         finally:
             if proxy:
@@ -746,6 +760,8 @@ if __name__ == "__main__":
     parser.add_argument("--mfa", action="store_true")
     parser.add_argument("--recovery", action="store_true")
     parser.add_argument("--chromedriver", default=os.environ.get("CHROMEDRIVER", "chromedriver"))
+    parser.add_argument("--screenshot-output", type=Path)
     arguments = parser.parse_args()
     print(json.dumps(rehearse(arguments.browser, arguments.chromedriver,
-                             arguments.mfa, arguments.recovery), sort_keys=True))
+                             arguments.mfa, arguments.recovery,
+                             arguments.screenshot_output), sort_keys=True))
