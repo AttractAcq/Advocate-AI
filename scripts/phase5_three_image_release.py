@@ -1173,6 +1173,19 @@ def rehearse(output: Path, crane: Path, crane_sha256: str, syft: Path,
                         == _image_id(bundle, "core", verified["images"]["core"], crane)):
                     raise AssertionError("signed Core image identity did not change")
                 result["bundle_manifest_sha256"] = _sha256(bundle / "release-manifest.json")
+                result["updated_bundle_manifest_sha256"] = _sha256(
+                    update_bundle / "release-manifest.json")
+                result["synthetic_public_key_sha256"] = _sha256(trusted)
+                # Retain only public controls. Image archives and the trial private
+                # key stay out of the downloadable CI artifact.
+                proof = output / "signed-manifests"
+                proof.mkdir()
+                shutil.copyfile(trusted, proof / "synthetic-trusted.pem")
+                for label, source in (("initial", bundle), ("updated", update_bundle)):
+                    destination = proof / label
+                    destination.mkdir()
+                    for name in ("release-manifest.json", "release-manifest.sig"):
+                        shutil.copyfile(source / name, destination / name)
                 result["vessel_compatibility"] = SUPPORTED_VESSEL_COMPATIBILITY
                 ids = {role: _image_id(bundle, role, verified["images"][role], crane)
                        for role in ROLES}
