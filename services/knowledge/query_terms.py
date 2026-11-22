@@ -8,7 +8,7 @@ _WORDS = re.compile(r"[a-z0-9]{3,}")
 _STOP = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
          "with", "from", "into", "about", "that", "this", "are", "can", "does", "did",
          "tell", "show", "find", "list", "give", "provide", "describe", "explain",
-         "summarize", "summary", "outline", "please", "there", "their", "your",
+         "summarize", "summary", "overview", "recap", "outline", "please", "there", "their", "your",
          "according", "should", "done"}
 _FORMS = {"actions": "action", "required": "require", "requires": "require",
           "requiring": "require", "procedures": "procedure", "documents": "document",
