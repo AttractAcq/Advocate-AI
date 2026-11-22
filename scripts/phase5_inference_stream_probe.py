@@ -18,9 +18,9 @@ from scripts.evidence import stamp
 from scripts.phase5_core_load import percentile
 
 PROMPT = (
-    "Write exactly 25 numbered observations about a fictional paper boat in a "
+    "Write exactly 30 numbered observations about a fictional paper boat in a "
     "synthetic lab. Each observation must be an independent sentence of roughly "
-    "ten words. Continue until all 25 are complete. Do not mention real vessels, "
+    "ten words. Continue until all 30 are complete. Do not mention real vessels, "
     "networks or equipment."
 )
 MAX_STREAM_BYTES = 2 * 1024 * 1024
@@ -75,7 +75,7 @@ async def measure(client: httpx.AsyncClient, model: str, sample: int) -> dict[st
                "stream_options": {"include_usage": True},
                "messages": [{"role": "system", "content": "Synthetic local performance probe."},
                             {"role": "user", "content": PROMPT}],
-               "max_tokens": 400, "temperature": 0.1, "reasoning_effort": "none"}
+               "max_tokens": 480, "temperature": 0.1, "reasoning_effort": "none"}
     async with client.stream("POST", "/chat/completions", json=payload) as response:
         response.raise_for_status()
         async for event in _events(response):
@@ -87,7 +87,7 @@ async def measure(client: httpx.AsyncClient, model: str, sample: int) -> dict[st
             usage = event.get("usage")
             if isinstance(usage, dict):
                 value = usage.get("completion_tokens")
-                if type(value) is int and 0 <= value <= 400:
+                if type(value) is int and 0 <= value <= 480:
                     completion_tokens = value
             choices = event.get("choices", [])
             if not isinstance(choices, list):

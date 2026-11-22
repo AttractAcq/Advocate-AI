@@ -25,6 +25,9 @@ class InferenceStreamProbeTests(unittest.TestCase):
             def handler(request: httpx.Request) -> httpx.Response:
                 if request.url.path == "/v1/models":
                     return httpx.Response(200, json={"data": [{"id": "synthetic-model"}]})
+                payload = json.loads(request.content)
+                self.assertEqual(payload["max_tokens"], 480)
+                self.assertIn("30 numbered observations", payload["messages"][1]["content"])
                 return httpx.Response(200, content=stream())
 
             transport = httpx.MockTransport(handler)
