@@ -15,18 +15,20 @@ or unresolved inventories, and high, critical or unknown scan findings.
 
 After downloading the named artifact from a specific final-head GitHub Actions
 run, compare the run's head SHA with the blocker record and use its recorded
-result hash. For example, PR #257 at `23ec948` used run `44974944722`:
+result hash. For example, PR #262 at `21947f0` used run `44988888711`:
 
 ```sh
-gh run download 44974944722 \
+gh run download 44988888711 \
   --name synthetic-three-image-bundle-evidence \
-  --dir /private/lab/evidence/pr257
+  --dir /private/lab/evidence/pr262
 .venv/bin/python -m scripts.phase5_verify_ci_release_evidence \
-  --directory /private/lab/evidence/pr257 \
-  --result-sha256 889b70e8b603be1ee6cf10834eaf31e4e87163029caf94aeeec5fcc355983ca1
+  --directory /private/lab/evidence/pr262 \
+  --result-sha256 efb46340bda9de392b38c7977ad8c2b2122776101b32b62c05d5d0312dd7a8b0
 ```
 
-The command was also run against downloaded final-head artifacts for PR #255
+This returned `artifact-consistency-pass` and
+`signed_manifests=initial-and-updated-verified`. The previous verifier, at its
+original commit, was run against downloaded final-head artifacts for PR #255
 (run `44972817825`, result hash
 `6f066939f27320b68e0a45bc961b6493895c53df40dd2129114d9e2ed2a26da5`)
 and PR #256 (run `44974524081`, result hash
