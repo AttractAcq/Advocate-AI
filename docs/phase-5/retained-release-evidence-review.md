@@ -1,0 +1,39 @@
+# Offline review of retained release CI evidence
+
+The `synthetic-three-image-bundle-evidence` artifact contains `result.json`,
+three Core/Console/Knowledge scan and SBOM pairs, and the updated Core pair.
+The verifier checks the recorded SHA-256 of `result.json`, its reported
+synthetic release and recovery outcomes, and all four scan/SBOM pairs using
+the existing offline release intake policy. It rejects changed result bytes,
+duplicate JSON keys, missing recovery results, unmatched image hashes, stale
+or unresolved inventories, and high, critical or unknown scan findings.
+
+After downloading the named artifact from a specific final-head GitHub Actions
+run, compare the run's head SHA with the blocker record and use its recorded
+result hash. For example, PR #257 at `23ec948` used run `44974944722`:
+
+```sh
+gh run download 44974944722 \
+  --name synthetic-three-image-bundle-evidence \
+  --dir /private/lab/evidence/pr257
+.venv/bin/python -m scripts.phase5_verify_ci_release_evidence \
+  --directory /private/lab/evidence/pr257 \
+  --result-sha256 889b70e8b603be1ee6cf10834eaf31e4e87163029caf94aeeec5fcc355983ca1
+```
+
+The command was also run against downloaded final-head artifacts for PR #255
+(run `44972817825`, result hash
+`6f066939f27320b68e0a45bc961b6493895c53df40dd2129114d9e2ed2a26da5`)
+and PR #256 (run `44974524081`, result hash
+`ca71025a2e83acd3020c92cfec45e6cb84d4c5eb471cfe55c3f0afb2fa36bb01`).
+All three returned `artifact-consistency-pass` with four checked image pairs.
+The verifier applies the release intake's current 30-day scan freshness rule;
+a historical artifact can remain authentic while no longer being eligible as
+a current release candidate.
+
+**Scope.** The downloaded evidence does not include the image archives or
+signed release bundle. This command checks consistency of retained evidence
+and reported outcomes; it cannot independently prove a bundle signature,
+archive digest, CI runner identity, hardware behavior, deployment approval or
+independent product assessment. Preserve the GitHub run URL, final head,
+artifact hash and reviewer decision separately.
