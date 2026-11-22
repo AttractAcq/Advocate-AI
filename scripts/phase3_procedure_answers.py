@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 from datetime import datetime, timezone
 import hashlib
@@ -41,18 +42,23 @@ def require_expected_outcomes(results: list[dict[str, object]]) -> None:
     """Refuse to publish a passing-looking report with missing or extra sources."""
     failures = []
     for item in results:
+        label = str(item["case_id"])
+        if "sample" in item:
+            label += f"@{item['sample']}"
         expected = item["expected_document_id"]
         cited = {entry["citation"]["document_id"] for entry in item["citations"]}
         if expected is None:
             if item["no_answer_denial"] is not True or cited:
-                failures.append(str(item["case_id"]))
+                failures.append(label)
         elif cited != {expected} or item["expected_source_cited"] is not True:
-            failures.append(str(item["case_id"]))
+            failures.append(label)
     if failures:
         raise RuntimeError("procedure evaluation failed: " + ", ".join(failures))
 
 
-async def run() -> dict[str, object]:
+async def run(*, repetitions: int = 1) -> dict[str, object]:
+    if not 1 <= repetitions <= 5:
+        raise ValueError("repetitions must be between 1 and 5")
     if not DATABASE.is_file():
         raise RuntimeError("build the synthetic Phase 3 index before evaluating Core")
     password = secrets.token_urlsafe(24)
@@ -68,40 +74,43 @@ async def run() -> dict[str, object]:
                 login.raise_for_status()
                 headers[user] = {"Authorization": "Bearer " + login.json()["access_token"]}
             results = []
-            for identifier, user, question, expected in CASES:
-                reply = await client.post("/api/chat", headers=headers[user],
-                                          json={"message": question, "mode": "documents"})
-                reply.raise_for_status()
-                turn = reply.json()
-                citations = []
-                for citation in turn["citations"]:
-                    preview = await client.get(
-                        f"/api/sources/{citation['document_id']}/preview",
-                        params={"ordinal": citation["ordinal"]}, headers=headers[user])
-                    preview.raise_for_status()
-                    source = preview.json()
-                    if any(source[key] != citation[key] for key in
-                           ("document_id", "version", "sha256", "ordinal")):
-                        raise RuntimeError("Core citation changed before preview")
-                    citations.append({"citation": citation, "excerpt": source["excerpt"]})
-                matched = (any(item["citation"]["document_id"] == expected
-                               for item in citations) if expected else None)
-                denied = (not citations and turn["answer"] ==
-                          "No matching permitted source was found. I cannot answer from vessel documents.")
-                results.append({"case_id": identifier, "role": user, "question": question,
-                                "expected_document_id": expected, "answer": turn["answer"],
-                                "citations": citations, "expected_source_cited": matched,
-                                "no_answer_denial": denied if expected is None else None})
+            for sample in range(1, repetitions + 1):
+                for identifier, user, question, expected in CASES:
+                    reply = await client.post("/api/chat", headers=headers[user],
+                                              json={"message": question, "mode": "documents"})
+                    reply.raise_for_status()
+                    turn = reply.json()
+                    citations = []
+                    for citation in turn["citations"]:
+                        preview = await client.get(
+                            f"/api/sources/{citation['document_id']}/preview",
+                            params={"ordinal": citation["ordinal"]}, headers=headers[user])
+                        preview.raise_for_status()
+                        source = preview.json()
+                        if any(source[key] != citation[key] for key in
+                               ("document_id", "version", "sha256", "ordinal")):
+                            raise RuntimeError("Core citation changed before preview")
+                        citations.append({"citation": citation, "excerpt": source["excerpt"]})
+                    matched = (any(item["citation"]["document_id"] == expected
+                                   for item in citations) if expected else None)
+                    denied = (not citations and turn["answer"] ==
+                              "No matching permitted source was found. I cannot answer from vessel documents.")
+                    results.append({"case_id": identifier, "sample": sample, "role": user,
+                                    "question": question, "expected_document_id": expected,
+                                    "answer": turn["answer"], "citations": citations,
+                                    "expected_source_cited": matched,
+                                    "no_answer_denial": denied if expected is None else None})
     require_expected_outcomes(results)
     allowed = [item for item in results if item["expected_document_id"]]
     denied = [item for item in results if not item["expected_document_id"]]
     report = {
-        "schema": 1, "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "schema": 2, "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"],
                                                   cwd=ROOT, text=True).strip(),
         "host": {"system": platform.system(), "machine": platform.machine()},
         "model": "qwen3.5:2b", "fixture_manifest_sha256": hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),
-        "summary": {"cases": len(results), "expected_source_citations": sum(
+        "summary": {"cases": len(results), "unique_questions": len(CASES),
+                    "repetitions": repetitions, "expected_source_citations": sum(
             item["expected_source_cited"] is True for item in allowed),
                     "no_answer_denials": sum(item["no_answer_denial"] is True for item in denied)},
         "cases": results,
@@ -114,4 +123,7 @@ async def run() -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(asyncio.run(run())["summary"], sort_keys=True))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repetitions", type=int, default=1)
+    args = parser.parse_args()
+    print(json.dumps(asyncio.run(run(repetitions=args.repetitions))["summary"], sort_keys=True))
