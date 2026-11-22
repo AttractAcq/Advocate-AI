@@ -4,6 +4,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -187,6 +188,51 @@ class ReleaseIntakeTests(unittest.TestCase):
         result = self.verify()
         self.assertEqual(result["status"], "preflight-pass")
         self.assertEqual(result["components"], 1)
+
+    def test_evidence_read_stays_on_opened_file_after_path_replacement(self) -> None:
+        scan_path, scan_hash = self.write("scan.json", self.scan)
+        sbom_path, sbom_hash = self.write("sbom.json", self.sbom)
+        outside = self.root / "outside.json"
+        outside.write_bytes(b"not release evidence")
+        original_fdopen = os.fdopen
+        replaced = False
+
+        def replace_after_open(descriptor, *args, **kwargs):
+            nonlocal replaced
+            if not replaced:
+                replaced = True
+                scan_path.rename(self.root / "original.json")
+                scan_path.symlink_to(outside)
+            return original_fdopen(descriptor, *args, **kwargs)
+
+        with patch("infrastructure.release.intake.os.fdopen",
+                   side_effect=replace_after_open):
+            result = verify_intake(scan_path, sbom_path, IMAGE, scan_hash,
+                                   sbom_hash, now=NOW)
+        self.assertEqual(result["status"], "preflight-pass")
+        self.assertTrue(scan_path.is_symlink())
+
+    def test_evidence_links_and_oversize_are_rejected(self) -> None:
+        scan_path, scan_hash = self.write("scan.json", self.scan)
+        sbom_path, sbom_hash = self.write("sbom.json", self.sbom)
+        linked = self.root / "linked.json"
+        linked.symlink_to(scan_path)
+        with self.assertRaisesRegex(IntakeError, "invalid evidence file"):
+            verify_intake(linked, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
+        linked.unlink()
+        os.link(scan_path, linked)
+        with self.assertRaisesRegex(IntakeError, "invalid evidence file"):
+            verify_intake(scan_path, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
+        linked.unlink()
+        os.mkfifo(linked)
+        with self.assertRaisesRegex(IntakeError, "invalid evidence file"):
+            verify_intake(linked, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
+        linked.unlink()
+        with scan_path.open("wb") as stream:
+            stream.seek(MAX_EVIDENCE_BYTES)
+            stream.write(b"x")
+        with self.assertRaisesRegex(IntakeError, "exceeds size limit"):
+            verify_intake(scan_path, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
 
     def test_high_unknown_and_old_scan_rejected(self) -> None:
         for severity in ("HIGH", "CRITICAL", "UNKNOWN"):

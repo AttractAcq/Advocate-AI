@@ -10,8 +10,10 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 
 MAX_EVIDENCE_BYTES = 20 * 1024 * 1024
 MAX_AGE = timedelta(days=30)
@@ -36,11 +38,21 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def _read(path: Path, expected_digest: str) -> dict[str, object]:
-    if path.is_symlink() or not path.is_file() or not _DIGEST.fullmatch(expected_digest):
+    if not isinstance(expected_digest, str) or not _DIGEST.fullmatch(expected_digest):
         raise IntakeError("invalid evidence file or expected digest")
-    if path.stat().st_size > MAX_EVIDENCE_BYTES:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as exc:
+        raise IntakeError("invalid evidence file or expected digest") from exc
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise IntakeError("invalid evidence file or expected digest")
+        if info.st_size > MAX_EVIDENCE_BYTES:
+            raise IntakeError("evidence file exceeds size limit")
+        raw = stream.read(MAX_EVIDENCE_BYTES + 1)
+    if len(raw) > MAX_EVIDENCE_BYTES:
         raise IntakeError("evidence file exceeds size limit")
-    raw = path.read_bytes()
     if hashlib.sha256(raw).hexdigest() != expected_digest:
         raise IntakeError("evidence hash mismatch")
     try:
