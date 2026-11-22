@@ -141,6 +141,13 @@ class PostgresKnowledgeTests(unittest.TestCase):
         self.assertEqual([hit["document_id"] for hit in search_index(
             self.root, self.manifest, self.dsn, "engineer", question,
             document_ids={"ENG-002"})], ["ENG-002"])
+        for framed_question in ("What must be done for HVAC intake?",
+                                "What steps does HVAC intake require?"):
+            self.assertEqual([hit["document_id"] for hit in search_index(
+                self.root, self.manifest, self.dsn, "engineer", framed_question)],
+                ["ENG-002"])
+            self.assertEqual(search_index(self.root, self.manifest, self.dsn,
+                                          "deckhand", framed_question), [])
         build_vectors(self.dsn, ConstantEmbedder())
         self.assertEqual(vector_search(self.root, self.manifest, self.dsn,
                                        "engineer", question, ConstantEmbedder()), [])

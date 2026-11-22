@@ -50,6 +50,14 @@ independent assessor. The 50 marker cases also passed unchanged after the
 query normalization. This improves local retrieval coverage without closing
 the target identity, NAS or claim-support gates.
 
+An [expanded 12-case procedure run](procedure-answer-evaluation.json) at
+`d5b8373` checks eight exact-source citations and four cross-role no-source
+denials through Core and the local model. A preliminary reading found the
+required action verbs and objects supported in this sample; the
+[review record](claim-support-review.md) describes retrieval misses and model
+wording seen in intermediate runs. The retained sample does not establish
+reliability across repeated samples, real documents or the target model.
+
 For a generic request with exactly one selected document, the local candidate
 now returns at most the first two authorised passages as exact excerpts with
 citations and a visible partial-coverage label. It does not call the model.
