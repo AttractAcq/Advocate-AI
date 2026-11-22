@@ -23,10 +23,17 @@ DATABASE = ROOT / "infrastructure/lab/runtime/phase3-knowledge/index.sqlite3"
 OUT = ROOT / "docs/phase-3/procedure-answer-evaluation.json"
 CASES = (
     ("P-MAN-001", "lab-captain-1", "According to the Visitor arrival procedure, what actions are required?", "MAN-001"),
+    ("P-MAN-002", "lab-captain-1", "What must be done for the Tender schedule?", "MAN-002"),
     ("P-ENG-006", "lab-captain-1", "What actions does the HVAC intake procedure require?", "ENG-006"),
+    ("P-ENG-002", "lab-chief_engineer-1", "Explain the required action for Cooling pump.", "ENG-002"),
     ("P-INT-009", "lab-captain-1", "What actions does the Table setting procedure require?", "INT-009"),
+    ("P-INT-002", "lab-chief_stewardess-1", "What should be done for Linen count?", "INT-002"),
     ("P-DEC-001", "lab-captain-1", "What actions does the Line inspection procedure require?", "DEC-001"),
+    ("P-DEC-002", "lab-deckhand-1", "What steps does the Fender check require?", "DEC-002"),
     ("P-DENY-ENG-006", "lab-deckhand-1", "What actions does the HVAC intake procedure require?", None),
+    ("P-DENY-INT-009", "lab-deckhand-1", "What actions does the Table setting procedure require?", None),
+    ("P-DENY-ENG-002", "lab-chief_stewardess-1", "What actions does the Cooling pump procedure require?", None),
+    ("P-DENY-MAN-001", "lab-chief_engineer-1", "What actions does the Visitor arrival procedure require?", None),
 )
 
 

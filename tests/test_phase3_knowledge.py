@@ -111,12 +111,14 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_procedure_action_questions_retrieve_only_permitted_sources(self) -> None:
         self.add("ENG-002", "engineering", "Title: HVAC intake procedure. Required action: Isolate the test equipment.")
-        self.add("DEC-002", "deck", "Title: Line inspection procedure. Required action: Record the inspection.")
+        self.add("DEC-002", "deck", "Title: Fender check procedure. Required action: Record the inspection.")
         self.save()
         engineer = await self.login("engineer")
         deckhand = await self.login("deckhand")
         for question in ("What actions does the HVAC intake procedure require?",
                          "What should be done for HVAC intake?",
+                         "What must be done for HVAC intake?",
+                         "What steps does HVAC intake require?",
                          "Show me the HVAC intake procedure",
                          "Find the HVAC intake procedure",
                          "Summarize the HVAC intake procedure"):
@@ -130,10 +132,10 @@ class Phase3KnowledgeTests(unittest.IsolatedAsyncioTestCase):
                                                 json={"message": question, "mode": "documents"})
                 self.assertEqual(denied.json()["citations"], [])
         deck = await self.client.post("/api/chat", headers=deckhand,
-                                      json={"message": "According to the Line inspection procedure, what actions are required?",
+                                      json={"message": "According to the Fender check procedure, what actions are required?",
                                             "mode": "documents"})
         self.assertEqual([item["document_id"] for item in deck.json()["citations"]], ["DEC-002"])
-        for question in ("What should be done?", "What actions are required?",
+        for question in ("What should be done?", "What must be done?", "What actions are required?",
                          "What is the procedure?", "Which steps do the procedures require?"):
             with self.subTest(generic=question):
                 self.assertEqual(search_index(self.root, self.manifest, self.database,

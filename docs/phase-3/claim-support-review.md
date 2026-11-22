@@ -144,3 +144,29 @@ does not call the model for this path. An unscoped generic request and a
 deckhand's selected engineering request still return no source. This is an
 extractive overview, not a validated generative summary. Human claim-support
 review and a safe full-document summarisation design remain open.
+
+## Expanded procedure-action sample
+
+The [12-case Core/Qwen run](procedure-answer-evaluation.json) at source commit
+`d5b8373` covers eight permitted procedure questions across management,
+engineering, interior and deck, plus four cross-role denials. All eight
+permitted cases cite exactly the intended source with a matching live preview;
+all four restricted cases return the no-source denial. The evaluator refuses
+to publish its report if either count is wrong or an extra source is cited.
+
+The wider case set exposed two retrieval problems. “Must” and “steps” were
+treated as required source terms even when the source used “Required action”,
+causing missed sources. Removing every generic action term admitted similarly
+titled injection fixtures, so the final query change drops only “must” and
+“step” framing while retaining action/require terms in the match. The 12-case
+source-selection check and focused Core tests now pass.
+
+I compared the eight retained answers against their exact cited excerpts.
+Their required actions preserve the source verbs and objects in this sample.
+The previous local sample changed deck “use” to “retrieve”; an action-verb
+instruction removed that wording in the retained run. Another intermediate
+sample turned an engineering caution into a new requirement; the final prompt
+explicitly forbids that conversion. These are observations from a small,
+fictional corpus, not proof that other model samples or vessel documents will
+stay grounded. Independent claim-support assessment and a broader adversarial
+corpus remain open under AT-09.
