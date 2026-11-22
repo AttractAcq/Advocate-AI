@@ -25,8 +25,8 @@ establish target GPU performance.
 
 This is a **direct model-service probe**, separate from the [five-user Core
 load rehearsal](core-load-rehearsal.md). First content is only a proxy for
-first token, and five samples are too few to establish a reliable p95. Core still returns a non-streaming response, so end-to-end
-first-token time remains unobservable. AT-18 needs the full target workload,
+first token, and five samples are too few to establish a reliable p95. Core still returns
+a non-streaming response, so end-to-end first-token time remains unobservable. AT-18 needs the full target workload,
 model/runtime hashes, GPU thermals and process observations, and an approved
 decision on how its first-token metric will be measured. No AT-18 threshold is
 marked passed by this Mac result.
