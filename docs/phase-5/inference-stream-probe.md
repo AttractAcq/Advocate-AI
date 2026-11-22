@@ -14,19 +14,18 @@ does not contain the prompt or generated answer.
   --output /private/tmp/sovereign-inference-stream.json
 ```
 
-The [retained Mac result](inference-stream-mac.json) at source commit `086d09a`
-ran five concurrent samples with the installed local Qwen 2B model. Its p95
-first-content time was 55.428 seconds. Two of five responses reported at
-least 300 completion tokens and a normal stop; their p95 total time was
-70.933 seconds. The other three stopped normally at 284–295 tokens and are
-excluded from that 300-token figure. The staggered first-content times show
-contention in this particular local run; they do not establish target GPU
-performance.
+The [retained Mac result](inference-stream-mac.json) at source commit `7aae0e2`
+ran five concurrent samples with the installed local Qwen 2B model. All five
+reported 332–393 completion tokens and a normal stop. P95 first-content time
+was 64.685 seconds and p95 full-answer time was 80.620 seconds. The fixed
+synthetic prompt was expanded from 25 to 30 observations after the first run
+returned fewer than 300 tokens in three of five samples. The staggered
+first-content times show contention in this particular local run; they do not
+establish target GPU performance.
 
 This is a **direct model-service probe**, separate from the [five-user Core
 load rehearsal](core-load-rehearsal.md). First content is only a proxy for
-first token, and the two qualifying completions are too few to establish a
-reliable p95. Core still returns a non-streaming response, so end-to-end
+first token, and five samples are too few to establish a reliable p95. Core still returns a non-streaming response, so end-to-end
 first-token time remains unobservable. AT-18 needs the full target workload,
 model/runtime hashes, GPU thermals and process observations, and an approved
 decision on how its first-token metric will be measured. No AT-18 threshold is
