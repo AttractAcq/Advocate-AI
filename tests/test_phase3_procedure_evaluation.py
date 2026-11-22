@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
 
-from scripts.phase3_procedure_answers import require_expected_outcomes
+from scripts.phase3_procedure_answers import require_expected_outcomes, run
 
 
 def case(identifier: str, expected: str | None, citations: list[str],
@@ -27,3 +28,13 @@ class ProcedureEvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "answer, citation"):
             require_expected_outcomes([case("answer", None, [], denied=False),
                                        case("citation", None, ["ENG-006"], denied=True)])
+
+    def test_repeated_sample_failures_identify_the_sample(self) -> None:
+        result = case("missing", "ENG-006", [])
+        result["sample"] = 3
+        with self.assertRaisesRegex(RuntimeError, "missing@3"):
+            require_expected_outcomes([result])
+
+    def test_repetition_count_is_bounded_before_running(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 1 and 5"):
+            asyncio.run(run(repetitions=0))
