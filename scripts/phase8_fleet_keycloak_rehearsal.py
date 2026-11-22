@@ -450,7 +450,12 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                     visible: !!rect && style.display !== 'none' && style.visibility !== 'hidden',
                     width: rect?.width, height: rect?.height,
                     inWidth: !!rect && rect.left >= 0 && rect.right <= innerWidth + 1,
-                    pageFits: document.documentElement.scrollWidth <= innerWidth + 1};
+                    pageFits: document.documentElement.scrollWidth <= innerWidth + 1,
+                    viewport: innerWidth, pageWidth: document.documentElement.scrollWidth,
+                    signOutRight: rect?.right,
+                    overflow: [...document.querySelectorAll('.shell, .sidebar, .content, .page, .table-panel, .table-scroll, .topbar')]
+                        .filter((item) => item.getBoundingClientRect().right > innerWidth + 1)
+                        .map((item) => ({name: item.className, right: item.getBoundingClientRect().right}))};
             """, "args": []})
         assert (mobile["narrow"] and mobile["visible"] and mobile["inWidth"] and
                 mobile["pageFits"] and mobile["width"] >= 44 and
