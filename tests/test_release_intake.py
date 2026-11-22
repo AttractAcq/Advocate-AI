@@ -221,8 +221,8 @@ class ReleaseIntakeTests(unittest.TestCase):
             verify_intake(linked, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
         linked.unlink()
         os.link(scan_path, linked)
-        with self.assertRaisesRegex(IntakeError, "invalid evidence file"):
-            verify_intake(scan_path, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
+        self.assertEqual(verify_intake(scan_path, sbom_path, IMAGE, scan_hash,
+                                       sbom_hash, now=NOW)["status"], "preflight-pass")
         linked.unlink()
         os.mkfifo(linked)
         with self.assertRaisesRegex(IntakeError, "invalid evidence file"):

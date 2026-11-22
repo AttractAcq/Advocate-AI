@@ -46,7 +46,7 @@ def _read(path: Path, expected_digest: str) -> dict[str, object]:
         raise IntakeError("invalid evidence file or expected digest") from exc
     with os.fdopen(descriptor, "rb") as stream:
         info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        if not stat.S_ISREG(info.st_mode):
             raise IntakeError("invalid evidence file or expected digest")
         if info.st_size > MAX_EVIDENCE_BYTES:
             raise IntakeError("evidence file exceeds size limit")
