@@ -53,6 +53,6 @@ does not collect those external measurements.
 Core currently returns a complete non-streaming answer. The harness therefore
 cannot measure end-to-end time to first token, and it does not guarantee a
 300-token completion. Both AT-18 thresholds remain untested, as do the target
-GPU, 30-minute workload and network conditions. A streaming Core path or an
-approved separately labelled inference probe is needed before claiming the
-first-token result.
+GPU, 30-minute workload and network conditions. A [separate direct model
+probe](inference-stream-probe.md) is now available, but it does not measure
+end-to-end first-token time through Core or Console.

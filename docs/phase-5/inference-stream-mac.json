@@ -1,0 +1,78 @@
+{
+  "endpoint": "http://127.0.0.1:11434/v1",
+  "fixture_manifest_sha256": "8ae63145f3b7c6a7250ea26d0b0011788ee164a55bcc897b8396c0295860d66e",
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "limits": [
+    "direct local inference probe, not end-to-end Core or Console timing",
+    "first content delta is a proxy for first token",
+    "requires reported completion token count and stop finish for 300-token result",
+    "target GPU, process and network evidence remain separate"
+  ],
+  "model": "qwen3.5:2b",
+  "prompt_sha256": "5a4dc54fcdfffb1b788c458265ed36b808919a74b6b5910a5581969256e34044",
+  "recorded_at_utc": "2026-11-22T02:05:23.903693+00:00",
+  "samples": [
+    {
+      "complete_300_token_answer": true,
+      "completion_tokens": 352,
+      "content_chars": 1463,
+      "content_sha256": "e3b2c9043cfebd63132a36f8478af6e8291f5b50eaecb9d5aaa6a6e191a381d0",
+      "finish_reason": "stop",
+      "first_content_seconds": 64.685,
+      "sample": 1,
+      "total_seconds": 80.62
+    },
+    {
+      "complete_300_token_answer": true,
+      "completion_tokens": 393,
+      "content_chars": 1680,
+      "content_sha256": "7b647e2463ec500159e173b9db7071c2c1bdbe3abe281b72113676f5abd3c97e",
+      "finish_reason": "stop",
+      "first_content_seconds": 0.113,
+      "sample": 2,
+      "total_seconds": 17.904
+    },
+    {
+      "complete_300_token_answer": true,
+      "completion_tokens": 332,
+      "content_chars": 1396,
+      "content_sha256": "d25ac9ae9c4dfbfadbebf6fc2465a0c4cd4d72084e08b7792c64df8bd8e744be",
+      "finish_reason": "stop",
+      "first_content_seconds": 49.564,
+      "sample": 3,
+      "total_seconds": 64.584
+    },
+    {
+      "complete_300_token_answer": true,
+      "completion_tokens": 352,
+      "content_chars": 1677,
+      "content_sha256": "7345f0320c2f141294853fd5cb178ab29c26c89741f7bf8fdc0c7520cf8267b3",
+      "finish_reason": "stop",
+      "first_content_seconds": 18.014,
+      "sample": 4,
+      "total_seconds": 33.894
+    },
+    {
+      "complete_300_token_answer": true,
+      "completion_tokens": 340,
+      "content_chars": 1482,
+      "content_sha256": "f53773ecf3263755621dfb2e2fa76ec9d2b19c1ec3e70a46abcb31a7189613a4",
+      "finish_reason": "stop",
+      "first_content_seconds": 33.994,
+      "sample": 5,
+      "total_seconds": 49.451
+    }
+  ],
+  "schema": 1,
+  "source_bundle_sha256": "3a296778cb851953e18e27d511a6880b3e8c83744b0e5f06c84ac0f0f01ecc2b",
+  "source_commit": "7aae0e2c3cd48eac9769695406868869223fa975",
+  "summary": {
+    "complete_300_token_answers": 5,
+    "complete_300_token_p95_seconds": 80.62,
+    "first_content_p95_seconds": 64.685,
+    "requested": 5
+  }
+}
