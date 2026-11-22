@@ -162,17 +162,34 @@ def parse_gpu_sample(output: bytes, expected_uuid: str) -> dict[str, object]:
 
 
 async def gpu_sample(binary: Path, uuid: str) -> dict[str, object]:
+    async def bounded_read(stream: asyncio.StreamReader, maximum: int) -> bytes:
+        result = bytearray()
+        while chunk := await stream.read(1024):
+            result.extend(chunk)
+            if len(result) > maximum:
+                raise ValueError("GPU query output exceeds limit")
+        return bytes(result)
+
     process = await asyncio.create_subprocess_exec(
         str(binary), f"--query-gpu={GPU_QUERY}", "--format=csv,noheader,nounits",
         f"--id={uuid}", stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE)
+    tasks = [asyncio.create_task(bounded_read(process.stdout, 4096)),
+             asyncio.create_task(bounded_read(process.stderr, 4096)),
+             asyncio.create_task(process.wait())]
     try:
-        output, error = await asyncio.wait_for(process.communicate(), timeout=8)
-    except asyncio.TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise ValueError("GPU query timed out") from exc
-    if process.returncode or len(error) > 4096:
+        output, _, _ = await asyncio.wait_for(asyncio.gather(*tasks), timeout=8)
+    except (asyncio.TimeoutError, ValueError) as exc:
+        for task in tasks:
+            task.cancel()
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if isinstance(exc, asyncio.TimeoutError):
+            raise ValueError("GPU query timed out") from exc
+        raise
+    if process.returncode:
         raise ValueError("GPU query failed")
     return parse_gpu_sample(output, uuid)
 

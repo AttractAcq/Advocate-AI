@@ -77,6 +77,9 @@ class CoreLoadHarnessTests(unittest.TestCase):
             self.assertEqual(result["gpu_telemetry"]["sample_count"], 1)
             self.assertEqual(result["gpu_telemetry"]["binary_sha256"], digest)
             self.assertTrue(result["gpu_telemetry"]["coverage_ok"])
+            binary.write_text("#!/bin/sh\nprintf '" + "A" * 5000 + "'\n")
+            with self.assertRaisesRegex(ValueError, "exceeds limit"):
+                asyncio.run(gpu_sample(binary, GPU_UUID))
 
     def test_endpoint_and_private_token_intake(self) -> None:
         self.assertEqual(core_url("http://127.0.0.1:18080/"), "http://127.0.0.1:18080")

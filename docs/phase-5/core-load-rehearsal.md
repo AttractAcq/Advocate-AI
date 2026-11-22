@@ -60,7 +60,8 @@ GPU UUID with the exact target UUID. The optional NVIDIA sampler requires an
 absolute, regular, non-writable executable whose SHA-256 matches the approved
 value. It queries only UUID, core temperature, board power, used memory and
 utilisation with [NVIDIA's documented selective query interface](https://docs.nvidia.com/deploy/nvidia-smi/).
-A five-second interval produces time-aligned metadata-only samples in
+Each query has an eight-second timeout and bounded stdout and stderr. A
+five-second interval produces time-aligned metadata-only samples in
 `gpu_thermals`; an unavailable metric, query error, wrong UUID or truncated
 sampling or a long unobserved gap makes the command exit nonzero after retaining
 the report. The report includes sample count, monitor duration, maximum gap
