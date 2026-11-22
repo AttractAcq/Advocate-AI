@@ -24,6 +24,15 @@ no-source denial. The p95 end-to-end response time was 12.760 seconds; the
 entire run took about 16 seconds. This is a small concurrent smoke on an Apple
 arm64 host, not a capacity measurement or target GPU result.
 
+A [second Mac run](core-load-citation-integrity-mac.json) at `988df18`
+repeated ten requests after tightening the harness. It now requires the
+expected document ID, version, SHA-256 and collection from the fixed synthetic
+manifest, one nonnegative passage ordinal, and a nonempty allowed answer.
+Denials must contain no citations and the exact no-source response. All ten
+requests passed; p95 end-to-end response time was 11.543 seconds. This checks
+citation identity and denial behavior, not whether the answer prose supports
+every claim. Independent claim review and the target workload remain open.
+
 ## Target lab command
 
 On an approved isolated lab host, prepare an owner-only JSON file containing

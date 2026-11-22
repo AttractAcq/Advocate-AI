@@ -111,6 +111,25 @@ def percentile(values: list[float], percent: float) -> float | None:
     return round(ordered[math.ceil(percent * len(ordered) / 100) - 1], 3)
 
 
+def expected_sources() -> dict[str, dict[str, str]]:
+    """Pin load assertions to the exact fictional source inventory."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"),
+                          object_pairs_hook=_unambiguous_object)
+    required = {document_id for cases in CASES.values() for _, _, document_id in cases
+                if document_id is not None}
+    sources = {}
+    for source in manifest["sources"]:
+        document_id = source["document_id"]
+        if document_id in required:
+            if document_id in sources:
+                raise ValueError("duplicate expected source")
+            sources[document_id] = {key: source[key] for key in
+                                    ("document_id", "version", "sha256", "collection")}
+    if set(sources) != required:
+        raise ValueError("load corpus source missing")
+    return sources
+
+
 async def exercise(client: httpx.AsyncClient, headers: dict[str, dict[str, str]], *,
                    requests_per_role: int, duration_seconds: float) -> dict[str, object]:
     """Schedule each of five named users independently and retain bounded results."""
@@ -118,6 +137,7 @@ async def exercise(client: httpx.AsyncClient, headers: dict[str, dict[str, str]]
         raise ValueError("load schedule out of bounds")
     if set(headers) != set(CASES):
         raise ValueError("five named synthetic users required")
+    sources = expected_sources()
     start = time.monotonic()
 
     async def one_role(user: str) -> list[dict[str, object]]:
@@ -133,12 +153,22 @@ async def exercise(client: httpx.AsyncClient, headers: dict[str, dict[str, str]]
                                              json={"message": question, "mode": "documents"})
                 elapsed = time.monotonic() - began
                 payload = response.json() if response.status_code == 200 else {}
+                if not isinstance(payload, dict):
+                    raise ValueError("malformed Core response")
                 citations = payload.get("citations", [])
-                cited = ([item.get("document_id") for item in citations]
-                         if isinstance(citations, list) else [])
-                passed = (response.status_code == 200 and
-                          cited == ([expected] if expected else []) and
-                          (expected is not None or payload.get("answer") == DENIAL))
+                answer = payload.get("answer")
+                citation_ok = (
+                    isinstance(citations, list) and
+                    (len(citations) == 1 and isinstance(citations[0], dict) and
+                     all(citations[0].get(key) == value
+                         for key, value in sources[expected].items()) and
+                     type(citations[0].get("ordinal")) is int and
+                     citations[0]["ordinal"] >= 0
+                     if expected else citations == [])
+                )
+                passed = (response.status_code == 200 and citation_ok and
+                          (isinstance(answer, str) and bool(answer.strip()) and
+                           answer != DENIAL if expected else answer == DENIAL))
                 status = response.status_code
             except (httpx.HTTPError, ValueError, TypeError):
                 elapsed = time.monotonic() - began
