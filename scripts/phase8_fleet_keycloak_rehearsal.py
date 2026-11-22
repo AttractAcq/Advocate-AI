@@ -234,6 +234,23 @@ def _run_flow(api: str, flow: str) -> dict[str, object]:
     raise AssertionError("unreachable PKCE retry state")
 
 
+def _lab_token_denied(api: str) -> None:
+    script = ("import httpx; r=httpx.get('http://fleet-portal:8080/api/fleet/me', "
+              "headers={'X-Fleet-Lab-Token': 'synthetic-fleet-admin-token-0123456789'}, "
+              "trust_env=False, timeout=5); assert r.status_code == 401")
+    # Docker DNS may briefly return EAI_AGAIN after connecting the portal to
+    # the application network. Retry that transport error only; a response
+    # other than 401 or any other failure still fails immediately.
+    for attempt in range(15):
+        try:
+            _run("docker", "exec", api, "python", "-c", script)
+            return
+        except RuntimeError as error:
+            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 14:
+                raise
+            time.sleep(1)
+
+
 def _admin_rotate(api: str, password: str, action: str, old_kid: str,
                   old_provider: str = "", new_kid: str = "") -> dict[str, object]:
     script = (_ADMIN_ROTATE.replace("__ISSUER__", repr(ISSUER))
@@ -610,10 +627,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                                      logs.stderr[-1600:])
             _verify_base64_mitigation(keycloak)
             if mfa:
-                _run("docker", "exec", api, "python", "-c",
-                     "import httpx; r=httpx.get('http://fleet-portal:8080/api/fleet/me', "
-                     "headers={'X-Fleet-Lab-Token': 'synthetic-fleet-admin-token-0123456789'}, "
-                     "trust_env=False); assert r.status_code == 401")
+                _lab_token_denied(api)
                 outcome = {"keycloak_flow": "mfa-required", "lab_token": "denied"}
             else:
                 flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(

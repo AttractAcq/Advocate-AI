@@ -13,7 +13,8 @@ from unittest.mock import patch
 
 from infrastructure.backup import BackupError, generate_key
 from scripts.phase8_fleet_keycloak_rehearsal import (
-    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _run_flow, _totp,
+    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _lab_token_denied,
+    _realm, _run_flow, _totp,
     _verify_base64_mitigation)
 
 
@@ -99,6 +100,19 @@ class FleetKeycloakMfaTests(unittest.TestCase):
                    side_effect=RuntimeError("assert status_code == 200")) as command:
             with self.assertRaises(RuntimeError):
                 _run_flow("api", "flow")
+            command.assert_called_once()
+
+    def test_lab_token_probe_retries_only_transient_container_dns(self) -> None:
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=[RuntimeError("httpx.ConnectError: [Errno -3] Try again"), ""]) as command, \
+             patch("scripts.phase8_fleet_keycloak_rehearsal.time.sleep") as pause:
+            _lab_token_denied("api")
+            self.assertEqual(command.call_count, 2)
+            pause.assert_called_once_with(1)
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=RuntimeError("AssertionError: status_code was 200")) as command:
+            with self.assertRaisesRegex(RuntimeError, "status_code was 200"):
+                _lab_token_denied("api")
             command.assert_called_once()
 
 
