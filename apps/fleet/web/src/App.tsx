@@ -284,7 +284,7 @@ export default function App() {
   if (!token || !identity) return (
     <main className="signin-shell">
       <div className="signin-panel">
-        <div className="brand-mark">S<span>◇</span></div>
+        <div className="brand-mark" aria-hidden="true">S<span>◇</span></div>
         <p className="eyebrow">Sovereign · company workspace</p>
         <h1>Fleet operations</h1>
         <p className="muted">Synthetic local portal for coded company metadata. Vessel documents, prompts, embeddings and security logs are excluded.</p>
@@ -305,7 +305,7 @@ export default function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">S<span>◇</span></span><span><strong>Sovereign</strong><small>FLEET · LAB</small></span></div>
+        <div className="brand"><span className="brand-mark" aria-hidden="true">S<span>◇</span></span><span><strong>Sovereign</strong><small>FLEET · LAB</small></span></div>
         <nav aria-label="Fleet sections">
           {availableSections.map((item) => <button key={item.id} type="button"
             className={section === item.id ? 'nav-link active' : 'nav-link'}
