@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 from datetime import datetime, timezone
 import hashlib
 import ipaddress
@@ -16,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import secrets
 import ssl
 import stat
@@ -47,6 +49,8 @@ CASES = {
 }
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in
                          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
+GPU_UUID = re.compile(r"GPU-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
+GPU_QUERY = "uuid,temperature.gpu,power.draw,memory.used,utilization.gpu"
 
 
 def _unambiguous_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -109,6 +113,127 @@ def percentile(values: list[float], percent: float) -> float | None:
         raise ValueError("percentile out of bounds")
     ordered = sorted(values)
     return round(ordered[math.ceil(percent * len(ordered) / 100) - 1], 3)
+
+
+def checked_gpu_binary(path: Path, expected_sha256: str) -> str:
+    """Require an approved local executable before GPU observation."""
+    if not path.is_absolute() or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise ValueError("GPU sampler needs an absolute binary and SHA-256")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111
+                or info.st_mode & 0o022 or info.st_uid not in (0, os.getuid())
+                or not 0 < info.st_size <= 100 * 1024 * 1024):
+            raise ValueError("unsafe GPU sampler binary")
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            raise ValueError("GPU sampler binary hash mismatch")
+    finally:
+        os.close(descriptor)
+    return digest.hexdigest()
+
+
+def parse_gpu_sample(output: bytes, expected_uuid: str) -> dict[str, object]:
+    if len(output) > 4096:
+        raise ValueError("GPU response exceeds limit")
+    try:
+        rows = list(csv.reader(output.decode("ascii").splitlines()))
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise ValueError("invalid GPU response") from exc
+    if len(rows) != 1 or len(rows[0]) != 5 or rows[0][0].strip() != expected_uuid:
+        raise ValueError("GPU identity or response shape changed")
+    try:
+        temperature = float(rows[0][1].strip())
+        power = float(rows[0][2].strip())
+        memory = float(rows[0][3].strip())
+        utilization = float(rows[0][4].strip())
+    except ValueError as exc:
+        raise ValueError("GPU metric unavailable") from exc
+    if (not 0 <= temperature <= 150 or not 0 <= power <= 2000
+            or not 0 <= memory <= 1_000_000 or not 0 <= utilization <= 100
+            or not all(math.isfinite(value) for value in
+                       (temperature, power, memory, utilization))):
+        raise ValueError("GPU metric out of bounds")
+    return {"temperature_c": temperature, "power_w": power,
+            "memory_mib": memory, "utilization_percent": utilization}
+
+
+async def gpu_sample(binary: Path, uuid: str) -> dict[str, object]:
+    async def bounded_read(stream: asyncio.StreamReader, maximum: int) -> bytes:
+        result = bytearray()
+        while chunk := await stream.read(1024):
+            result.extend(chunk)
+            if len(result) > maximum:
+                raise ValueError("GPU query output exceeds limit")
+        return bytes(result)
+
+    process = await asyncio.create_subprocess_exec(
+        str(binary), f"--query-gpu={GPU_QUERY}", "--format=csv,noheader,nounits",
+        f"--id={uuid}", stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+    tasks = [asyncio.create_task(bounded_read(process.stdout, 4096)),
+             asyncio.create_task(bounded_read(process.stderr, 4096)),
+             asyncio.create_task(process.wait())]
+    try:
+        output, _, _ = await asyncio.wait_for(asyncio.gather(*tasks), timeout=8)
+    except (asyncio.TimeoutError, ValueError) as exc:
+        for task in tasks:
+            task.cancel()
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if isinstance(exc, asyncio.TimeoutError):
+            raise ValueError("GPU query timed out") from exc
+        raise
+    if process.returncode:
+        raise ValueError("GPU query failed")
+    return parse_gpu_sample(output, uuid)
+
+
+async def monitor_gpu(binary: Path, uuid: str, stop: asyncio.Event,
+                      *, interval_seconds: float = 5) -> dict[str, object]:
+    if not GPU_UUID.fullmatch(uuid) or not 5 <= interval_seconds <= 60:
+        raise ValueError("invalid GPU monitor configuration")
+    start = time.monotonic()
+    samples: list[dict[str, object]] = []
+    errors: list[dict[str, object]] = []
+    while len(samples) + len(errors) < 721:
+        elapsed = round(time.monotonic() - start, 3)
+        try:
+            samples.append({"elapsed_seconds": elapsed, **await gpu_sample(binary, uuid)})
+        except (OSError, ValueError) as exc:
+            errors.append({"elapsed_seconds": elapsed, "kind": type(exc).__name__})
+        if stop.is_set():
+            break
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except asyncio.TimeoutError:
+            continue
+        break
+    return {"gpu_uuid": uuid, "interval_seconds": interval_seconds,
+            "monitor_seconds": round(time.monotonic() - start, 3),
+            "samples": samples, "errors": errors, "sample_count": len(samples),
+            "error_count": len(errors), "truncated": not stop.is_set(),
+            "temperature_max_c": max((row["temperature_c"] for row in samples), default=None),
+            "power_max_w": max((row["power_w"] for row in samples), default=None),
+            "memory_max_mib": max((row["memory_mib"] for row in samples), default=None),
+            "utilization_p95_percent": percentile(
+                [float(row["utilization_percent"]) for row in samples], 95)}
+
+
+def gpu_coverage(report: dict[str, object], load_seconds: float) -> tuple[bool, float]:
+    """Check observations span the load without an unobserved long interval."""
+    elapsed = float(report["monitor_seconds"])
+    points = [0.0] + [float(row["elapsed_seconds"]) for row in report["samples"]] + [elapsed]
+    max_gap = round(max(right - left for left, right in zip(points, points[1:])), 3)
+    covered = (bool(report["sample_count"]) and not report["error_count"]
+               and not report["truncated"] and elapsed >= load_seconds - 2
+               and max_gap <= max(20.0, 3 * float(report["interval_seconds"])))
+    return covered, max_gap
 
 
 def expected_sources() -> dict[str, dict[str, str]]:
@@ -215,18 +340,39 @@ async def run_local(requests_per_role: int, duration_seconds: float) -> dict[str
 
 
 async def run_remote(url: str, tokens: Path, requests_per_role: int,
-                     duration_seconds: float, ca_bundle: Path | None) -> dict[str, object]:
+                     duration_seconds: float, ca_bundle: Path | None,
+                     gpu_binary: Path | None = None, gpu_sha256: str | None = None,
+                     gpu_uuid: str | None = None,
+                     transport: httpx.AsyncBaseTransport | None = None) -> dict[str, object]:
     url = core_url(url)
+    if gpu_binary is not None:
+        if gpu_sha256 is None or gpu_uuid is None or not GPU_UUID.fullmatch(gpu_uuid):
+            raise ValueError("GPU sampler needs binary, SHA-256 and UUID")
+        approved_gpu_hash = checked_gpu_binary(gpu_binary, gpu_sha256)
     if ca_bundle is not None:
         context = ssl.create_default_context(cadata=_private_file(ca_bundle, 64 * 1024).decode("ascii"))
     else:
         context = True
     async with httpx.AsyncClient(base_url=url, timeout=120, verify=context,
-                                 trust_env=False, follow_redirects=False) as client:
+                                 trust_env=False, follow_redirects=False,
+                                 transport=transport) as client:
         before = await client.get("/health")
         before.raise_for_status()
-        result = await exercise(client, auth_headers(tokens), requests_per_role=requests_per_role,
-                                duration_seconds=duration_seconds)
+        stop_gpu = asyncio.Event()
+        gpu_task = (asyncio.create_task(monitor_gpu(gpu_binary, gpu_uuid, stop_gpu))
+                    if gpu_binary is not None and gpu_uuid is not None else None)
+        try:
+            result = await exercise(client, auth_headers(tokens), requests_per_role=requests_per_role,
+                                    duration_seconds=duration_seconds)
+        finally:
+            stop_gpu.set()
+            if gpu_task is not None:
+                gpu_result = await gpu_task
+        if gpu_task is not None:
+            gpu_result["binary_sha256"] = approved_gpu_hash
+            gpu_result["coverage_ok"], gpu_result["max_sample_gap_seconds"] = gpu_coverage(
+                gpu_result, float(result["wall_seconds"]))
+            result["gpu_telemetry"] = gpu_result
         try:
             after = await client.get("/health")
             result["health_after"] = after.status_code == 200
@@ -243,18 +389,27 @@ def main() -> None:
     parser.add_argument("--core-url", help="private numeric HTTPS endpoint; omit for local in-process Core")
     parser.add_argument("--tokens-file", type=Path, help="owner-only five-user token map for remote Core")
     parser.add_argument("--ca-bundle", type=Path, help="owner-only private CA for remote Core")
+    parser.add_argument("--nvidia-smi", type=Path, help="approved local NVIDIA query binary on the load host")
+    parser.add_argument("--nvidia-smi-sha256", help="SHA-256 of the approved NVIDIA query binary")
+    parser.add_argument("--gpu-uuid", help="exact GPU UUID to sample during remote load")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if bool(args.core_url) != bool(args.tokens_file) or (args.ca_bundle and not args.core_url):
         parser.error("remote Core requires both --core-url and --tokens-file")
+    gpu_args = (args.nvidia_smi, args.nvidia_smi_sha256, args.gpu_uuid)
+    if any(value is not None for value in gpu_args) and (not args.core_url or
+                                                         not all(value is not None for value in gpu_args)):
+        parser.error("GPU sampling requires remote Core, binary, SHA-256 and UUID")
     if not 1 <= args.requests_per_role <= 50 or not 0 <= args.duration_seconds <= 3600:
         parser.error("load schedule out of bounds")
     if args.core_url:
         result = asyncio.run(run_remote(args.core_url, args.tokens_file,
                                         args.requests_per_role, args.duration_seconds,
-                                        args.ca_bundle))
+                                        args.ca_bundle, args.nvidia_smi,
+                                        args.nvidia_smi_sha256, args.gpu_uuid))
     else:
         result = asyncio.run(run_local(args.requests_per_role, args.duration_seconds))
+    gpu_thermals = result.pop("gpu_telemetry", None)
     report = {"schema": 1, **stamp(),
               "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
               "mode": "remote-private-core" if args.core_url else "local-in-process-core",
@@ -263,9 +418,9 @@ def main() -> None:
               "corpus_sha256": hashlib.sha256(json.dumps(CASES, sort_keys=True).encode()).hexdigest(),
               "result": result,
               "ttft_seconds": None, "model_300_token_p95_seconds": None,
-              "gpu_thermals": None, "oom_or_restart_observation": None,
+              "gpu_thermals": gpu_thermals, "oom_or_restart_observation": None,
               "limits": ["Core uses non-streaming chat; time to first token is not observable here",
-                         "no 300-token workload or GPU telemetry in this Core-only run",
+                         "no 300-token workload; GPU telemetry only when explicitly configured",
                          "target packet capture, process observation and independent review remain"]}
     if args.output.exists():
         parser.error("output file already exists")
@@ -276,7 +431,9 @@ def main() -> None:
         stream.write("\n")
     print(json.dumps({"attempts": result["attempts"], "passed": result["passed"],
                       "failed": result["failed"], "latency_p95_seconds": result["latency_p95_seconds"]}))
-    if result["failed"] or result.get("health_after") is False:
+    if (result["failed"] or result.get("health_after") is False or
+            (gpu_thermals is not None and
+             not gpu_thermals["coverage_ok"])):
         raise SystemExit(1)
 
 
