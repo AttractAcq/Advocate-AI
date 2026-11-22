@@ -198,6 +198,7 @@ async def monitor_gpu(binary: Path, uuid: str, stop: asyncio.Event,
             continue
         break
     return {"gpu_uuid": uuid, "interval_seconds": interval_seconds,
+            "monitor_seconds": round(time.monotonic() - start, 3),
             "samples": samples, "errors": errors, "sample_count": len(samples),
             "error_count": len(errors), "truncated": not stop.is_set(),
             "temperature_max_c": max((row["temperature_c"] for row in samples), default=None),
@@ -205,6 +206,17 @@ async def monitor_gpu(binary: Path, uuid: str, stop: asyncio.Event,
             "memory_max_mib": max((row["memory_mib"] for row in samples), default=None),
             "utilization_p95_percent": percentile(
                 [float(row["utilization_percent"]) for row in samples], 95)}
+
+
+def gpu_coverage(report: dict[str, object], load_seconds: float) -> tuple[bool, float]:
+    """Check observations span the load without an unobserved long interval."""
+    elapsed = float(report["monitor_seconds"])
+    points = [0.0] + [float(row["elapsed_seconds"]) for row in report["samples"]] + [elapsed]
+    max_gap = round(max(right - left for left, right in zip(points, points[1:])), 3)
+    covered = (bool(report["sample_count"]) and not report["error_count"]
+               and not report["truncated"] and elapsed >= load_seconds - 2
+               and max_gap <= max(20.0, 3 * float(report["interval_seconds"])))
+    return covered, max_gap
 
 
 def expected_sources() -> dict[str, dict[str, str]]:
@@ -341,6 +353,8 @@ async def run_remote(url: str, tokens: Path, requests_per_role: int,
                 gpu_result = await gpu_task
         if gpu_task is not None:
             gpu_result["binary_sha256"] = approved_gpu_hash
+            gpu_result["coverage_ok"], gpu_result["max_sample_gap_seconds"] = gpu_coverage(
+                gpu_result, float(result["wall_seconds"]))
             result["gpu_telemetry"] = gpu_result
         try:
             after = await client.get("/health")
@@ -402,8 +416,7 @@ def main() -> None:
                       "failed": result["failed"], "latency_p95_seconds": result["latency_p95_seconds"]}))
     if (result["failed"] or result.get("health_after") is False or
             (gpu_thermals is not None and
-             (gpu_thermals["error_count"] or gpu_thermals["truncated"] or
-              not gpu_thermals["sample_count"]))):
+             not gpu_thermals["coverage_ok"])):
         raise SystemExit(1)
 
 

@@ -62,7 +62,9 @@ value. It queries only UUID, core temperature, board power, used memory and
 utilisation with [NVIDIA's documented selective query interface](https://docs.nvidia.com/deploy/nvidia-smi/).
 A five-second interval produces time-aligned metadata-only samples in
 `gpu_thermals`; an unavailable metric, query error, wrong UUID or truncated
-sampling makes the command exit nonzero after retaining the report. On a host
+sampling or a long unobserved gap makes the command exit nonzero after retaining
+the report. The report includes sample count, monitor duration, maximum gap
+and a coverage decision. On a host
 without NVIDIA hardware, omit all three GPU arguments; the report then leaves
 `gpu_thermals` null and cannot satisfy the GPU evidence requirement.
 

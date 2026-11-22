@@ -11,7 +11,8 @@ import httpx
 
 from scripts.phase5_core_load import (CASES, DENIAL, auth_headers, checked_gpu_binary,
                                       core_url, exercise, expected_sources, gpu_sample,
-                                      monitor_gpu, parse_gpu_sample, percentile, run_remote)
+                                      gpu_coverage, monitor_gpu, parse_gpu_sample, percentile,
+                                      run_remote)
 
 GPU_UUID = "GPU-00000000-0000-0000-0000-000000000001"
 
@@ -45,6 +46,10 @@ class CoreLoadHarnessTests(unittest.TestCase):
             self.assertEqual(report["error_count"], 0)
             self.assertFalse(report["truncated"])
             self.assertEqual(report["memory_max_mib"], 6144)
+            self.assertTrue(gpu_coverage(report, 0)[0])
+            sparse = {**report, "monitor_seconds": 1800.0}
+            self.assertFalse(gpu_coverage(sparse, 1800)[0])
+            self.assertEqual(gpu_coverage(sparse, 1800)[1], 1800.0)
 
             tokens = Path(directory) / "tokens.json"
             tokens.write_text(json.dumps({user: user + "-synthetic-access-token"
@@ -71,6 +76,7 @@ class CoreLoadHarnessTests(unittest.TestCase):
             self.assertTrue(result["health_after"])
             self.assertEqual(result["gpu_telemetry"]["sample_count"], 1)
             self.assertEqual(result["gpu_telemetry"]["binary_sha256"], digest)
+            self.assertTrue(result["gpu_telemetry"]["coverage_ok"])
 
     def test_endpoint_and_private_token_intake(self) -> None:
         self.assertEqual(core_url("http://127.0.0.1:18080/"), "http://127.0.0.1:18080")
