@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -8,11 +9,69 @@ import unittest
 
 import httpx
 
-from scripts.phase5_core_load import (CASES, DENIAL, auth_headers, core_url,
-                                      exercise, expected_sources, percentile)
+from scripts.phase5_core_load import (CASES, DENIAL, auth_headers, checked_gpu_binary,
+                                      core_url, exercise, expected_sources, gpu_sample,
+                                      monitor_gpu, parse_gpu_sample, percentile, run_remote)
+
+GPU_UUID = "GPU-00000000-0000-0000-0000-000000000001"
 
 
 class CoreLoadHarnessTests(unittest.TestCase):
+    def test_pinned_read_only_gpu_sampling(self) -> None:
+        sample = f"{GPU_UUID}, 62, 210.5, 6144, 87\n".encode()
+        self.assertEqual(parse_gpu_sample(sample, GPU_UUID)["temperature_c"], 62)
+        for bad in (sample.replace(b"62", b"N/A"),
+                    sample.replace(b"210.5", b"nan"),
+                    sample.replace(GPU_UUID.encode(), b"GPU-wrong")):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                parse_gpu_sample(bad, GPU_UUID)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "nvidia-smi"
+            binary.write_text("#!/bin/sh\nprintf '%s\\n' '" + sample.decode().strip() + "'\n")
+            binary.chmod(0o700)
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            self.assertEqual(checked_gpu_binary(binary, digest), digest)
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                checked_gpu_binary(binary, "0" * 64)
+            self.assertEqual(asyncio.run(gpu_sample(binary, GPU_UUID))["power_w"], 210.5)
+
+            async def sample_once() -> dict[str, object]:
+                stop = asyncio.Event()
+                stop.set()
+                return await monitor_gpu(binary, GPU_UUID, stop)
+
+            report = asyncio.run(sample_once())
+            self.assertEqual(report["sample_count"], 1)
+            self.assertEqual(report["error_count"], 0)
+            self.assertFalse(report["truncated"])
+            self.assertEqual(report["memory_max_mib"], 6144)
+
+            tokens = Path(directory) / "tokens.json"
+            tokens.write_text(json.dumps({user: user + "-synthetic-access-token"
+                                          for user in CASES}))
+            tokens.chmod(0o600)
+            sources = expected_sources()
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path == "/health":
+                    return httpx.Response(200)
+                user = request.headers["Authorization"].removeprefix("Bearer ")
+                user = user.removesuffix("-synthetic-access-token")
+                question = json.loads(request.content)["message"]
+                expected = next(document_id for _, text, document_id in CASES[user]
+                                if text == question)
+                citations = [{**sources[expected], "ordinal": 0}] if expected else []
+                return httpx.Response(200, json={"answer": "supported" if expected else DENIAL,
+                                                 "citations": citations})
+
+            result = asyncio.run(run_remote(
+                "https://10.8.0.7:8443", tokens, 2, 0, None,
+                binary, digest, GPU_UUID, httpx.MockTransport(handler)))
+            self.assertEqual((result["attempts"], result["passed"]), (10, 10))
+            self.assertTrue(result["health_after"])
+            self.assertEqual(result["gpu_telemetry"]["sample_count"], 1)
+            self.assertEqual(result["gpu_telemetry"]["binary_sha256"], digest)
+
     def test_endpoint_and_private_token_intake(self) -> None:
         self.assertEqual(core_url("http://127.0.0.1:18080/"), "http://127.0.0.1:18080")
         self.assertEqual(core_url("https://10.8.0.7:8443"), "https://10.8.0.7:8443")

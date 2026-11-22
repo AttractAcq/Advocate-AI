@@ -49,15 +49,29 @@ owner-only local CA PEM when the lab does not use the host trust store.
   --tokens-file /private/lab/core-load-tokens.json \
   --ca-bundle /private/lab/core-ca.pem \
   --requests-per-role 50 --duration-seconds 1800 \
+  --nvidia-smi /absolute/path/to/approved/nvidia-smi \
+  --nvidia-smi-sha256 APPROVED_BINARY_SHA256 \
+  --gpu-uuid GPU-00000000-0000-0000-0000-000000000001 \
   --output /private/lab/evidence/core-load.json
 ```
 
-The token lifetime must cover the scheduled run. A nonzero exit or any failed
-citation, denial, HTTP request or final health probe fails this software
-rehearsal. Preserve the host configuration, route and WAN state, model and
-runtime hashes, process restart/OOM record, GPU power and thermal readings,
-and independent tester decision alongside the metadata-only JSON. The script
-does not collect those external measurements.
+The token lifetime must cover the scheduled run. Replace the illustrative
+GPU UUID with the exact target UUID. The optional NVIDIA sampler requires an
+absolute, regular, non-writable executable whose SHA-256 matches the approved
+value. It queries only UUID, core temperature, board power, used memory and
+utilisation with [NVIDIA's documented selective query interface](https://docs.nvidia.com/deploy/nvidia-smi/).
+A five-second interval produces time-aligned metadata-only samples in
+`gpu_thermals`; an unavailable metric, query error, wrong UUID or truncated
+sampling makes the command exit nonzero after retaining the report. On a host
+without NVIDIA hardware, omit all three GPU arguments; the report then leaves
+`gpu_thermals` null and cannot satisfy the GPU evidence requirement.
+
+A nonzero exit or any failed citation, denial, HTTP request or final health
+probe fails this software rehearsal. Preserve the host configuration, route
+and WAN state, model and runtime hashes, process restart/OOM record, GPU
+readings and independent tester decision alongside the JSON. The sampler does
+not establish absence of OOM or process restarts; collect supervisor and host
+logs separately. A clean result on the target hardware remains required.
 
 Core currently returns a complete non-streaming answer. The harness therefore
 cannot measure end-to-end time to first token, and it does not guarantee a

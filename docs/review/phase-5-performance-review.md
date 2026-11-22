@@ -12,7 +12,7 @@ smoke result is development evidence, not a G2 decision.
 
 | Evidence | What it establishes | What remains unproven |
 |---|---|---|
-| [Core load harness](../../scripts/phase5_core_load.py) and [runbook](../phase-5/core-load-rehearsal.md) | Fixed five-role schedule, per-request latency and throughput, expected citation identity and exact cross-role denials without retaining question or answer text | Full target run, answer prose support, user-visible first-token latency, 300-token answer time, GPU/process health |
+| [Core load harness](../../scripts/phase5_core_load.py) and [runbook](../phase-5/core-load-rehearsal.md) | Fixed five-role schedule, per-request latency and throughput, expected citation identity and exact cross-role denials without retaining question or answer text | Full target run, answer prose support, user-visible first-token latency, 300-token answer time, process health; optional NVIDIA sampling needs target hardware |
 | [Original Core Mac smoke](../phase-5/core-load-smoke-mac.json) | 10/10 local requests passed the original citation-ID and denial checks | Exact source metadata was added later; this is not a capacity result |
 | [Citation-integrity Core Mac smoke](../phase-5/core-load-citation-integrity-mac.json) | 10/10 local requests passed with source ID, version, hash, collection and passage ordinal checks; p95 complete-response time 11.543 seconds | Human claim review, target concurrency duration and first-token metric |
 | [Direct inference probe](../../scripts/phase5_inference_stream_probe.py), [runbook](../phase-5/inference-stream-probe.md) and [Mac report](../phase-5/inference-stream-mac.json) | Five local model streams stopped normally at 332–393 tokens; p95 first-content time 64.685 seconds and p95 full-answer time 80.620 seconds | Core/Console path, target GPU, a statistically reliable p95 and acceptance of the proposed thresholds |
@@ -44,7 +44,8 @@ corpus; its timing cannot be substituted for the full Core workload.
    needed for quality assessment; retain timing, token count, finish reason
    and hashes in the shared evidence. Confirm the answer is complete rather
    than stopped by an output cap.
-5. Collect time-aligned GPU memory, power and thermal samples, model/Core
+5. Collect time-aligned GPU memory, power and thermal samples with the optional
+   pinned NVIDIA sampler or an approved equivalent, plus model/Core
    process and container IDs, restart/OOM events, service health, and network
    routes or packet captures. Inspect both WAN-present and WAN-disconnected
    operation under the separate AT-10 and AT-17 procedures.
