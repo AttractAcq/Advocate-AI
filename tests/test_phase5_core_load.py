@@ -45,6 +45,8 @@ class CoreLoadHarnessTests(unittest.TestCase):
                 user = request.headers["Authorization"].removeprefix("Bearer ")
                 question = json.loads(request.content)["message"]
                 expected = next(expected for _, text, expected in CASES[user] if text == question)
+                if break_kind == "malformed":
+                    return httpx.Response(200, json=[])
                 if break_kind == "denial" and expected is None and user == "lab-deckhand-1":
                     expected = "ENG-006"
                 citations = [{**sources[expected], "ordinal": 0}] if expected else []
@@ -64,6 +66,7 @@ class CoreLoadHarnessTests(unittest.TestCase):
         failed = asyncio.run(run("denial"))
         self.assertEqual(failed["failed"], 1)
         self.assertNotIn("Authorization", json.dumps(failed))
+        self.assertEqual(asyncio.run(run("malformed"))["failed"], 10)
         for field in ("sha256", "version", "collection", "ordinal"):
             with self.subTest(field=field):
                 self.assertEqual(asyncio.run(run(field))["failed"], 6)

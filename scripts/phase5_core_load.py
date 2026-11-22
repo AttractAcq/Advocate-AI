@@ -153,6 +153,8 @@ async def exercise(client: httpx.AsyncClient, headers: dict[str, dict[str, str]]
                                              json={"message": question, "mode": "documents"})
                 elapsed = time.monotonic() - began
                 payload = response.json() if response.status_code == 200 else {}
+                if not isinstance(payload, dict):
+                    raise ValueError("malformed Core response")
                 citations = payload.get("citations", [])
                 answer = payload.get("answer")
                 citation_ok = (
