@@ -31,14 +31,18 @@ class RuntimeHandle:
     network_id: str
     core_id: str
     console_id: str
+    identity_network_id: str | None = None
+    identity_network_name: str | None = None
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
-def _core_state_options(state: Path | None, password_file: Path | None) -> list[str]:
+def _core_state_options(state: Path | None, password_file: Path | None,
+                        emergency_file: Path | None = None,
+                        upload_root: Path | None = None) -> list[str]:
     """Validate and mount disposable, restored lab state outside signed images."""
-    if state is None and password_file is None:
+    if state is None and password_file is None and emergency_file is None and upload_root is None:
         return []
     if state is None or password_file is None:
         raise RuntimeError("Core state and lab credential must be supplied together")
@@ -57,19 +61,84 @@ def _core_state_options(state: Path | None, password_file: Path | None) -> list[
             sources.stat().st_uid != os.getuid() or
             stat.S_IMODE(sources.stat().st_mode) & 0o022):
         raise RuntimeError("invalid restored Core source directory")
+    audit = state / "audit.jsonl"
+    if audit.exists() or audit.is_symlink():
+        if (audit.is_symlink() or not audit.is_file() or
+                audit.stat().st_uid != os.getuid() or
+                stat.S_IMODE(audit.stat().st_mode) & 0o077):
+            raise RuntimeError("invalid restored Core audit trail")
+    knowledge_manifest = state / "knowledge-manifest.json"
+    knowledge_database = state / "knowledge.db"
+    if knowledge_manifest.is_symlink() or knowledge_database.is_symlink():
+        raise RuntimeError("linked Core knowledge file")
+    if knowledge_manifest.exists() != knowledge_database.exists():
+        raise RuntimeError("Core knowledge manifest and index must be supplied together")
+    if knowledge_manifest.exists():
+        for item in (knowledge_manifest, knowledge_database):
+            if (item.is_symlink() or not item.is_file() or
+                    item.stat().st_uid != os.getuid() or
+                    stat.S_IMODE(item.stat().st_mode) & 0o022):
+                raise RuntimeError("invalid restored Core knowledge file")
     if (not password_file.is_absolute() or password_file.is_symlink() or
             not password_file.is_file() or password_file.stat().st_uid != os.getuid()
             or stat.S_IMODE(password_file.stat().st_mode) & 0o077
             or password_file.stat().st_size > 4096
             or password_file.resolve().is_relative_to(state.resolve())):
         raise RuntimeError("invalid separate synthetic lab credential")
-    return ["--user", f"{os.getuid()}:{os.getgid()}",
+    if emergency_file is not None and (
+            not emergency_file.is_absolute() or emergency_file.is_symlink() or
+            not emergency_file.is_file() or emergency_file.stat().st_uid != os.getuid() or
+            stat.S_IMODE(emergency_file.stat().st_mode) & 0o077 or
+            not 0 < emergency_file.stat().st_size <= 4096 or
+            emergency_file.resolve().is_relative_to(state.resolve()) or
+            os.path.samefile(emergency_file, password_file)):
+        raise RuntimeError("invalid separate emergency credential")
+    if upload_root is not None and (
+            not upload_root.is_absolute() or upload_root.is_symlink() or
+            not upload_root.is_dir() or upload_root.stat().st_uid != os.getuid() or
+            stat.S_IMODE(upload_root.stat().st_mode) & 0o077 or
+            upload_root.resolve().is_relative_to(state.resolve()) or
+            state.resolve().is_relative_to(upload_root.resolve())):
+        raise RuntimeError("invalid separate upload quarantine")
+    options = ["--user", f"{os.getuid()}:{os.getgid()}",
             "--mount", f"type=bind,source={state.resolve()},target=/var/lib/sovereign",
             "--mount", (f"type=bind,source={password_file.resolve()},"
                         "target=/run/secrets/lab-password,readonly"),
             "-e", "SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
             "-e", "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+            "-e", "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
             "-e", "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"]
+    if emergency_file is not None:
+        options += ["--mount", (f"type=bind,source={emergency_file.resolve()},"
+                                 "target=/run/secrets/emergency-password,readonly"),
+                    "-e", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password"]
+    if upload_root is not None:
+        options += ["--mount", (f"type=bind,source={upload_root.resolve()},"
+                                 "target=/var/lib/sovereign-uploads"),
+                    "-e", "SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads"]
+    if knowledge_manifest.exists():
+        options += ["-e", "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/knowledge-manifest.json",
+                    "-e", "SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db"]
+    return options
+
+
+def _emergency_digest(path: Path) -> str:
+    """Hash only a bounded, owner-only regular credential through a pinned fd."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK |
+                             os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(descriptor, "rb") as stream:
+            details = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid() or
+                    stat.S_IMODE(details.st_mode) & 0o077 or
+                    not 0 < details.st_size <= 4096):
+                raise RuntimeError("invalid emergency credential file")
+            payload = stream.read(4097)
+        if not 0 < len(payload) <= 4096:
+            raise RuntimeError("invalid emergency credential file")
+        return hashlib.sha256(payload).hexdigest()
+    except OSError as exc:
+        raise RuntimeError("emergency credential unavailable") from exc
 
 
 def _archive_image_ids(archive: Path, role: str) -> set[str]:
@@ -189,7 +258,7 @@ def _image_id(bundle: Path, role: str, item: dict[str, str], crane: Path) -> str
     return image_id
 
 
-def _validate_console_config(path: Path) -> None:
+def _validate_console_config(path: Path, *, allow_oidc: bool = False) -> str | None:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
         raise RuntimeError("synthetic Console configuration is missing or linked")
     try:
@@ -204,19 +273,32 @@ def _validate_console_config(path: Path) -> None:
         config = json.loads(path.read_bytes(), object_pairs_hook=unique_object)
     except (ValueError, UnicodeError) as exc:
         raise RuntimeError("invalid synthetic Console configuration") from exc
-    if (not isinstance(config, dict) or
-            config != {"schema": 1, "oidc_issuer": None} or type(config["schema"]) is not int):
+    if (not isinstance(config, dict) or set(config) != {"schema", "oidc_issuer"}
+            or type(config["schema"]) is not int or config["schema"] != 1):
+        raise RuntimeError("invalid Console configuration fields")
+    issuer = config["oidc_issuer"]
+    if issuer is None:
+        return None
+    if not allow_oidc or not isinstance(issuer, str):
         raise RuntimeError("only the synthetic no-issuer Console configuration is allowed")
+    from apps.api.oidc import validate_keycloak_issuer
+    try:
+        validate_keycloak_issuer(issuer, allow_https=True)
+    except ValueError as exc:
+        raise RuntimeError("invalid Console OIDC issuer") from exc
+    if not issuer.startswith("https://"):
+        raise RuntimeError("vessel OIDC issuer must use HTTPS")
+    return issuer
 
 
-def _health(core_id: str) -> None:
+def _health(core_id: str, issuer: str | None = None) -> None:
     _docker("exec", core_id, "python", "-c",
             'import urllib.error, urllib.request; '
             'assert urllib.request.urlopen("http://127.0.0.1:18100/health", timeout=3).status == 200')
     _docker("exec", core_id, "python", "-c",
             'import json, urllib.request; '
             'r=urllib.request.urlopen("http://console:8080/console-config.json", timeout=3); '
-            'assert json.load(r)=={"schema":1,"oidc_issuer":None}; '
+            f'assert json.load(r)=={{"schema":1,"oidc_issuer":{issuer!r}}}; '
             'assert r.headers["Cache-Control"]=="no-store"')
     _docker("exec", core_id, "python", "-c",
             'import urllib.request; '
@@ -251,22 +333,45 @@ def verify_runtime_identity(handle: RuntimeHandle) -> None:
             _docker("network", "inspect", handle.network_id, "--format",
                     "{{.Internal}}") != "true"):
         raise RuntimeError("synthetic runtime network identity mismatch")
+    identity_name = handle.identity_network_name
+    identity_id = handle.identity_network_id
+    if (identity_name is None) != (identity_id is None):
+        raise RuntimeError("incomplete vessel identity network handle")
+    if identity_name is not None:
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,63}", identity_name)
+                or identity_name.startswith("sovereign-synthetic-")
+                or not re.fullmatch(r"[0-9a-f]{64}", identity_id or "")
+                or _docker("network", "inspect", identity_name, "--format", "{{.Id}}") != identity_id
+                or _docker("network", "inspect", identity_name, "--format", "{{.Internal}}") != "true"
+                or _docker("network", "inspect", identity_name, "--format",
+                           '{{index .Labels "sovereign.vessel.identity"}}') != "true"):
+            raise RuntimeError("vessel identity network changed")
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format",
                    '{{index .Config.Labels "sovereign.synthetic.run"}}') != run_name:
             raise RuntimeError("synthetic runtime container identity mismatch")
         networks = json.loads(_docker("inspect", identifier, "--format",
                                     "{{json .NetworkSettings.Networks}}"))
-        if (not isinstance(networks, dict) or len(networks) != 1 or
+        expected = {run_name} | ({identity_name} if identifier == handle.core_id
+                                 and identity_name is not None else set())
+        if (not isinstance(networks, dict) or set(networks) != expected or
                 run_name not in networks or not isinstance(networks[run_name], dict) or
                 networks[run_name].get("NetworkID") != handle.network_id):
             raise RuntimeError("synthetic runtime network attachment mismatch")
+        if identifier == handle.core_id and identity_name is not None:
+            identity = networks[identity_name]
+            if not isinstance(identity, dict) or identity.get("NetworkID") != identity_id:
+                raise RuntimeError("vessel Core identity network attachment changed")
 
 
 def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
-                               lab_password_file: Path | None) -> None:
+                               lab_password_file: Path | None,
+                               emergency_password_file: Path | None = None,
+                               *, upload_root: Path | None = None,
+                               allow_stale_emergency: bool = False) -> None:
     """Check that a running Core still uses the installation's declared mounts."""
-    _core_state_options(core_state, lab_password_file)
+    _core_state_options(core_state, lab_password_file, emergency_password_file,
+                        upload_root)
     try:
         mounts = json.loads(_docker("inspect", handle.core_id, "--format", "{{json .Mounts}}"))
         environment = json.loads(_docker("inspect", handle.core_id, "--format",
@@ -275,11 +380,15 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
         raise RuntimeError("invalid Core runtime mount metadata") from exc
     if not isinstance(mounts, list) or not isinstance(environment, list):
         raise RuntimeError("invalid Core runtime mount metadata")
-    targets = {"/var/lib/sovereign", "/run/secrets/lab-password"}
+    targets = {"/var/lib/sovereign", "/run/secrets/lab-password",
+               "/run/secrets/emergency-password", "/var/lib/sovereign-uploads"}
     selected = [item for item in mounts if isinstance(item, dict)
                 and item.get("Destination") in targets]
     prefixes = ("SOVEREIGN_FIXTURE_ROOT=", "SOVEREIGN_HISTORY_DB=",
-                "SOVEREIGN_LAB_PASSWORD_FILE=")
+                "SOVEREIGN_AUDIT_PATH=",
+                "SOVEREIGN_KNOWLEDGE_MANIFEST=", "SOVEREIGN_KNOWLEDGE_DB=",
+                "SOVEREIGN_LAB_PASSWORD_FILE=", "SOVEREIGN_EMERGENCY_PASSWORD_FILE=",
+                "SOVEREIGN_UPLOAD_ROOT=")
     relevant = [item for item in environment if isinstance(item, str)
                 and item.startswith(prefixes)]
     if core_state is None:
@@ -288,7 +397,13 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
         return
     expected = {"/var/lib/sovereign": ("bind", str(core_state.resolve()), True),
                 "/run/secrets/lab-password": ("bind", str(lab_password_file.resolve()), False)}
-    if (len(selected) != 2 or
+    if emergency_password_file is not None:
+        expected["/run/secrets/emergency-password"] = (
+            "bind", str(emergency_password_file.resolve()), False)
+    if upload_root is not None:
+        expected["/var/lib/sovereign-uploads"] = (
+            "bind", str(upload_root.resolve()), True)
+    if (len(selected) != len(expected) or
             {item["Destination"]: (item.get("Type"), item.get("Source"), item.get("RW"))
              for item in selected} != expected or
             _docker("inspect", handle.core_id, "--format", "{{.Config.User}}") !=
@@ -296,19 +411,42 @@ def _verify_core_state_runtime(handle: RuntimeHandle, core_state: Path | None,
         raise RuntimeError("Core state mount identity mismatch")
     required = {"SOVEREIGN_FIXTURE_ROOT=/var/lib/sovereign",
                 "SOVEREIGN_HISTORY_DB=/var/lib/sovereign/history.db",
+                "SOVEREIGN_AUDIT_PATH=/var/lib/sovereign/audit.jsonl",
                 "SOVEREIGN_LAB_PASSWORD_FILE=/run/secrets/lab-password"}
-    if len(relevant) != 3 or set(relevant) != required:
+    if emergency_password_file is not None:
+        required.add("SOVEREIGN_EMERGENCY_PASSWORD_FILE=/run/secrets/emergency-password")
+    if upload_root is not None:
+        required.add("SOVEREIGN_UPLOAD_ROOT=/var/lib/sovereign-uploads")
+    if (core_state / "knowledge-manifest.json").exists():
+        required.update({
+            "SOVEREIGN_KNOWLEDGE_MANIFEST=/var/lib/sovereign/knowledge-manifest.json",
+            "SOVEREIGN_KNOWLEDGE_DB=/var/lib/sovereign/knowledge.db",
+        })
+    if len(relevant) != len(required) or set(relevant) != required:
         raise RuntimeError("Core state environment mismatch")
+    if emergency_password_file is not None and not allow_stale_emergency:
+        expected_digest = _emergency_digest(emergency_password_file)
+        code = ("import hashlib; from pathlib import Path; "
+                "print(hashlib.sha256(Path('/run/secrets/emergency-password').read_bytes()).hexdigest())")
+        mounted_digest = _docker("exec", handle.core_id, "python", "-c", code)
+        if mounted_digest != expected_digest:
+            raise RuntimeError("Core emergency credential mount is stale")
 
 
 def probe_runtime(handle: RuntimeHandle, core_state: Path | None = None,
-                  lab_password_file: Path | None = None) -> None:
+                  lab_password_file: Path | None = None,
+                  emergency_password_file: Path | None = None,
+                  *, upload_root: Path | None = None,
+                  allow_stale_emergency: bool = False) -> None:
     """Fail if the current Core and Console no longer satisfy lab health checks."""
     verify_runtime_identity(handle)
     for identifier in (handle.core_id, handle.console_id):
         if _docker("inspect", identifier, "--format", "{{.State.Running}}") != "true":
             raise RuntimeError("synthetic runtime is stopped")
-    _verify_core_state_runtime(handle, core_state, lab_password_file)
+    _verify_core_state_runtime(handle, core_state, lab_password_file,
+                               emergency_password_file,
+                               upload_root=upload_root,
+                               allow_stale_emergency=allow_stale_emergency)
     _health(handle.core_id)
 
 
@@ -396,7 +534,9 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
                           console_config: Path,
                           installation_id: str | None = None,
                           core_state: Path | None = None,
-                          lab_password_file: Path | None = None) -> RuntimeHandle:
+                          lab_password_file: Path | None = None,
+                          emergency_password_file: Path | None = None,
+                          upload_root: Path | None = None) -> RuntimeHandle:
     """Load exact signed archives, launch two isolated services and check them."""
     manifest = verify_bundle(bundle, trusted_key)
     if manifest["schema"] != 4:
@@ -404,7 +544,8 @@ def start_verified_bundle(bundle: Path, trusted_key: Path, crane: Path,
     _validate_console_config(console_config)
     if installation_id is not None and not re.fullmatch(r"[0-9a-f]{32}", installation_id):
         raise RuntimeError("invalid synthetic installation identifier")
-    core_options = _core_state_options(core_state, lab_password_file)
+    core_options = _core_state_options(core_state, lab_password_file,
+                                       emergency_password_file, upload_root)
     images = manifest["images"]
     ids = {role: _image_id(bundle, role, images[role], crane)
            for role in ("core", "console")}

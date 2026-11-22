@@ -11,19 +11,24 @@ import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from infrastructure.release.intake import IntakeError, verify_intake
-from infrastructure.release.upstream import UpstreamError, validate_image_archive
+from infrastructure.release.upstream import (
+    UpstreamError, image_labels_from_archive, validate_image_archive,
+)
 
 MANIFEST = "release-manifest.json"
 SIGNATURE = "release-manifest.sig"
 MAX_MANIFEST_BYTES = 1024 * 1024
+SUPPORTED_VESSEL_COMPATIBILITY = {"knowledge_schema": 1, "core_state_schema": 1}
 
 
 class BundleError(ValueError):
@@ -87,18 +92,35 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
                    *, evidence: dict[str, str] | None = None,
                    images: dict[str, dict[str, str]] | None = None,
-                   fleet: bool = False) -> dict[str, object]:
+                   fleet: bool = False, knowledge: bool = False,
+                   vessel_compatibility: dict[str, int] | None = None,
+                   model_id: str | None = None,
+                   model_provenance: dict[str, str] | None = None) -> dict[str, object]:
     """Copy an approved payload and sign its exact manifest bytes."""
     if not isinstance(version, str) or not version or len(version) > 80 or any(c.isspace() for c in version):
         raise BundleError("invalid release version")
     source_files = _files(payload)
     if evidence is not None and images is not None:
         raise BundleError("ambiguous release evidence")
+    if fleet and knowledge:
+        raise BundleError("ambiguous image bundle target")
+    if knowledge:
+        _validate_vessel_compatibility(vessel_compatibility)
+    elif vessel_compatibility is not None:
+        raise BundleError("vessel compatibility applies only to vessel bundles")
+    if knowledge or model_id is not None:
+        _validate_model_files(model_id, {name for name, _ in source_files}, knowledge)
+    if model_provenance is not None:
+        if model_id is None:
+            raise BundleError("model provenance requires a model ID")
+        _validate_model_provenance(model_provenance)
     if evidence is not None:
         _validate_evidence(evidence, {name for name, _ in source_files})
     if images is not None:
         _validate_image_set(images, {name for name, _ in source_files},
-                            ("fleet-api", "fleet-portal") if fleet else ("core", "console"))
+                            ("fleet-api", "fleet-portal") if fleet else
+                            ("core", "console", "knowledge") if knowledge else
+                            ("core", "console"))
     output = output.absolute()
     if output.exists() or output.is_relative_to(payload.resolve()):
         raise BundleError("output must be new and outside payload")
@@ -116,7 +138,9 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
             shutil.copyfile(source, target)
             rows.append({"path": name, "sha256": _sha256(target), "size": target.stat().st_size})
         manifest: dict[str, object] = {
-            "schema": (5 if fleet else 4) if images is not None else
+            "schema": (5 if fleet else 8 if knowledge and model_provenance else
+                       7 if knowledge and model_id else
+                       6 if knowledge else 4) if images is not None else
                       (3 if evidence is not None else 2),
             "version": version, "key_id": _key_id(key.public_key()), "files": rows,
         }
@@ -126,8 +150,15 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
         if images is not None:
             manifest["signed_at"] = datetime.now(timezone.utc).isoformat()
             manifest["images"] = images
-            if fleet:
-                manifest["target"] = "fleet"
+            if fleet or knowledge:
+                manifest["target"] = "fleet" if fleet else "vessel"
+            if knowledge:
+                manifest["compatibility"] = vessel_compatibility
+                if model_id is not None:
+                    manifest["model"] = {"id": model_id, "files": [
+                        row for row in rows if row["path"].startswith("model/")]}
+                    if model_provenance is not None:
+                        manifest["model"]["provenance"] = model_provenance
         raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
         (output / MANIFEST).write_bytes(raw)
         (output / SIGNATURE).write_bytes(base64.b64encode(key.sign(raw)))
@@ -140,6 +171,60 @@ def _create_bundle(payload: Path, output: Path, signing_key: Path, version: str,
 def create_bundle(payload: Path, output: Path, signing_key: Path, version: str) -> dict[str, object]:
     """Create a schema-2 synthetic bundle without release evidence."""
     return _create_bundle(payload, output, signing_key, version)
+
+
+def _validate_model_files(model_id: str | None, files: set[str], knowledge: bool) -> None:
+    paths = {name for name in files if name.startswith("model/")}
+    if model_id is None:
+        if paths:
+            raise BundleError("model files require a vessel model descriptor")
+        return
+    if (not knowledge or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", model_id)
+            or not 1 <= len(paths) <= 4096 or
+            any(len(name) > 240 for name in paths)):
+        raise BundleError("invalid vessel model descriptor")
+
+
+def _validate_model_provenance(provenance: object) -> None:
+    if (not isinstance(provenance, dict) or
+            set(provenance) != {"source_url", "revision", "publisher", "license_claim"}):
+        raise BundleError("invalid model provenance declaration")
+    source = provenance["source_url"]
+    if (not isinstance(source, str) or len(source) > 400 or
+            not source.isascii() or not source.isprintable() or
+            any(char.isspace() for char in source)):
+        raise BundleError("invalid model provenance source")
+    try:
+        parsed = urlsplit(source)
+        port = parsed.port
+    except ValueError as exc:
+        raise BundleError("invalid model provenance source") from exc
+    if (parsed.scheme != "https" or not parsed.hostname or not parsed.path or
+            parsed.username or parsed.password or parsed.query or parsed.fragment or
+            port is not None):
+        raise BundleError("invalid model provenance source")
+    if (not isinstance(provenance["revision"], str) or
+            not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", provenance["revision"])):
+        raise BundleError("invalid model provenance revision")
+    for key, limit in (("publisher", 100), ("license_claim", 160)):
+        value = provenance[key]
+        if (not isinstance(value, str) or not 1 <= len(value) <= limit or
+                not value.isprintable() or value.strip() != value):
+            raise BundleError("invalid model provenance declaration")
+
+
+def _validate_model_descriptor(model: object, rows: list[dict[str, object]],
+                               schema: int) -> None:
+    required = {"id", "files", "provenance"} if schema == 8 else {"id", "files"}
+    if (not isinstance(model, dict) or set(model) != required or
+            not isinstance(model["id"], str)):
+        raise BundleError("invalid vessel model descriptor")
+    if schema == 8:
+        _validate_model_provenance(model["provenance"])
+    _validate_model_files(model["id"], {row["path"] for row in rows}, True)
+    expected = [row for row in rows if row["path"].startswith("model/")]
+    if model["files"] != expected:
+        raise BundleError("vessel model files differ from signed inventory")
 
 
 def _validate_evidence(evidence: object, files: set[str]) -> None:
@@ -171,7 +256,7 @@ def _validate_evidence(evidence: object, files: set[str]) -> None:
         raise BundleError("invalid image reference")
 
 
-def _validate_image_set(images: object, files: set[str], roles: tuple[str, str]) -> None:
+def _validate_image_set(images: object, files: set[str], roles: tuple[str, ...]) -> None:
     """Require the exact evidenced image roles for one product boundary."""
     if not isinstance(images, dict) or set(images) != set(roles):
         raise BundleError("bundle image roles do not match its target")
@@ -195,6 +280,34 @@ def _validate_image_set(images: object, files: set[str], roles: tuple[str, str])
 
 def _validate_product_images(images: object, files: set[str]) -> None:
     _validate_image_set(images, files, ("core", "console"))
+
+
+def _validate_vessel_compatibility(value: object) -> None:
+    if (not isinstance(value, dict) or
+            set(value) != {"knowledge_schema", "core_state_schema"} or
+            any(type(item) is not int or not 1 <= item <= 65535
+                for item in value.values())):
+        raise BundleError("invalid vessel compatibility contract")
+
+
+def require_supported_vessel_compatibility(manifest: dict[str, object]) -> None:
+    """Refuse a signed vessel release this installed software cannot run."""
+    if (manifest.get("schema") not in (6, 7, 8) or manifest.get("target") != "vessel" or
+            manifest.get("compatibility") != SUPPORTED_VESSEL_COMPATIBILITY):
+        raise BundleError("unsupported vessel compatibility contract")
+
+
+def _check_core_image_compatibility(archive: Path,
+                                    compatibility: dict[str, int]) -> None:
+    try:
+        labels = image_labels_from_archive(archive, "core")
+    except UpstreamError as exc:
+        raise BundleError("Core archive has no verified compatibility labels") from exc
+    if (labels.get("sovereign.compat.knowledge-schema") !=
+            str(compatibility["knowledge_schema"]) or
+            labels.get("sovereign.compat.core-state-schema") !=
+            str(compatibility["core_state_schema"])):
+        raise BundleError("Core image and signed compatibility contract differ")
 
 
 def _preflight_image(payload: Path, evidence: dict[str, str], crane: Path) -> None:
@@ -225,6 +338,44 @@ def create_product_bundle(payload: Path, output: Path, signing_key: Path,
             if copied.get("archive_sha256") != item["archive_sha256"] or \
                     _sha256(output / item["archive_path"]) != item["archive_sha256"]:
                 raise BundleError("copied product archive does not match signed evidence")
+    except (IntakeError, BundleError, OSError):
+        shutil.rmtree(output)
+        raise
+    return manifest
+
+
+def create_knowledge_bundle(payload: Path, output: Path, signing_key: Path,
+                            version: str, images: dict[str, dict[str, str]],
+                            compatibility: dict[str, int], *, crane: Path,
+                            model_id: str | None = None,
+                            model_provenance: dict[str, str] | None = None) -> dict[str, object]:
+    """Sign Core, Console and Knowledge only after all three archives pass intake."""
+    _validate_vessel_compatibility(compatibility)
+    roles = ("core", "console", "knowledge")
+    source_files = {name for name, _ in _files(payload)}
+    _validate_image_set(images, source_files, roles)
+    _validate_model_files(model_id, source_files, True)
+    if model_provenance is not None:
+        if model_id is None:
+            raise BundleError("model provenance requires a model ID")
+        _validate_model_provenance(model_provenance)
+    for role in roles:
+        _preflight_image(payload, images[role], crane)
+    _check_core_image_compatibility(payload / images["core"]["archive_path"],
+                                    compatibility)
+    manifest = _create_bundle(payload, output, signing_key, version,
+                              images=images, knowledge=True,
+                              vessel_compatibility=compatibility,
+                              model_id=model_id,
+                              model_provenance=model_provenance)
+    try:
+        for role in roles:
+            item = images[role]
+            copied = verify_intake(output / item["scan_path"], output / item["sbom_path"],
+                                   item["image_ref"], item["scan_sha256"], item["sbom_sha256"])
+            if copied.get("archive_sha256") != item["archive_sha256"] or \
+                    _sha256(output / item["archive_path"]) != item["archive_sha256"]:
+                raise BundleError("copied knowledge product archive does not match signed evidence")
     except (IntakeError, BundleError, OSError):
         shutil.rmtree(output)
         raise
@@ -305,15 +456,21 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
         raise BundleError("invalid manifest, signature or public key") from exc
     if not isinstance(key, Ed25519PublicKey):
         raise BundleError("trusted key must be Ed25519")
-    if not isinstance(manifest, dict) or manifest.get("schema") not in (2, 3, 4, 5):
+    if (not isinstance(manifest, dict) or
+            type(manifest.get("schema")) is not int or
+            manifest["schema"] not in (2, 3, 4, 5, 6, 7, 8)):
         raise BundleError("invalid manifest fields")
     required = {"schema", "version", "key_id", "files"}
     if manifest["schema"] == 3:
         required |= {"signed_at", "evidence"}
-    elif manifest["schema"] in (4, 5):
+    elif manifest["schema"] in (4, 5, 6, 7, 8):
         required |= {"signed_at", "images"}
-        if manifest["schema"] == 5:
+        if manifest["schema"] in (5, 6, 7, 8):
             required.add("target")
+        if manifest["schema"] in (6, 7, 8):
+            required.add("compatibility")
+        if manifest["schema"] in (7, 8):
+            required.add("model")
     if set(manifest) != required:
         raise BundleError("invalid manifest fields")
     if manifest["key_id"] != _key_id(key):
@@ -348,7 +505,7 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
     actual = {name for name, _ in _files(bundle, allow_control=True)} - {MANIFEST, SIGNATURE}
     if actual != expected:
         raise BundleError("unlisted or missing payload")
-    if manifest["schema"] in (3, 4, 5):
+    if manifest["schema"] in (3, 4, 5, 6, 7, 8):
         try:
             signed_at = datetime.fromisoformat(manifest["signed_at"])
         except (TypeError, ValueError) as exc:
@@ -372,12 +529,21 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
                 raise BundleError("signed image archive does not match the SBOM")
         elif "archive_path" in evidence:
             raise BundleError("signed image archive lacks generated inventory")
-    elif manifest["schema"] in (4, 5):
+    elif manifest["schema"] in (4, 5, 6, 7, 8):
         images = manifest["images"]
-        roles = ("core", "console") if manifest["schema"] == 4 else \
-                ("fleet-api", "fleet-portal")
+        roles = (("core", "console") if manifest["schema"] == 4 else
+                 ("fleet-api", "fleet-portal") if manifest["schema"] == 5 else
+                 ("core", "console", "knowledge"))
         if manifest["schema"] == 5 and manifest["target"] != "fleet":
             raise BundleError("signed Fleet bundle target is invalid")
+        if manifest["schema"] in (6, 7, 8) and manifest["target"] != "vessel":
+            raise BundleError("signed knowledge bundle target is invalid")
+        if manifest["schema"] in (6, 7, 8):
+            _validate_vessel_compatibility(manifest["compatibility"])
+            if manifest["schema"] == 6:
+                _validate_model_files(None, expected, True)
+            else:
+                _validate_model_descriptor(manifest["model"], rows, manifest["schema"])
         _validate_image_set(images, expected, roles)
         for role in roles:
             item = images[role]
@@ -390,6 +556,9 @@ def verify_bundle(bundle: Path, trusted_key: Path) -> dict[str, object]:
             if intake.get("archive_sha256") != item["archive_sha256"] or \
                     _sha256(bundle / item["archive_path"]) != item["archive_sha256"]:
                 raise BundleError("signed product image archive does not match the SBOM")
+        if manifest["schema"] in (6, 7, 8):
+            _check_core_image_compatibility(bundle / images["core"]["archive_path"],
+                                            manifest["compatibility"])
     return manifest
 
 
@@ -422,6 +591,17 @@ def main() -> None:
     product.add_argument("--version", required=True)
     product.add_argument("--images-json", required=True, type=Path)
     product.add_argument("--crane", required=True, type=Path)
+    knowledge = commands.add_parser("pack-knowledge")
+    knowledge.add_argument("payload", type=Path)
+    knowledge.add_argument("output", type=Path)
+    knowledge.add_argument("--signing-key", required=True, type=Path)
+    knowledge.add_argument("--version", required=True)
+    knowledge.add_argument("--images-json", required=True, type=Path)
+    knowledge.add_argument("--knowledge-schema", required=True, type=int)
+    knowledge.add_argument("--core-state-schema", required=True, type=int)
+    knowledge.add_argument("--crane", required=True, type=Path)
+    knowledge.add_argument("--model-id")
+    knowledge.add_argument("--model-provenance-json", type=Path)
     fleet = commands.add_parser("pack-fleet")
     fleet.add_argument("payload", type=Path)
     fleet.add_argument("output", type=Path)
@@ -453,6 +633,23 @@ def main() -> None:
             images = json.loads(args.images_json.read_text(), object_pairs_hook=_unique_object)
             result = create_product_bundle(args.payload, args.output, args.signing_key,
                                            args.version, images, crane=args.crane)
+        elif args.command == "pack-knowledge":
+            if args.images_json.is_symlink() or not args.images_json.is_file() or \
+                    args.images_json.stat().st_size > MAX_MANIFEST_BYTES:
+                raise BundleError("invalid knowledge image descriptor")
+            images = json.loads(args.images_json.read_text(), object_pairs_hook=_unique_object)
+            provenance = None
+            if args.model_provenance_json is not None:
+                source = args.model_provenance_json
+                if source.is_symlink() or not source.is_file() or source.stat().st_size > 4096:
+                    raise BundleError("invalid model provenance file")
+                provenance = json.loads(source.read_text(), object_pairs_hook=_unique_object)
+            result = create_knowledge_bundle(args.payload, args.output, args.signing_key,
+                                             args.version, images,
+                                             {"knowledge_schema": args.knowledge_schema,
+                                              "core_state_schema": args.core_state_schema},
+                                             crane=args.crane, model_id=args.model_id,
+                                             model_provenance=provenance)
         elif args.command == "pack-fleet":
             if args.images_json.is_symlink() or not args.images_json.is_file() or \
                     args.images_json.stat().st_size > MAX_MANIFEST_BYTES:

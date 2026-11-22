@@ -8,17 +8,20 @@ stored; source files remain in the read-only fixture tree.
 from __future__ import annotations
 
 import hashlib
-import json
+from io import BytesIO
 import multiprocessing
+import os
 from pathlib import Path
 import re
 import sqlite3
 import stat
+import tempfile
 from threading import RLock
 from typing import Callable
 from zipfile import BadZipFile, ZipFile
 
-from services.knowledge.paths import source_path
+from services.knowledge.paths import read_source_bytes
+from services.knowledge.manifest_io import load_manifest
 
 SUPPORTED = {".pdf", ".docx", ".xlsx", ".txt"}
 MAX_BYTES = 8 * 1024 * 1024
@@ -51,14 +54,19 @@ def _serve_parser(pipe) -> None:
     import os
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    from services.knowledge.parse_worker import convert
+    from services.knowledge.parse_worker import (configure_linux_limits, convert,
+                                                 set_linux_cpu_budget)
+    configure_linux_limits()
+    cold = True
     while True:
         try:
             path = pipe.recv()
         except EOFError:
             return
         try:
+            set_linux_cpu_budget((COLD_PARSE_SECONDS if cold else WARM_PARSE_SECONDS) + 15)
             pipe.send((True, convert(Path(path))))
+            cold = False
         except Exception as exc:
             pipe.send((False, type(exc).__name__))
 
@@ -94,7 +102,7 @@ def parse_local(path: Path) -> str:
             success, value = pipe.recv()
         except EOFError as exc:
             raise ValueError("parser worker stopped") from exc
-        _PARSER_WARM = True
+        _PARSER_WARM = success
         if not success or len(value) > MAX_TEXT:
             raise ValueError("parser failed or exceeded output limit")
         return value
@@ -134,27 +142,27 @@ def _connect(database: Path) -> sqlite3.Connection:
     return connection
 
 
-def _valid_source(root: Path, item: dict[str, object]) -> tuple[Path, str]:
+def _valid_source(root: Path, item: dict[str, object]) -> tuple[str, str, bytes]:
     document_id = item.get("document_id")
     relative = item.get("relative_path")
     digest = item.get("sha256")
     if not isinstance(document_id, str) or not _ID.fullmatch(document_id):
         raise ValueError("invalid source id")
-    path = source_path(root, relative)
-    if path.suffix.casefold() not in SUPPORTED:
+    if not isinstance(relative, str):
+        raise ValueError("invalid source path")
+    suffix = Path(relative).suffix.casefold()
+    if suffix not in SUPPORTED:
         raise ValueError("unsupported format")
-    if path.stat().st_size > MAX_BYTES:
-        raise ValueError("source exceeds size limit")
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise ValueError("missing source hash")
-    payload = path.read_bytes()
+    payload = read_source_bytes(root, relative, MAX_BYTES)
     if hashlib.sha256(payload).hexdigest() != digest:
         raise ValueError("source hash mismatch")
-    if path.suffix.casefold() == ".pdf":
+    if suffix == ".pdf":
         _pdf_preflight(payload)
-    if path.suffix.casefold() in {".docx", ".xlsx"}:
+    if suffix in {".docx", ".xlsx"}:
         try:
-            with ZipFile(path) as archive:
+            with ZipFile(BytesIO(payload)) as archive:
                 members = archive.infolist()
                 if len(members) > 512 or sum(member.file_size for member in members) > 16 * 1024 * 1024:
                     raise ValueError("archive resource limit")
@@ -184,11 +192,22 @@ def _valid_source(root: Path, item: dict[str, object]) -> tuple[Path, str]:
     for key in ("owner", "collection", "classification", "version", "source_type"):
         if not isinstance(item.get(key), str) or not item[key]:
             raise ValueError(f"missing {key}")
-    return path, digest
+    return suffix, digest, payload
+
+
+def _parse_verified_bytes(payload: bytes, suffix: str, parser: Callable[[Path], str]) -> str:
+    """Give the parser a private snapshot of the bytes checked against the manifest."""
+    with tempfile.TemporaryDirectory(prefix="sovereign-source-") as temporary:
+        snapshot = Path(temporary) / f"verified{suffix}"
+        descriptor = os.open(snapshot, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+        return parser(snapshot)
 
 
 def sync_manifest(
-    root: Path, manifest: Path, database: Path,
+    root: Path, manifest: Path, database: Path | str,
     parser: Callable[[Path], str] = parse_local,
 ) -> dict[str, object]:
     """Replace index contents from an approved manifest, failing closed per source.
@@ -196,8 +215,11 @@ def sync_manifest(
     The caller must mount the source root read-only. Only manifest-listed paths
     are opened. Deletions are reconciled in the same transaction as additions.
     """
+    if isinstance(database, str) and database.startswith("postgresql://"):
+        from services.knowledge.postgres_index import sync_manifest_pg
+        return sync_manifest_pg(root, manifest, database, parser)
     base = root.resolve(strict=True)
-    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload = load_manifest(manifest)
     if not isinstance(payload, dict) or payload.get("schema") != 1 or not isinstance(payload.get("sources"), list):
         raise ValueError("invalid ingestion manifest")
     sources = payload["sources"]
@@ -218,7 +240,7 @@ def sync_manifest(
         for item in sources:
             document_id = item["document_id"]
             try:
-                path, digest = _valid_source(base, item)
+                suffix, digest, payload = _valid_source(base, item)
                 if digest in seen_hashes:
                     raise ValueError("duplicate source payload")
                 seen_hashes.add(digest)
@@ -229,7 +251,7 @@ def sync_manifest(
                         ("relative_path", "collection", "classification", "owner", "version", "sha256", "source_type")) == metadata:
                     result["unchanged"].append(document_id)
                     continue
-                passage_text = chunks(parser(path))
+                passage_text = chunks(_parse_verified_bytes(payload, suffix, parser))
                 db.execute("DELETE FROM sources WHERE document_id=?", (document_id,))
                 db.execute("INSERT INTO sources VALUES (?,?,?,?,?,?,?,?,?)",
                            (document_id, *metadata, "ready"))

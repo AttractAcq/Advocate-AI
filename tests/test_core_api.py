@@ -5,10 +5,11 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 
-from apps.api.main import Settings, create_app
+from apps.api.main import Settings, create_app, search_fixture_documents
 from apps.api.model import LocalModel, ModelTimeout, ModelUnavailable, validate_local_endpoint
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,11 @@ class FakeModel:
         self.calls: list[dict[str, object]] = []
         self.fail = False
         self.timeout = False
+        self.ready = True
+
+    async def check_ready(self) -> None:
+        if not self.ready:
+            raise ModelUnavailable("local model route unavailable")
 
     async def complete(self, question: str, context: list[dict[str, object]], *, general: bool = False) -> str:
         if self.timeout:
@@ -94,6 +100,80 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
                            for user in policy["users"]]
         (self.fixtures / "roles.json").write_text(json.dumps(policy))
         self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code, 401)
+
+    async def test_revocation_during_model_call_discards_chat_and_incident_answer(self) -> None:
+        policy_path = self.fixtures / "roles.json"
+        initial = policy_path.read_bytes()
+        calls = 0
+
+        async def revoke_during_model(question, context, **kwargs):
+            nonlocal calls
+            calls += 1
+            policy = json.loads(policy_path.read_text())
+            policy["users"] = [user | {"status": "revoked"}
+                               if user["id"] == actor else user
+                               for user in policy["users"]]
+            policy_path.write_text(json.dumps(policy))
+            return "Synthetic answer that must be discarded"
+
+        self.model.complete = revoke_during_model
+        for mode in ("documents", "general"):
+            policy_path.write_bytes(initial)
+            actor = "lab-chief_engineer-1"
+            engineer = await self.login(actor)
+            response = await self.client.post("/api/chat", headers=engineer,
+                                              json={"message": "generator inspection",
+                                                    "mode": mode})
+            self.assertEqual(response.status_code, 403, response.text)
+            self.assertNotIn("Synthetic answer", response.text)
+            for conversation_id in self.app.state.sessions.list_conversations(actor):
+                self.assertEqual(self.app.state.sessions.conversation(
+                    conversation_id, actor).turns, [])
+
+        policy_path.write_bytes(initial)
+        actor = "lab-avit_admin-1"
+        admin = await self.login(actor)
+        listing = await self.client.get("/api/security/incidents", headers=admin)
+        self.assertEqual(listing.status_code, 200)
+        incident_id = listing.json()["incidents"][0]["incident_id"]
+        response = await self.client.post(
+            f"/api/security/incidents/{incident_id}/explain", headers=admin)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertNotIn("Synthetic answer", response.text)
+        self.assertEqual(calls, 3)
+
+    async def test_revocation_after_retrieval_blocks_model_context(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        policy_path = self.fixtures / "roles.json"
+
+        def retrieve_then_revoke(*args, **kwargs):
+            hits = search_fixture_documents(*args, **kwargs)
+            self.assertTrue(hits)
+            policy = json.loads(policy_path.read_text())
+            policy["users"] = [user | {"status": "revoked"}
+                               if user["id"] == "lab-chief_engineer-1" else user
+                               for user in policy["users"]]
+            policy_path.write_text(json.dumps(policy))
+            return hits
+
+        with patch("apps.api.main.search_fixture_documents", side_effect=retrieve_then_revoke):
+            response = await self.client.post("/api/chat", headers=engineer,
+                                              json={"message": "generator inspection"})
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.model.calls, [])
+
+    async def test_pending_policy_change_blocks_new_api_and_health_requests(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        marker = self.fixtures / "roles.json.pending"
+        marker.write_text("synthetic pending change")
+        try:
+            self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code,
+                             503)
+            self.assertEqual((await self.client.get("/health")).status_code, 503)
+        finally:
+            marker.unlink()
+        self.assertEqual((await self.client.get("/api/me", headers=engineer)).status_code,
+                         200)
 
     async def test_optional_history_survives_restart_and_rechecks_scope(self) -> None:
         settings = Settings(fixture_root=self.fixtures, lab_password="synthetic-test-passphrase",
@@ -194,10 +274,39 @@ class CoreApiTests(unittest.IsolatedAsyncioTestCase):
         engineer = await self.login("lab-chief_engineer-1")
         self.assertEqual((await self.client.get("/api/admin/status", headers=avit)).status_code, 200)
         self.assertEqual((await self.client.get("/api/admin/status", headers=engineer)).status_code, 403)
+        self.assertEqual((await self.client.get("/api/admin/model-readiness", headers=engineer)).status_code, 403)
+        self.assertEqual((await self.client.get("/api/admin/model-readiness", headers=avit)).json()["route"],
+                         "advertised")
+        self.model.ready = False
+        self.assertEqual((await self.client.get("/api/admin/model-readiness", headers=avit)).status_code, 503)
         reply = await self.client.post("/api/chat", headers=engineer,
                                        json={"message": "generator inspection", "workspace": "deck"})
         self.assertEqual(reply.json()["citations"], [])
         self.assertEqual(self.model.calls, [])
+
+    async def test_failed_local_model_does_not_create_empty_history(self) -> None:
+        engineer = await self.login("lab-chief_engineer-1")
+        before = (await self.client.get("/api/conversations", headers=engineer)).json()["conversation_ids"]
+        self.model.fail = True
+        reply = await self.client.post("/api/chat", headers=engineer,
+                                       json={"mode": "general", "message": "synthetic outage"})
+        self.assertEqual(reply.status_code, 503)
+        after = (await self.client.get("/api/conversations", headers=engineer)).json()["conversation_ids"]
+        self.assertEqual(after, before)
+        persistent = create_app(Settings(fixture_root=self.fixtures,
+                                         lab_password="synthetic-test-passphrase",
+                                         history_db=self.fixtures / "persistent/history.db"),
+                                self.model)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=persistent),
+                                     base_url="http://persistent") as client:
+            login = await client.post("/api/login", json={"user_id": "lab-chief_engineer-1",
+                                                      "password": "synthetic-test-passphrase"})
+            headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+            self.assertEqual((await client.post("/api/chat", headers=headers,
+                                                json={"mode": "general",
+                                                      "message": "synthetic outage"})).status_code, 503)
+            self.assertEqual((await client.get("/api/conversations", headers=headers)).json(),
+                             {"conversation_ids": []})
 
 
 class ModelBoundaryTests(unittest.TestCase):
@@ -211,6 +320,32 @@ class ModelBoundaryTests(unittest.TestCase):
 
 
 class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_readiness_requires_matching_advertised_model(self) -> None:
+        observed: list[str] = []
+
+        def response(request: httpx.Request) -> httpx.Response:
+            observed.append(str(request.url))
+            return httpx.Response(200, json={"data": [{"id": "signed-model"}]})
+
+        model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                           transport=httpx.MockTransport(response))
+        await model.check_ready()
+        self.assertEqual(observed, ["http://127.0.0.1:11434/v1/models"])
+        for payload in ({"data": [{"id": "other-model"}]}, {"data": "signed-model"}, {}):
+            model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                               transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)))
+            with self.assertRaises(ModelUnavailable):
+                await model.check_ready()
+        model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                           transport=httpx.MockTransport(lambda _: httpx.Response(503)))
+        with self.assertRaises(ModelUnavailable):
+            await model.check_ready()
+        model = LocalModel("http://127.0.0.1:11434/v1", "signed-model",
+                           transport=httpx.MockTransport(lambda _: httpx.Response(
+                               200, content=b" " * (64 * 1024 + 1))))
+        with self.assertRaises(ModelUnavailable):
+            await model.check_ready()
+
     async def test_incident_prompt_is_bounded_and_has_no_tools(self) -> None:
         requests: list[httpx.Request] = []
 
@@ -244,6 +379,44 @@ class LocalModelAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["reasoning_effort"], "none")
         self.assertNotIn("tools", payload)
         self.assertIn("ENG-001", payload["messages"][1]["content"])
+
+    async def test_general_mode_does_not_claim_document_grounding(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def answer(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"choices": [{"message": {"content": "A general answer"}}]})
+
+        model = LocalModel("http://127.0.0.1:11434/v1", "qwen3.5:2b",
+                           transport=httpx.MockTransport(answer))
+        await model.complete("What is a hash?", [], general=True)
+        instruction = json.loads(requests[0].content)["messages"][0]["content"]
+        self.assertIn("general questions", instruction)
+        self.assertNotIn("supplied sources", instruction)
+
+    async def test_token_limited_answer_is_not_returned_as_complete(self) -> None:
+        model = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
+                "choices": [{"message": {"content": "An incomplete answer"},
+                             "finish_reason": "length"}]})))
+        with self.assertRaisesRegex(ModelUnavailable, "truncated"):
+            await model.complete("Explain hashes", [], general=True)
+
+    async def test_oversized_model_response_and_answer_are_rejected(self) -> None:
+        oversized = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(
+                200, content=b"{" + b" " * (64 * 1024))))
+        with self.assertRaisesRegex(ModelUnavailable, "response is too large"):
+            await oversized.complete("Explain hashes", [], general=True)
+        long_answer = LocalModel(
+            "http://127.0.0.1:11434/v1", "qwen3.5:2b",
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
+                "choices": [{"message": {"content": "x" * 8001},
+                             "finish_reason": "stop"}]})))
+        with self.assertRaisesRegex(ModelUnavailable, "answer is too long"):
+            await long_answer.complete("Explain hashes", [], general=True)
 
     async def test_timeout_is_distinct(self) -> None:
         def timeout(_: httpx.Request) -> httpx.Response:

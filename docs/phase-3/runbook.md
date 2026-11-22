@@ -31,10 +31,37 @@ or credential should be placed in this lab.
 
    This writes the SQLite index under ignored `infrastructure/lab/runtime/`
    and the per-case report to [evaluation.json](evaluation.json). The index is
-   a Mac simulation; the target PostgreSQL/pgvector service is not deployed.
+   a Mac simulation. A local [PostgreSQL/pgvector index candidate](postgres-pgvector-index.md)
+   can be selected separately; the target service is not deployed.
+
+   With the already installed `qwen3.5:2b` served by Ollama on loopback, the
+   Core API answer and citation rehearsal is:
+
+   ```sh
+   .venv/bin/python -m scripts.phase3_core_answers
+   ```
+
+   It writes [core-answer-evaluation.json](core-answer-evaluation.json) with
+   synthetic answers, structured Core citations and exact preview excerpts.
+   The temporary lab login tokens and audit log are discarded. This does not
+   replace an independent review of claim support.
+
+   To reconcile the approved manifest once, or poll for changes in the
+   synthetic lab, run respectively:
+
+   ```sh
+   .venv/bin/python -m scripts.phase3_reconcile --once
+   .venv/bin/python -m scripts.phase3_reconcile
+   ```
+
+   Polling defaults to 30 seconds with a full source recheck every ten
+   minutes. The source root must be mounted read-only for the service; Core
+   still checks source hashes and permissions on each request. The poller is
+   not a substitute for target NAS identity and ACL qualification.
 
 4. Prepare and start synthetic Keycloak on loopback. The script creates random
-   test passwords in ignored runtime files; it does not print them:
+   test passwords and an empty private logout revocation log in ignored runtime
+   files; it does not print the passwords:
 
    ```sh
    .venv/bin/python -m scripts.phase3_identity prepare
@@ -46,9 +73,16 @@ or credential should be placed in this lab.
    `127.0.0.1:18086`. Its realm import has named synthetic users, five roles,
    a public Console client with PKCE and a Core audience. Keycloak's
    [container guide](https://www.keycloak.org/server/containers) documents
-   the import mechanism. The `start-dev` mode and direct password grant in
+   the import mechanism. The launch sets the vendor's interim
+   `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` flag. After it starts, verify
+   the live JVM reports `UseBASE64Intrinsics = false` with
+   `docker exec sovereign-keycloak-lab jcmd io.quarkus.bootstrap.runner.QuarkusEntryPoint VM.flags -all`.
+   The `start-dev` mode and direct password grant in
    this lab realm are test-only. Production identity needs TLS, persistent
    storage, MFA, service identities and a reviewed admin process.
+   If a previously prepared lab is missing its revocation log, preparation
+   refuses the partial state. Inspect the lab files before rebuilding the
+   fictional realm; Core denies OIDC tokens while the log is absent.
 
 5. Start Core and Console with the Phase 3 index and local identity:
 
@@ -57,6 +91,7 @@ or credential should be placed in this lab.
    SOVEREIGN_KNOWLEDGE_DB=infrastructure/lab/runtime/phase3-knowledge/index.sqlite3 \
    SOVEREIGN_AUDIT_PATH=infrastructure/lab/runtime/phase3-audit/events.jsonl \
    SOVEREIGN_HISTORY_DB=infrastructure/lab/runtime/phase3-history/conversations.sqlite3 \
+   SOVEREIGN_UPLOAD_ROOT="$PWD/infrastructure/lab/runtime/phase3-uploads" \
    SOVEREIGN_OIDC_ISSUER=http://127.0.0.1:18086/realms/sovereign-lab \
    .venv/bin/uvicorn apps.api.main:app --host 127.0.0.1 --port 18100
    ```
@@ -74,6 +109,17 @@ or credential should be placed in this lab.
    Open `http://127.0.0.1:18101/`. The browser uses Keycloak's authorization
    code flow with PKCE. The local container's generated credentials are in
    ignored `infrastructure/lab/runtime/phase3-identity/test-credentials.json`.
+
+   The optional `SOVEREIGN_UPLOAD_ROOT` enables the Console's submission form.
+   It must be an absolute path outside the approved fixture/source tree, with
+   an existing parent writable by the Core service. Core creates a private
+   `0700` directory and stores each submission as a `0600` blob and metadata
+   record. Only the submitting user can list the metadata. Each file is capped
+   at 8 MiB; the area holds at most 100 pending submissions. Submission does
+   not parse, index, approve or expose the file to search or inference. An
+   authorised offline reviewer must inspect it and separately update the
+   approved-source manifest under the vessel's approved process. Until that
+   process is designed and reviewed, use synthetic files only.
 
 6. Run source access and audit tests with `make test`. The indexed search API
    accepts `POST /api/search` with `query`, `mode` (`lexical` or `vector`),

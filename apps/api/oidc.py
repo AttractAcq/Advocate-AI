@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from threading import RLock
 import time
 from urllib.parse import urlsplit
@@ -15,43 +16,52 @@ from urllib.parse import urlsplit
 import httpx
 import jwt
 
+from services.policy.policy_file import active_user, load_policy
+
+
+def validate_keycloak_issuer(issuer: str, *, allow_https: bool = False) -> None:
+    """Accept one exact local realm URL, never a redirectable discovery URL."""
+    parsed = urlsplit(issuer)
+    realm = re.fullmatch(r"/realms/[A-Za-z0-9_-]{1,80}", parsed.path)
+    if (not realm or parsed.query or parsed.fragment or parsed.username or
+            parsed.password or issuer.endswith("/")):
+        raise ValueError("OIDC issuer must identify one Keycloak realm")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid OIDC issuer port") from exc
+    if parsed.scheme == "https" and allow_https:
+        hostname = parsed.hostname or ""
+        labels = hostname.split(".")
+        if (port is not None or len(labels) < 2 or len(hostname) > 253 or
+                hostname.replace(".", "").isdigit() or
+                any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                    for label in labels) or
+                parsed.netloc != hostname):
+            raise ValueError("HTTPS issuer must use a DNS host on port 443")
+        return
+    try:
+        address = ipaddress.ip_address(parsed.hostname or "")
+    except ValueError as exc:
+        raise ValueError("OIDC issuer must use numeric loopback in lab") from exc
+    host = f"[{address}]" if address.version == 6 else str(address)
+    if (parsed.scheme != "http" or not address.is_loopback or not port or
+            parsed.netloc != f"{host}:{port}"):
+        raise ValueError("OIDC issuer must be local Keycloak realm")
+
 
 class OidcVerifier:
+    _MAX_REVOCATIONS = 4 * 1024 * 1024
+
     def __init__(self, issuer: str, roles_path: Path, audience: str = "sovereign-core",
                  *, transport: httpx.BaseTransport | None = None,
                  revocations_path: Path | None = None,
                  authorized_client: str = "sovereign-console",
                  allow_https_issuer: bool = False,
                  ca_file: Path | None = None) -> None:
-        parsed = urlsplit(issuer)
-        realm = re.fullmatch(r"/realms/[A-Za-z0-9_-]{1,80}", parsed.path)
-        if (not realm or parsed.query or parsed.fragment or parsed.username or
-                parsed.password or issuer.endswith("/")):
-            raise ValueError("OIDC issuer must identify one Keycloak realm")
-        try:
-            port = parsed.port
-        except ValueError as exc:
-            raise ValueError("invalid OIDC issuer port") from exc
-        if ca_file is not None and parsed.scheme != "https":
+        if ca_file is not None and urlsplit(issuer).scheme != "https":
             raise ValueError("custom OIDC CA requires an HTTPS issuer")
-        if parsed.scheme == "https" and allow_https_issuer:
-            hostname = parsed.hostname or ""
-            labels = hostname.split(".")
-            if (port is not None or len(labels) < 2 or len(hostname) > 253 or
-                    hostname.replace(".", "").isdigit() or
-                    any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-                        for label in labels) or
-                    parsed.netloc != hostname):
-                raise ValueError("Fleet HTTPS issuer must use a DNS host on port 443")
-        else:
-            try:
-                address = ipaddress.ip_address(parsed.hostname or "")
-            except ValueError as exc:
-                raise ValueError("OIDC issuer must use numeric loopback in lab") from exc
-            host = f"[{address}]" if address.version == 6 else str(address)
-            if (parsed.scheme != "http" or not address.is_loopback or not port or
-                    parsed.netloc != f"{host}:{port}"):
-                raise ValueError("OIDC issuer must be local Keycloak realm")
+        validate_keycloak_issuer(issuer, allow_https=allow_https_issuer)
         self.issuer = issuer.rstrip("/")
         self.roles_path = roles_path
         self.audience = audience
@@ -74,30 +84,94 @@ class OidcVerifier:
             if self.revocations_path is None:
                 self._revoked_in_memory.add(digest)
                 return
-            self.revocations_path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor = os.open(self.revocations_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            if not self.revocations_path.is_absolute():
+                raise ValueError("OIDC revocation path must be absolute")
+            self.revocations_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            descriptor = self._open_revocations(
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NONBLOCK)
             try:
-                os.write(descriptor, (json.dumps({"sha256": digest}) + "\n").encode())
+                record = (json.dumps({"sha256": digest}) + "\n").encode()
+                if os.fstat(descriptor).st_size + len(record) > self._MAX_REVOCATIONS:
+                    raise ValueError("OIDC revocation file is full")
+                if os.write(descriptor, record) != len(record):
+                    raise OSError("incomplete OIDC revocation write")
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
+            self._revoked_in_memory.add(digest)
+
+    def _revocation_directory(self) -> int:
+        path = self.revocations_path
+        if path is None or not path.is_absolute():
+            raise ValueError("OIDC revocation path must be absolute")
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            parent = os.fstat(directory)
+            if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
+                    or stat.S_IMODE(parent.st_mode) & 0o022):
+                raise ValueError("OIDC revocation directory is unsafe")
+        except Exception:
+            os.close(directory)
+            raise
+        return directory
+
+    def _open_revocations(self, flags: int) -> int:
+        path = self.revocations_path
+        directory = self._revocation_directory()
+        assert path is not None
+        try:
+            descriptor = os.open(path.name, flags | os.O_NOFOLLOW, 0o600,
+                                 dir_fd=directory)
+        finally:
+            os.close(directory)
+        try:
+            details = os.fstat(descriptor)
+            if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
+                    or details.st_nlink != 1 or
+                    stat.S_IMODE(details.st_mode) & 0o077 or
+                    details.st_size > self._MAX_REVOCATIONS):
+                raise ValueError("OIDC revocation file is unsafe")
+        except Exception:
+            os.close(descriptor)
+            raise
+        return descriptor
 
     def _is_revoked(self, token: str) -> bool:
         digest = hashlib.sha256(token.encode()).hexdigest()
         with self._lock:
             if digest in self._revoked_in_memory:
                 return True
-            if self.revocations_path is None or not self.revocations_path.exists():
+            if self.revocations_path is None:
                 return False
             try:
-                with self.revocations_path.open(encoding="utf-8") as stream:
-                    for line in stream:
-                        item = json.loads(line)
-                        if not isinstance(item, dict) or not isinstance(item.get("sha256"), str):
-                            return True
-                        if item["sha256"] == digest:
-                            return True
-            except (OSError, ValueError, json.JSONDecodeError):
+                descriptor = self._open_revocations(os.O_RDONLY | os.O_NONBLOCK)
+            except FileNotFoundError:
+                return True
+            except (OSError, ValueError):
+                return True
+            try:
+                with os.fdopen(descriptor, encoding="utf-8") as stream:
+                    content = stream.read(self._MAX_REVOCATIONS + 1)
+                if len(content) > self._MAX_REVOCATIONS:
+                    return True
+                if content and not content.endswith("\n"):
+                    return True
+                def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                    value: dict[str, object] = {}
+                    for key, item in pairs:
+                        if key in value:
+                            raise ValueError("duplicate OIDC revocation key")
+                        value[key] = item
+                    return value
+                for line in content.splitlines():
+                    item = json.loads(line, object_pairs_hook=unique)
+                    if (not isinstance(item, dict) or set(item) != {"sha256"}
+                            or not isinstance(item["sha256"], str)
+                            or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+                        return True
+                    if item["sha256"] == digest:
+                        return True
+            except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
                 return True
         return False
 
@@ -128,13 +202,29 @@ class OidcVerifier:
                         if len(body) + len(chunk) > 256 * 1024:
                             raise ValueError("OIDC key set is too large")
                         body.extend(chunk)
-            keys = json.loads(body)["keys"]
+            def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                value: dict[str, object] = {}
+                for name, item in pairs:
+                    if name in value:
+                        raise ValueError("duplicate OIDC key set field")
+                    value[name] = item
+                return value
+            payload = json.loads(body, object_pairs_hook=unique)
+            keys = payload.get("keys") if isinstance(payload, dict) else None
             if not isinstance(keys, list) or len(keys) > 64 or any(
                     not isinstance(item, dict) for item in keys):
                 raise ValueError("invalid OIDC key set")
-            self._keys = {item["kid"]: jwt.PyJWK.from_dict(item).key for item in keys
-                          if item.get("kty") == "RSA" and item.get("alg") == "RS256"
-                          and isinstance(item.get("kid"), str)}
+            accepted: dict[str, object] = {}
+            seen: set[str] = set()
+            for item in keys:
+                key_id = item.get("kid")
+                if (not isinstance(key_id, str) or not 0 < len(key_id) <= 256
+                        or key_id in seen):
+                    raise ValueError("invalid or duplicate OIDC key ID")
+                seen.add(key_id)
+                if item.get("kty") == "RSA" and item.get("alg") == "RS256":
+                    accepted[key_id] = jwt.PyJWK.from_dict(item).key
+            self._keys = accepted
             self._expires = time.monotonic() + 300
             return self._keys.get(kid)
 
@@ -155,13 +245,13 @@ class OidcVerifier:
             username = claims.get("preferred_username")
             if not isinstance(username, str):
                 return None
-            policy = json.loads(self.roles_path.read_text(encoding="utf-8"))
-            if not isinstance(policy, dict) or not isinstance(policy.get("users"), list):
-                return None
-            user = next((item for item in policy.get("users", []) if isinstance(item, dict)
-                         and item.get("id") == username and item.get("status") == "active"), None)
-            roles = claims.get("realm_access", {}).get("roles", [])
-            if user is None or not isinstance(roles, list) or user.get("role") not in roles:
+            policy = load_policy(self.roles_path)
+            user = active_user(policy, username)
+            access = claims.get("realm_access")
+            roles = access.get("roles") if isinstance(access, dict) else None
+            if (user is None or not isinstance(roles, list) or
+                    any(not isinstance(role, str) for role in roles) or
+                    user.get("role") not in roles):
                 return None
             return user
         except (jwt.PyJWTError, ValueError, KeyError, TypeError, httpx.HTTPError, OSError):

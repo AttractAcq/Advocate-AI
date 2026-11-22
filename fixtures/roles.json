@@ -55,6 +55,11 @@
       "id": "lab-removed-1",
       "role": "deckhand",
       "status": "revoked"
+    },
+    {
+      "id": "lab-emergency-recovery-1",
+      "role": "emergency_recovery",
+      "status": "revoked"
     }
   ],
   "allow": {
@@ -77,7 +82,8 @@
     ],
     "avit_admin": [
       "deck"
-    ]
+    ],
+    "emergency_recovery": []
   },
   "restricted_collection": "deny_all_by_default"
 }

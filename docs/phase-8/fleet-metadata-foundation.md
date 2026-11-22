@@ -69,6 +69,14 @@ when a client bypasses the portal. The API filters customer-linked records and
 audit events before pagination and rejects cross-customer changes and imports.
 Record lookups return the same not-found response for absent and out-of-scope
 codes.
+`GET /api/fleet/overview` counts all visible coded records after full catalog
+and audit verification, then returns at most 100 ranked attention items. It
+flags active licences outside their date window or ending within 30 days,
+overdue planned maintenance, and unresolved P1/P2 tickets. The response
+includes the exact visible attention total; a scoped user sees neither global
+release counts nor another customer's records. These are synthetic review
+prompts and never change stored status. Production alert windows and escalation
+ownership remain B-12.
 Scoped audit pages use a visible-only sequence as their cursor and omit the
 global chain hash, so hidden company activity is not exposed through sequence
 gaps. The catalog still verifies the full chain before projecting a page.
@@ -115,7 +123,10 @@ npm run dev
 The development server listens on `127.0.0.1:18801` and proxies only
 `/api/fleet` to the loopback Fleet API on port 18800. It shows company
 customers, verified release metadata, deployments, licences, coded support
-and maintenance, signed receipt results and audit events. It can create
+and maintenance, signed receipt results and audit events. The overview shows
+the server's exact scope-filtered counts and dated attention queue, rather
+than estimating totals from the first paginated list response. The portal
+validates the bounded overview response before rendering it. It can create
 strictly structured customer, deployment, licence, ticket and maintenance
 records and use the lab status-transition routes. Release import remains a
 local signed-bundle operation. With `SOVEREIGN_FLEET_TOKEN_FILE`, the portal
@@ -190,6 +201,18 @@ approved offline process; production handoff and key revocation remain B-12.
 Receipt import requires `SOVEREIGN_FLEET_IMPORT_KEY_FILE` pointing to an
 owner-only regular PEM file containing the offline issuer's Ed25519 public
 key. If unset, import returns 503 while the rest of Fleet remains available.
+For a synthetic issuer rotation, set `SOVEREIGN_FLEET_IMPORT_TRUST_FILE`
+instead. It names an owner-only JSON file containing an array of one to four
+distinct absolute PEM paths, for example `["/protected/issuer-old.pem",
+"/protected/issuer-new.pem"]`. The two environment settings are mutually
+exclusive. Fleet loads the trust set at startup, selects the verifier by the
+envelope's `key_id`, and rejects unknown issuers before signature validation.
+Add the new public key and restart Fleet for an overlap window; remove the old
+key from the manifest and restart to retire it. Keep the manifest and each key
+owner-only. The
+database audit retains the issuer key ID for each accepted import. This is a
+local rotation mechanism; issuer approval, secure offline distribution,
+revocation timing and production key custody remain B-12.
 The API accepts a strict JSON envelope with `schema_version: 1`, `key_id`
 (SHA-256 of the raw 32-byte public key), `receipt` (the strict metadata-only
 record) and a standard Base64 `signature`. The issuer signs the ASCII bytes
@@ -200,6 +223,24 @@ receipt fields fail before storage. Duplicate receipt codes reject replay.
 The audit event records the trusted issuer key ID and record digest, without
 the signature or raw request. The import key is a synthetic lab trust anchor;
 production key custody, revocation and approved offline handoff remain B-12.
+
+The synthetic offline issuer command accepts a strict coded receipt JSON file
+and an owner-only Ed25519 private PEM file, then creates a new owner-only
+signed envelope. The issuer workstation keeps the private key and inputs;
+transfer only the envelope through the approved offline procedure. The command
+rejects unknown or duplicate receipt fields and will not overwrite an output:
+
+```sh
+.venv/bin/python -m services.fleet.offline_issue \
+  --record /private/receipt-record.json \
+  --signing-key /private/issuer-private.pem \
+  --output /private/signed-receipt.json
+```
+
+The `source: approved_offline_admin` field is a coded claim in the signed
+record, not proof that an owner approved the handoff. Production issuer
+authorisation, private-key custody, transport and revocation procedure remain
+B-12.
 
 The local lifecycle candidate exposes authenticated `PATCH` routes for
 `/licences/{code}/status`, `/tickets/{code}/status` and

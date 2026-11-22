@@ -14,13 +14,14 @@ import stat
 import subprocess
 import tempfile
 
-from infrastructure.backup import BackupError, _name, _snapshot, _unique_object
+from infrastructure.backup import BackupError, MAX_FILE, MAX_FILES, MAX_TOTAL, _name, _snapshot, _unique_object
 
 RESTIC_VERSION = "0.19.1"
 MANIFEST = "sovereign-snapshot-manifest.json"
 SNAPSHOT_TAG = "sovereign-ai"
 SNAPSHOT_HOST = "sovereign-ai"
 _SNAPSHOT_ID = re.compile(r"[0-9a-f]{64}\Z")
+SPACE_RESERVE = 128 * 1024 * 1024
 
 
 class ResticError(ValueError):
@@ -75,17 +76,63 @@ def _preflight(restic: Path, restic_sha256: str, repository: Path,
         raise ResticError("unapproved restic version")
 
 
+def _check_snapshot_space(spec: object, base: Path, staging_parent: Path,
+                          repository: Path, max_file: int) -> None:
+    """Estimate staged plaintext and repository packs before copying data."""
+    if type(max_file) is not int or not 1 <= max_file <= MAX_TOTAL:
+        raise ResticError("invalid snapshot file limit")
+    if (not isinstance(spec, dict) or set(spec) != {"schema", "files"}
+            or spec["schema"] != 1 or not isinstance(spec["files"], list)
+            or not 1 <= len(spec["files"]) <= MAX_FILES):
+        raise ResticError("invalid snapshot space specification")
+    estimated = 4096 * (len(spec["files"]) + 1)
+    for row in spec["files"]:
+        if (not isinstance(row, dict) or set(row) != {"name", "kind", "source"}
+                or row["kind"] not in ("file", "sqlite")
+                or not isinstance(row["source"], str)):
+            raise ResticError("invalid snapshot space entry")
+        _name(row["name"])
+        path = base / row["source"]
+        details = path.lstat()
+        if not stat.S_ISREG(details.st_mode) or details.st_size > max_file:
+            raise ResticError("unsafe or oversized snapshot source")
+        estimated += details.st_size
+        if row["kind"] == "sqlite":
+            wal = path.with_name(path.name + "-wal")
+            if wal.exists() or wal.is_symlink():
+                wal_details = wal.lstat()
+                if not stat.S_ISREG(wal_details.st_mode):
+                    raise ResticError("unsafe SQLite WAL")
+                estimated += wal_details.st_size
+    volume = repository if repository.exists() else repository.parent
+    if volume.is_symlink() or not volume.is_dir():
+        raise ResticError("repository volume is missing or linked")
+    if _device(staging_parent) == _device(volume):
+        if shutil.disk_usage(staging_parent).free < estimated * 2 + SPACE_RESERVE:
+            raise ResticError("insufficient space for restic snapshot")
+    elif (shutil.disk_usage(staging_parent).free < estimated + SPACE_RESERVE or
+          shutil.disk_usage(volume).free < estimated + SPACE_RESERVE):
+        raise ResticError("insufficient space for restic snapshot")
+
+
+def _device(path: Path) -> int:
+    return path.stat().st_dev
+
+
 def create_snapshot(spec_path: Path, repository: Path, password_file: Path,
-                    restic: Path, restic_sha256: str, staging_parent: Path) -> dict[str, object]:
+                    restic: Path, restic_sha256: str, staging_parent: Path,
+                    *, max_file: int = MAX_FILE) -> dict[str, object]:
     """Snapshot SQLite and allowlisted files, then store them in local restic."""
     _preflight(restic, restic_sha256, repository, password_file)
     if not staging_parent.is_dir() or staging_parent.is_symlink():
         raise ResticError("private staging parent is missing or linked")
     spec = json.loads(spec_path.read_text(), object_pairs_hook=_unique_object)
+    _check_snapshot_space(spec, spec_path.parent, staging_parent, repository, max_file)
     with tempfile.TemporaryDirectory(prefix=".sovereign-restic-", dir=staging_parent) as temporary:
         stage = Path(temporary) / "snapshot"
         stage.mkdir(mode=0o700)
-        rows = _snapshot(spec, spec_path.parent, stage, password_file, repository)
+        rows = _snapshot(spec, spec_path.parent, stage, password_file, repository,
+                         max_file=max_file)
         if any(row["name"] == MANIFEST for row in rows):
             raise ResticError("reserved snapshot manifest name")
         manifest = {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),

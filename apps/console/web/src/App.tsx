@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api } from './api'
-import type { AdminStatus, ChatResult, Citation, Identity, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, Turn } from './api'
+import { api, stageDocument } from './api'
+import type { AdminStatus, ChatResult, Citation, Identity, RelatedAlertEvidence, SecurityAnalysis, SecurityDetail, SecurityIncident, Source, SourcePreview, StagedUpload, ThreatIntelStatus, Turn } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 
 type View = 'chat' | 'documents' | 'security' | 'administration'
@@ -22,6 +22,10 @@ export default function App() {
   const [password, setPassword] = useState('')
   const [view, setView] = useState<View>('chat')
   const [sources, setSources] = useState<Source[]>([])
+  const [uploads, setUploads] = useState<StagedUpload[]>([])
+  const [uploadsEnabled, setUploadsEnabled] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadMessage, setUploadMessage] = useState('')
   const [models, setModels] = useState<string[]>([])
   const [selectedSources, setSelectedSources] = useState<string[]>([])
   const [workspace, setWorkspace] = useState('')
@@ -32,9 +36,12 @@ export default function App() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [admin, setAdmin] = useState<AdminStatus | null>(null)
   const [incidents, setIncidents] = useState<SecurityIncident[]>([])
+  const [threatIntel, setThreatIntel] = useState<ThreatIntelStatus | null>(null)
   const [securitySince, setSecuritySince] = useState('')
   const [securityUntil, setSecurityUntil] = useState('')
   const [incident, setIncident] = useState<SecurityDetail | null>(null)
+  const [relatedAlerts, setRelatedAlerts] = useState<RelatedAlertEvidence | null>(null)
+  const [relatedError, setRelatedError] = useState('')
   const [analysis, setAnalysis] = useState<SecurityAnalysis | null>(null)
   const [filter, setFilter] = useState('')
   const [preview, setPreview] = useState<{ bearer: string; source: SourcePreview } | null>(null)
@@ -58,16 +65,19 @@ export default function App() {
   ), [sources, workspace, filter])
 
   async function loadSession(bearer: string) {
-      const [me, files, modelList, sessions] = await Promise.all([
+      const [me, files, modelList, sessions, staged] = await Promise.all([
         api<Identity>('/me', bearer),
         api<{ sources: Source[] }>('/sources', bearer),
         api<{ models: string[] }>('/models', bearer),
         api<{ conversation_ids: string[] }>('/conversations', bearer),
+        api<{ uploads: StagedUpload[]; enabled: boolean }>('/documents/staged', bearer),
       ])
       setToken(bearer)
       setIdentity(me)
       setPreview(null)
       setSources(files.sources)
+      setUploads(staged.uploads)
+      setUploadsEnabled(staged.enabled)
       setModels(modelList.models)
       setConversationIds(sessions.conversation_ids)
       setPassword('')
@@ -99,12 +109,18 @@ export default function App() {
     setConversationIds([])
     setTurns([])
     setSources([])
+    setUploads([])
+    setUploadFile(null)
+    setUploadMessage('')
     setSelectedSources([])
     setAdmin(null)
     setIncidents([])
+    setThreatIntel(null)
     setSecuritySince('')
     setSecurityUntil('')
     setIncident(null)
+    setRelatedAlerts(null)
+    setRelatedError('')
     setAnalysis(null)
     setPreview(null)
     setError('')
@@ -164,6 +180,7 @@ export default function App() {
     setIncident(null)
     setAnalysis(null)
     setIncidents([])
+    setThreatIntel(null)
     if (Boolean(securitySince) !== Boolean(securityUntil)) {
       setError('Enter both start and end times, or clear both to view recent alerts.')
       return
@@ -175,13 +192,22 @@ export default function App() {
       setIncidents((await api<{ incidents: SecurityIncident[] }>(`/security/incidents${range}`, token)).incidents)
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Security alerts unavailable') }
+    try { setThreatIntel(await api<ThreatIntelStatus>('/security/threat-intel', token)) }
+    catch { setThreatIntel({ status: 'unavailable', warning: 'Offline threat snapshot could not be verified.' }) }
   }
 
   async function openIncident(id: string) {
     if (!token) return
     setError('')
     setAnalysis(null)
-    try { setIncident(await api<SecurityDetail>(`/security/incidents/${encodeURIComponent(id)}`, token)) }
+    setRelatedAlerts(null)
+    setRelatedError('')
+    try {
+      const path = `/security/incidents/${encodeURIComponent(id)}`
+      setIncident(await api<SecurityDetail>(path, token))
+      try { setRelatedAlerts(await api<RelatedAlertEvidence>(`${path}/related`, token)) }
+      catch (cause) { setRelatedError(cause instanceof Error ? cause.message : 'Related alert evidence unavailable') }
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Incident unavailable') }
   }
 
@@ -409,11 +435,27 @@ export default function App() {
             </label>)}
             {visibleSources.length === 0 && <p className="text-sm text-[#5d7380]">No permitted sources match this filter.</p>}
           </div>
+          {uploadsEnabled && <div className="mt-8 border-t border-[#e0e7e5] pt-6">
+            <h3 className="text-lg font-semibold">Submit a document for review</h3>
+            <p className="mt-1 text-sm text-[#5d7380]">PDF, DOCX, XLSX or TXT, up to 8 MB. Submitted files stay private and unavailable to AI search until separately approved.</p>
+            <form className="mt-4 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); if (!token || !uploadFile) return; setPending(true); setUploadMessage(''); void stageDocument(token, uploadFile).then((item) => { setUploads((items) => [item, ...items]); setUploadFile(null); setUploadMessage('Submitted for review. This file is not searchable.'); }).catch((cause) => setUploadMessage(cause instanceof Error ? cause.message : 'Upload failed')).finally(() => setPending(false)) }}>
+              <label className="text-sm font-medium">Document file<input className="field mt-1" type="file" accept=".pdf,.docx,.xlsx,.txt" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} /></label>
+              <button className="primary-button" type="submit" disabled={!uploadFile || pending}>Submit</button>
+            </form>
+            {uploadMessage && <p role="status" className="mt-3 text-sm">{uploadMessage}</p>}
+            {uploads.length > 0 && <ul className="mt-4 space-y-2 text-sm">{uploads.map((item) => <li key={item.id} className="rounded-xl border border-[#e3ebea] p-3">{item.filename} · pending review · {Math.ceil(item.size / 1024)} KB</li>)}</ul>}
+          </div>}
         </section>}
 
         {view === 'security' && identity.role === 'avit_admin' && <section className="rounded-2xl border border-[#e0e7e5] bg-white p-7 shadow-sm">
           <h2 className="text-xl font-semibold">Read-only incident review</h2>
           <p className="mt-2 text-sm text-[#5d7380]">Synthetic alert evidence. Verify every finding in the independent Wazuh store before acting.</p>
+          {threatIntel && <div className="mt-4 rounded-xl border border-[#dce5e5] p-4 text-sm" role="status">
+            <strong>Offline threat intelligence: {threatIntel.status}</strong>
+            {threatIntel.feed_id && <p className="mt-1">{threatIntel.feed_id} · {threatIntel.publisher} · issued {threatIntel.issued_at} · {threatIntel.indicator_count} indicators · age {threatIntel.age_hours} hours</p>}
+            {threatIntel.warning && <p className="mt-1 font-medium text-[#8b421c]">{threatIntel.warning}</p>}
+            <p className="mt-1 text-xs text-[#5d7380]">This signed offline snapshot is advisory and does not provide live coverage.</p>
+          </div>}
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="text-sm">From<input className="field mt-1" type="datetime-local" value={securitySince} onChange={(event) => setSecuritySince(event.target.value)} /></label>
             <label className="text-sm">To<input className="field mt-1" type="datetime-local" value={securityUntil} onChange={(event) => setSecurityUntil(event.target.value)} /></label>
@@ -433,11 +475,21 @@ export default function App() {
             <p className="mt-2 text-sm">Related asset mapping: {incident.event.related_asset_status}</p>
             <h4 className="mt-5 text-sm font-semibold">Evidence</h4>
             <ul className="mt-2 list-disc pl-5 text-sm">{incident.evidence.map((entry) => <li key={`${entry.index_name}:${entry.index_id}`}>Wazuh alert {entry.event_id} · index {entry.index_name} / {entry.index_id} · {entry.timestamp} · rule {entry.rule_id} · {entry.location}</li>)}</ul>
+            <h4 className="mt-5 text-sm font-semibold">Related alerts on the same mapped source</h4>
+            {relatedError && <p className="mt-2 text-sm text-[#895534]">{relatedError}</p>}
+            {relatedAlerts && <div className="mt-2 text-sm">
+              {relatedAlerts.status === 'unresolved-source'
+                ? <p>Source mapping is unresolved, so no related device is inferred.</p>
+                : relatedAlerts.related.length === 0
+                  ? <p>No same-source alert was found in the checked sample.</p>
+                  : <ul className="list-disc pl-5">{relatedAlerts.related.map((item) => <li key={item.incident_id}>{item.summary} · {item.severity} · {item.timestamp} · {item.evidence[0].index_name} / {item.evidence[0].index_id}</li>)}</ul>}
+              <p className="mt-2 text-xs text-[#5d7380]">{relatedAlerts.notice} {relatedAlerts.examined} alerts examined; at most 20 related alerts shown.</p>
+            </div>}
             <h4 className="mt-5 text-sm font-semibold">Suggested checks</h4>
             <ul className="mt-2 list-disc pl-5 text-sm">{incident.suggested_checks.map((check) => <li key={check}>{check}</li>)}</ul>
             <p className="mt-4 text-xs text-[#5d7380]">{incident.confidence}</p>
             <button className="primary-button mt-5" disabled={pending} onClick={() => void explainIncident()}>{pending ? 'Analysing…' : 'Explain event'}</button>
-            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">{analysis.method === 'local-model' ? 'AI explanation' : 'Evidence summary'}</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
+            {analysis && <div className="mt-5 rounded-xl bg-white p-4" role="status"><h4 className="font-semibold">{analysis.method === 'local-model' ? 'AI explanation' : 'Evidence summary'}</h4><p className="mt-2 whitespace-pre-wrap text-sm">{analysis.analysis}</p><h5 className="mt-3 text-sm font-semibold">Evidence supplied</h5><ul className="mt-1 list-disc pl-5 text-xs">{analysis.evidence.map((entry) => <li key={`${entry.index_name}:${entry.index_id}`}>{entry.event_id} · {entry.index_name} / {entry.index_id} · {entry.timestamp}</li>)}</ul><p className="mt-3 text-xs text-[#895534]">{analysis.notice}</p></div>}
           </article>}
         </section>}
 

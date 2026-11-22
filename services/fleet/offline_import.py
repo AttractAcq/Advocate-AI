@@ -50,6 +50,35 @@ def load_import_key(path: Path) -> Ed25519PublicKey:
     return key
 
 
+def load_import_trust(path: Path) -> tuple[Ed25519PublicKey, ...]:
+    """Load a bounded, owner-controlled issuer set for an overlap window."""
+    if not path.is_absolute():
+        raise ValueError("offline import trust manifest path must be absolute")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077 or info.st_size > 4096):
+            raise ValueError("offline import trust manifest must be owner-only")
+        raw = os.read(descriptor, 4097)
+    finally:
+        os.close(descriptor)
+    if len(raw) > 4096:
+        raise ValueError("offline import trust manifest is too large")
+    try:
+        paths = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid offline import trust manifest") from exc
+    if (not isinstance(paths, list) or not 1 <= len(paths) <= 4
+            or any(not isinstance(item, str) or not item for item in paths)
+            or len(set(paths)) != len(paths)):
+        raise ValueError("offline import trust manifest requires 1-4 distinct paths")
+    keys = tuple(load_import_key(Path(item)) for item in paths)
+    if len({key_id(key) for key in keys}) != len(keys):
+        raise ValueError("offline import trust manifest repeats an issuer")
+    return keys
+
+
 def key_id(key: Ed25519PublicKey) -> str:
     raw = key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     return hashlib.sha256(raw).hexdigest()

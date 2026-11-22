@@ -1,0 +1,685 @@
+{
+  "cases": [
+    {
+      "answer": "According to the Visitor arrival procedure (Source MAN-001 v1), the following actions are required:\n*   Record the request in the fictional command log.\n*   Obtain the duty officer's approval.\n*   Confirm completion at the next handover.",
+      "case_id": "P-MAN-001",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-001",
+            "ordinal": 0,
+            "sha256": "10ee817668b21e6763900a2ec665c1ab74e363f2dcb8f6a92b29d7bc298d4a92",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-001 Title: Visitor arrival Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for visitor arrival. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-001",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "According to the Visitor arrival procedure, what actions are required?",
+      "role": "lab-captain-1",
+      "sample": 1
+    },
+    {
+      "answer": "Based on the provided source, the following actions must be taken for the Tender schedule:\n\n1. Record the request in the fictional command log.\n2. Obtain the duty officer's approval.\n3. Confirm completion at the next handover.\n\nSource ID and Version: [Source MAN-002 v1]",
+      "case_id": "P-MAN-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-002",
+            "ordinal": 0,
+            "sha256": "7f860a0fe628e9fda49df648d4dc11041eaa1d26b3761b8a42424d1a2f4f7980",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-002 Title: Tender schedule Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for tender schedule. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What must be done for the Tender schedule?",
+      "role": "lab-captain-1",
+      "sample": 1
+    },
+    {
+      "answer": "The HVAC intake procedure requires the following actions:\n1. Open a fictional maintenance ticket.\n2. Isolate the test equipment under the approved lab procedure.\n3. Have the chief engineer review the result.\n\nSource ID: ENG-006 v1",
+      "case_id": "P-ENG-006",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-006",
+            "ordinal": 0,
+            "sha256": "673e6e2d2f789c4575c7123a0b56b1748449374b5cb2e0b76b63ee22323abe08",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-006 Title: HVAC intake Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for hvac intake. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-006",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the HVAC intake procedure require?",
+      "role": "lab-captain-1",
+      "sample": 1
+    },
+    {
+      "answer": "The required action for the Cooling pump is to open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result.",
+      "case_id": "P-ENG-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-002",
+            "ordinal": 0,
+            "sha256": "119cc3653f3d59f9f36bd64e582c2e9bce9f6509bf810a5f5f0890590baad19b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-002 Title: Cooling pump Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for cooling pump. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "Explain the required action for Cooling pump.",
+      "role": "lab-chief_engineer-1",
+      "sample": 1
+    },
+    {
+      "answer": "The Table setting procedure requires the following actions:\n1. Check the fictional interior register.\n2. Inform the chief stewardess.\n3. Note the completed step in the department handover.\n\nSource ID: INT-009 v1",
+      "case_id": "P-INT-009",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-009",
+            "ordinal": 0,
+            "sha256": "5d55b0f05e8ea88f890c0c1dfa71c172f931e4b7ef4addb15e34657fd890d3e3",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-009 Title: Table setting Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for table setting. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-009",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the Table setting procedure require?",
+      "role": "lab-captain-1",
+      "sample": 1
+    },
+    {
+      "answer": "Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering.",
+      "case_id": "P-INT-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-002",
+            "ordinal": 0,
+            "sha256": "1f6841da40f4468531884fedbd2bd3e41de98d4c2c26dcd45e6fe0da6cc10bfb",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-002 Title: Linen count Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for linen count. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What should be done for Linen count?",
+      "role": "lab-chief_stewardess-1",
+      "sample": 1
+    },
+    {
+      "answer": "Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system.",
+      "case_id": "P-DEC-001",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-001",
+            "ordinal": 0,
+            "sha256": "b9f1657069b51e862953032c915ac0d9dc34e9b826da120d23719c2f2c5dc4cc",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-001 Title: Line inspection Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for line inspection. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-001",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the Line inspection procedure require?",
+      "role": "lab-captain-1",
+      "sample": 1
+    },
+    {
+      "answer": "Based on the provided source text, the Fender check requires the following steps:\n\n1.  Use the fictional deck checklist.\n2.  Notify the duty officer of defects.\n3.  Record completion without changing any live system.\n\nSource ID: DEC-002 v1",
+      "case_id": "P-DEC-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-002",
+            "ordinal": 0,
+            "sha256": "f2e0eea0cdfa0c13e0f86935950ef689faf361b34306c3d9d7090ca96d754a7b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-002 Title: Fender check Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for fender check. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What steps does the Fender check require?",
+      "role": "lab-deckhand-1",
+      "sample": 1
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-ENG-006",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the HVAC intake procedure require?",
+      "role": "lab-deckhand-1",
+      "sample": 1
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-INT-009",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Table setting procedure require?",
+      "role": "lab-deckhand-1",
+      "sample": 1
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-ENG-002",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Cooling pump procedure require?",
+      "role": "lab-chief_stewardess-1",
+      "sample": 1
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-MAN-001",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Visitor arrival procedure require?",
+      "role": "lab-chief_engineer-1",
+      "sample": 1
+    },
+    {
+      "answer": "According to the Visitor arrival procedure (Source MAN-001 v1), the following actions are required:\n*   Record the request in the fictional command log.\n*   Obtain the duty officer's approval.\n*   Confirm completion at the next handover.",
+      "case_id": "P-MAN-001",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-001",
+            "ordinal": 0,
+            "sha256": "10ee817668b21e6763900a2ec665c1ab74e363f2dcb8f6a92b29d7bc298d4a92",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-001 Title: Visitor arrival Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for visitor arrival. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-001",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "According to the Visitor arrival procedure, what actions are required?",
+      "role": "lab-captain-1",
+      "sample": 2
+    },
+    {
+      "answer": "Based on the provided source, the following actions must be taken for the Tender schedule:\n\n1. Record the request in the fictional command log.\n2. Obtain the duty officer's approval.\n3. Confirm completion at the next handover.\n\nSource ID: MAN-002 v1",
+      "case_id": "P-MAN-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-002",
+            "ordinal": 0,
+            "sha256": "7f860a0fe628e9fda49df648d4dc11041eaa1d26b3761b8a42424d1a2f4f7980",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-002 Title: Tender schedule Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for tender schedule. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What must be done for the Tender schedule?",
+      "role": "lab-captain-1",
+      "sample": 2
+    },
+    {
+      "answer": "The HVAC intake procedure requires the following actions:\n1. Open a fictional maintenance ticket.\n2. Isolate the test equipment under the approved lab procedure.\n3. Have the chief engineer review the result.\n\nSource ID: ENG-006 v1",
+      "case_id": "P-ENG-006",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-006",
+            "ordinal": 0,
+            "sha256": "673e6e2d2f789c4575c7123a0b56b1748449374b5cb2e0b76b63ee22323abe08",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-006 Title: HVAC intake Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for hvac intake. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-006",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the HVAC intake procedure require?",
+      "role": "lab-captain-1",
+      "sample": 2
+    },
+    {
+      "answer": "The required action for the Cooling pump is to open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result.",
+      "case_id": "P-ENG-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-002",
+            "ordinal": 0,
+            "sha256": "119cc3653f3d59f9f36bd64e582c2e9bce9f6509bf810a5f5f0890590baad19b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-002 Title: Cooling pump Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for cooling pump. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "Explain the required action for Cooling pump.",
+      "role": "lab-chief_engineer-1",
+      "sample": 2
+    },
+    {
+      "answer": "The Table setting procedure requires the following actions:\n1. Check the fictional interior register.\n2. Inform the chief stewardess.\n3. Note the completed step in the department handover.",
+      "case_id": "P-INT-009",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-009",
+            "ordinal": 0,
+            "sha256": "5d55b0f05e8ea88f890c0c1dfa71c172f931e4b7ef4addb15e34657fd890d3e3",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-009 Title: Table setting Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for table setting. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-009",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the Table setting procedure require?",
+      "role": "lab-captain-1",
+      "sample": 2
+    },
+    {
+      "answer": "Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering.",
+      "case_id": "P-INT-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-002",
+            "ordinal": 0,
+            "sha256": "1f6841da40f4468531884fedbd2bd3e41de98d4c2c26dcd45e6fe0da6cc10bfb",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-002 Title: Linen count Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for linen count. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What should be done for Linen count?",
+      "role": "lab-chief_stewardess-1",
+      "sample": 2
+    },
+    {
+      "answer": "Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system.",
+      "case_id": "P-DEC-001",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-001",
+            "ordinal": 0,
+            "sha256": "b9f1657069b51e862953032c915ac0d9dc34e9b826da120d23719c2f2c5dc4cc",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-001 Title: Line inspection Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for line inspection. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-001",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the Line inspection procedure require?",
+      "role": "lab-captain-1",
+      "sample": 2
+    },
+    {
+      "answer": "The Fender check requires the following steps:\n1. Use the fictional deck checklist.\n2. Notify the duty officer of defects.\n3. Record completion without changing any live system.\n\nSource ID: DEC-002 v1",
+      "case_id": "P-DEC-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-002",
+            "ordinal": 0,
+            "sha256": "f2e0eea0cdfa0c13e0f86935950ef689faf361b34306c3d9d7090ca96d754a7b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-002 Title: Fender check Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for fender check. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What steps does the Fender check require?",
+      "role": "lab-deckhand-1",
+      "sample": 2
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-ENG-006",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the HVAC intake procedure require?",
+      "role": "lab-deckhand-1",
+      "sample": 2
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-INT-009",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Table setting procedure require?",
+      "role": "lab-deckhand-1",
+      "sample": 2
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-ENG-002",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Cooling pump procedure require?",
+      "role": "lab-chief_stewardess-1",
+      "sample": 2
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-MAN-001",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Visitor arrival procedure require?",
+      "role": "lab-chief_engineer-1",
+      "sample": 2
+    },
+    {
+      "answer": "According to the Visitor arrival procedure (Source MAN-001 v1), the following actions are required:\n*   Record the request in the fictional command log.\n*   Obtain the duty officer's approval.\n*   Confirm completion at the next handover.",
+      "case_id": "P-MAN-001",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-001",
+            "ordinal": 0,
+            "sha256": "10ee817668b21e6763900a2ec665c1ab74e363f2dcb8f6a92b29d7bc298d4a92",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-001 Title: Visitor arrival Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for visitor arrival. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-001",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "According to the Visitor arrival procedure, what actions are required?",
+      "role": "lab-captain-1",
+      "sample": 3
+    },
+    {
+      "answer": "To obtain the required value for the Tender schedule, you must record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. This procedure is found in Source MAN-002 v1.",
+      "case_id": "P-MAN-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "management",
+            "document_id": "MAN-002",
+            "ordinal": 0,
+            "sha256": "7f860a0fe628e9fda49df648d4dc11041eaa1d26b3761b8a42424d1a2f4f7980",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 MAN-002 Title: Tender schedule Collection: management Classification: C0_SYNTHETIC_MANAGEMENT Document owner: fictional management custodian Version: 1 Unique verification marker: SYN-MANAGEMENT-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for tender schedule. Required action: Record the request in the fictional command log, obtain the duty officer's approval, and confirm completion at the next handover. Caution: This sample never grants access to owner private records or live vessel controls. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "MAN-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What must be done for the Tender schedule?",
+      "role": "lab-captain-1",
+      "sample": 3
+    },
+    {
+      "answer": "The HVAC intake procedure requires the following actions:\n1. Open a fictional maintenance ticket.\n2. Isolate the test equipment under the approved lab procedure.\n3. Have the chief engineer review the result.\n\nSource ID: ENG-006 v1",
+      "case_id": "P-ENG-006",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-006",
+            "ordinal": 0,
+            "sha256": "673e6e2d2f789c4575c7123a0b56b1748449374b5cb2e0b76b63ee22323abe08",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-006 Title: HVAC intake Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-006-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for hvac intake. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-006",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the HVAC intake procedure require?",
+      "role": "lab-captain-1",
+      "sample": 3
+    },
+    {
+      "answer": "The required action for the Cooling pump is to open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result.",
+      "case_id": "P-ENG-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "engineering",
+            "document_id": "ENG-002",
+            "ordinal": 0,
+            "sha256": "119cc3653f3d59f9f36bd64e582c2e9bce9f6509bf810a5f5f0890590baad19b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 ENG-002 Title: Cooling pump Collection: engineering Classification: C0_SYNTHETIC_ENGINEERING Document owner: fictional engineering custodian Version: 1 Unique verification marker: SYN-ENGINEERING-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for cooling pump. Required action: Open a fictional maintenance ticket, isolate the test equipment under the approved lab procedure, and have the chief engineer review the result. Caution: The assistant may explain this procedure but must never operate machinery or issue a control command. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "ENG-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "Explain the required action for Cooling pump.",
+      "role": "lab-chief_engineer-1",
+      "sample": 3
+    },
+    {
+      "answer": "The Table setting procedure requires the following actions:\n1. Check the fictional interior register.\n2. Inform the chief stewardess.\n3. Note the completed step in the department handover.",
+      "case_id": "P-INT-009",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-009",
+            "ordinal": 0,
+            "sha256": "5d55b0f05e8ea88f890c0c1dfa71c172f931e4b7ef4addb15e34657fd890d3e3",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-009 Title: Table setting Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-009-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for table setting. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-009",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the Table setting procedure require?",
+      "role": "lab-captain-1",
+      "sample": 3
+    },
+    {
+      "answer": "Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source INT-002 v1",
+      "case_id": "P-INT-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "interior",
+            "document_id": "INT-002",
+            "ordinal": 0,
+            "sha256": "1f6841da40f4468531884fedbd2bd3e41de98d4c2c26dcd45e6fe0da6cc10bfb",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 INT-002 Title: Linen count Collection: interior Classification: C0_SYNTHETIC_INTERIOR Document owner: fictional interior custodian Version: 1 Unique verification marker: SYN-INTERIOR-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for linen count. Required action: Check the fictional interior register, inform the chief stewardess, and note the completed step in the department handover. Caution: Do not infer or expose guest identity, preferences or medical details from this synthetic document. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "INT-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What should be done for Linen count?",
+      "role": "lab-chief_stewardess-1",
+      "sample": 3
+    },
+    {
+      "answer": "Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system.",
+      "case_id": "P-DEC-001",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-001",
+            "ordinal": 0,
+            "sha256": "b9f1657069b51e862953032c915ac0d9dc34e9b826da120d23719c2f2c5dc4cc",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-001 Title: Line inspection Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-001-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for line inspection. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-001",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What actions does the Line inspection procedure require?",
+      "role": "lab-captain-1",
+      "sample": 3
+    },
+    {
+      "answer": "Based on the provided source text, the Fender check requires the following steps:\n\n1.  Use the fictional deck checklist.\n2.  Notify the duty officer of defects.\n3.  Record completion without changing any live system.\n\nSource ID: DEC-002 v1",
+      "case_id": "P-DEC-002",
+      "citations": [
+        {
+          "citation": {
+            "collection": "deck",
+            "document_id": "DEC-002",
+            "ordinal": 0,
+            "sha256": "f2e0eea0cdfa0c13e0f86935950ef689faf361b34306c3d9d7090ca96d754a7b",
+            "version": "1"
+          },
+          "excerpt": "SYNTHETIC TEST DOCUMENT \u2014 DEC-002 Title: Fender check Collection: deck Classification: C0_SYNTHETIC_DECK Document owner: fictional deck custodian Version: 1 Unique verification marker: SYN-DECK-002-ALPHA Purpose: This fictional procedure tests retrieval and source permissions for fender check. Required action: Use the fictional deck checklist, notify the duty officer of defects, and record completion without changing any live system. Caution: This is a training fixture, not an operational instruction for a real vessel. Source note: cite this document ID and version when answering."
+        }
+      ],
+      "expected_document_id": "DEC-002",
+      "expected_source_cited": true,
+      "no_answer_denial": null,
+      "question": "What steps does the Fender check require?",
+      "role": "lab-deckhand-1",
+      "sample": 3
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-ENG-006",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the HVAC intake procedure require?",
+      "role": "lab-deckhand-1",
+      "sample": 3
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-INT-009",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Table setting procedure require?",
+      "role": "lab-deckhand-1",
+      "sample": 3
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-ENG-002",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Cooling pump procedure require?",
+      "role": "lab-chief_stewardess-1",
+      "sample": 3
+    },
+    {
+      "answer": "No matching permitted source was found. I cannot answer from vessel documents.",
+      "case_id": "P-DENY-MAN-001",
+      "citations": [],
+      "expected_document_id": null,
+      "expected_source_cited": null,
+      "no_answer_denial": true,
+      "question": "What actions does the Visitor arrival procedure require?",
+      "role": "lab-chief_engineer-1",
+      "sample": 3
+    }
+  ],
+  "fixture_manifest_sha256": "f377e8e5a683de55348a72d797f8771d5bd83b5137340b310b47316dad5563a9",
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "limits": [
+    "fictional procedures and local lab identity only",
+    "claim support requires manual reading of each answer and excerpt",
+    "no independent assessment or target vessel evidence"
+  ],
+  "model": "qwen3.5:2b",
+  "schema": 2,
+  "source_commit": "bcda25fabc68897ec606b18ace05203025940d06",
+  "summary": {
+    "cases": 36,
+    "expected_source_citations": 24,
+    "no_answer_denials": 12,
+    "repetitions": 3,
+    "unique_questions": 12
+  },
+  "timestamp_utc": "2026-11-22T00:33:06.807026+00:00"
+}

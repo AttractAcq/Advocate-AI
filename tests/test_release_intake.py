@@ -1,19 +1,156 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from infrastructure.release.intake import IntakeError, verify_intake
+from infrastructure.release.intake import IntakeError, MAX_EVIDENCE_BYTES, verify_intake
+from infrastructure.release.scan import generate_archive_scan
+from infrastructure.release.upstream import (UpstreamError, _read_generated_json,
+                                             _write_new_json, generate_resolved_sbom,
+                                             validate_image_archive)
 
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
 DIGEST = "a" * 64
 IMAGE = f"registry.example.invalid/fictional/identity@sha256:{DIGEST}"
+
+
+class ArchiveStabilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.archive = self.root / "image.tar"
+        self.archive.write_bytes(b"original synthetic archive")
+
+    def test_generated_evidence_rejects_oversize_duplicate_keys_and_links(self) -> None:
+        raw = self.root / "raw.json"
+        with raw.open("wb") as stream:
+            stream.seek(MAX_EVIDENCE_BYTES)
+            stream.write(b"x")
+        with self.assertRaisesRegex(UpstreamError, "exceeds size limit"):
+            _read_generated_json(raw)
+        raw.write_bytes(b'{"version":1,"version":2}')
+        with self.assertRaisesRegex(UpstreamError, "duplicate generated evidence key"):
+            _read_generated_json(raw)
+        linked = self.root / "linked.json"
+        linked.symlink_to(raw)
+        with self.assertRaises(OSError):
+            _read_generated_json(linked)
+        with self.assertRaisesRegex(UpstreamError, "exceeds size limit"):
+            _write_new_json(self.root / "evidence.json", {"blob": "x" * MAX_EVIDENCE_BYTES})
+        self.assertFalse((self.root / "evidence.json").exists())
+
+    def test_crane_validation_rejects_archive_changed_during_digest_read(self) -> None:
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return "0.22.1"
+            if argv[1] == "digest":
+                self.archive.write_bytes(b"changed synthetic archive")
+                return f"sha256:{DIGEST}"
+            return ""
+
+        with patch("infrastructure.release.upstream._binary"), \
+             patch("infrastructure.release.upstream._run", side_effect=run):
+            with self.assertRaisesRegex(UpstreamError, "changed during validation"):
+                validate_image_archive(self.archive, IMAGE, Path("/fake/crane"), "0" * 64)
+
+    def test_syft_inventory_rejects_archive_changed_during_catalog(self) -> None:
+        def run(argv, **kwargs):
+            if argv[0] == "/fake/crane":
+                return "0.22.1" if argv[1] == "version" else \
+                    f"sha256:{DIGEST}" if argv[1] == "digest" else ""
+            if argv[1] == "version":
+                return json.dumps({"version": "1.57.1"})
+            output = Path(next(value.split("=", 1)[1] for value in argv
+                               if value.startswith("cyclonedx-json@1.6=")))
+            output.write_text(json.dumps({
+                "bomFormat": "CycloneDX", "specVersion": "1.6",
+                "metadata": {"tools": {"components": [{"name": "syft", "version": "1.57.1"}]}},
+                "components": [{"bom-ref": "fictional", "name": "fictional"}],
+            }))
+            self.archive.write_bytes(b"changed synthetic archive")
+            return ""
+
+        with patch("infrastructure.release.upstream._binary"), \
+             patch("infrastructure.release.upstream._run", side_effect=run):
+            with self.assertRaisesRegex(UpstreamError, "changed during inventory generation"):
+                generate_resolved_sbom(self.archive, IMAGE, self.root / "sbom.json",
+                                       Path("/fake/crane"), "0" * 64,
+                                       Path("/fake/syft"), "0" * 64)
+        self.assertFalse((self.root / "sbom.json").exists())
+
+    def test_sbom_output_replacement_cannot_overwrite_another_file(self) -> None:
+        output = self.root / "sbom.json"
+        outside = self.root / "outside.txt"
+        outside.write_text("preserve this file")
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return json.dumps({"version": "1.57.1"})
+            raw = Path(next(value.split("=", 1)[1] for value in argv
+                            if value.startswith("cyclonedx-json@1.6=")))
+            raw.write_text(json.dumps({
+                "bomFormat": "CycloneDX", "specVersion": "1.6",
+                "metadata": {"tools": {"components": [{"name": "syft", "version": "1.57.1"}]}},
+                "components": [{"bom-ref": "fictional", "name": "fictional"}],
+            }))
+            output.symlink_to(outside)
+            return ""
+
+        identity = {"archive_sha256": hashlib.sha256(self.archive.read_bytes()).hexdigest()}
+        with patch("infrastructure.release.upstream.validate_image_archive", return_value=identity), \
+             patch("infrastructure.release.upstream._binary"), \
+             patch("infrastructure.release.upstream._run", side_effect=run):
+            with self.assertRaises(FileExistsError):
+                generate_resolved_sbom(self.archive, IMAGE, output, Path("/fake/crane"),
+                                       "0" * 64, Path("/fake/syft"), "0" * 64)
+        self.assertEqual(outside.read_text(), "preserve this file")
+
+    def test_trivy_raw_output_uses_private_directory(self) -> None:
+        output = self.root / "scan.json"
+        outside = self.root / "outside.txt"
+        outside.write_text("preserve this file")
+        cache = self.root / "cache" / "db"
+        cache.mkdir(parents=True)
+        (cache / "trivy.db").write_bytes(b"synthetic scanner database")
+        now = datetime.now(timezone.utc)
+        updated = (now - timedelta(hours=1)).isoformat()
+        next_update = (now + timedelta(days=1)).isoformat()
+        (cache / "metadata.json").write_text(json.dumps({
+            "Version": 2, "UpdatedAt": updated, "NextUpdate": next_update,
+        }))
+        report = {"SchemaVersion": 2, "ArtifactType": "container_image",
+                  "ArtifactName": str(self.archive), "Trivy": {"Version": "0.76.2"},
+                  "Metadata": {}, "Results": [{"Target": "fictional", "Vulnerabilities": []}],
+                  "CreatedAt": now.isoformat()}
+
+        def run(argv, **kwargs):
+            if argv[1] == "--version":
+                return "Version: 0.76.2"
+            raw = Path(argv[argv.index("--output") + 1])
+            self.assertEqual(raw.parent.stat().st_mode & 0o777, 0o700)
+            (self.root / "scan.json.raw.tmp").symlink_to(outside)
+            raw.write_text(json.dumps(report))
+            return ""
+
+        identity = {"archive_sha256": hashlib.sha256(self.archive.read_bytes()).hexdigest(),
+                    "manifest_digest": f"sha256:{DIGEST}"}
+        with patch("infrastructure.release.scan.validate_image_archive", return_value=identity), \
+             patch("infrastructure.release.scan._binary"), \
+             patch("infrastructure.release.scan._run", side_effect=run):
+            generated = generate_archive_scan(
+                self.archive, IMAGE, output, Path("/fake/crane"), "0" * 64,
+                Path("/fake/trivy"), "0" * 64, cache.parent)
+        self.assertEqual(outside.read_text(), "preserve this file")
+        self.assertEqual(generated["scan_sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
 
 
 class ReleaseIntakeTests(unittest.TestCase):
@@ -51,6 +188,51 @@ class ReleaseIntakeTests(unittest.TestCase):
         result = self.verify()
         self.assertEqual(result["status"], "preflight-pass")
         self.assertEqual(result["components"], 1)
+
+    def test_evidence_read_stays_on_opened_file_after_path_replacement(self) -> None:
+        scan_path, scan_hash = self.write("scan.json", self.scan)
+        sbom_path, sbom_hash = self.write("sbom.json", self.sbom)
+        outside = self.root / "outside.json"
+        outside.write_bytes(b"not release evidence")
+        original_fdopen = os.fdopen
+        replaced = False
+
+        def replace_after_open(descriptor, *args, **kwargs):
+            nonlocal replaced
+            if not replaced:
+                replaced = True
+                scan_path.rename(self.root / "original.json")
+                scan_path.symlink_to(outside)
+            return original_fdopen(descriptor, *args, **kwargs)
+
+        with patch("infrastructure.release.intake.os.fdopen",
+                   side_effect=replace_after_open):
+            result = verify_intake(scan_path, sbom_path, IMAGE, scan_hash,
+                                   sbom_hash, now=NOW)
+        self.assertEqual(result["status"], "preflight-pass")
+        self.assertTrue(scan_path.is_symlink())
+
+    def test_evidence_links_and_oversize_are_rejected(self) -> None:
+        scan_path, scan_hash = self.write("scan.json", self.scan)
+        sbom_path, sbom_hash = self.write("sbom.json", self.sbom)
+        linked = self.root / "linked.json"
+        linked.symlink_to(scan_path)
+        with self.assertRaisesRegex(IntakeError, "invalid evidence file"):
+            verify_intake(linked, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
+        linked.unlink()
+        os.link(scan_path, linked)
+        self.assertEqual(verify_intake(scan_path, sbom_path, IMAGE, scan_hash,
+                                       sbom_hash, now=NOW)["status"], "preflight-pass")
+        linked.unlink()
+        os.mkfifo(linked)
+        with self.assertRaisesRegex(IntakeError, "invalid evidence file"):
+            verify_intake(linked, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
+        linked.unlink()
+        with scan_path.open("wb") as stream:
+            stream.seek(MAX_EVIDENCE_BYTES)
+            stream.write(b"x")
+        with self.assertRaisesRegex(IntakeError, "exceeds size limit"):
+            verify_intake(scan_path, sbom_path, IMAGE, scan_hash, sbom_hash, now=NOW)
 
     def test_high_unknown_and_old_scan_rejected(self) -> None:
         for severity in ("HIGH", "CRITICAL", "UNKNOWN"):

@@ -36,6 +36,11 @@ scan and inventory files are retained as CI artifacts; temporary signing keys
 and image archives are not published by the rehearsal. This is evidence of
 the software path, not approval to distribute an image.
 
+The release CI command requires `fleet_bundle: verified` to pass. A scan
+denial exits unsuccessfully, and the workflow still uploads its metadata,
+scan and inventory files for investigation. The product-image release job
+uses the same always-upload behavior when its signed rehearsal fails.
+
 [PR #60's CI evidence](https://github.com/AttractAcq/Advocate-AI/actions/runs/44091882326)
 reported `fleet_bundle: verified`: both actual synthetic Fleet images passed
 archive identity and intake with zero unresolved HIGH, CRITICAL or UNKNOWN
@@ -53,7 +58,8 @@ lab token source. Later updates reuse the installed token and database:
 .venv/bin/python -m infrastructure.deploy.fleet_installer install \
   --bundle /path/to/signed-fleet-bundle --trusted-key /protected/fleet-trust-key.pem \
   --crane /path/to/pinned/crane --config /path/to/fleet-config.json \
-  --root /private/fleet-install --token-file /protected/fleet-lab-token
+  --root /private/fleet-install --token-file /protected/fleet-lab-token \
+  --receipt-trust-dir /protected/receipt-issuers
 .venv/bin/python -m infrastructure.deploy.fleet_installer status \
   --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem
 .venv/bin/python -m infrastructure.deploy.fleet_installer rollback \
@@ -64,6 +70,58 @@ lab token source. Later updates reuse the installed token and database:
 The local runtime publishes no host port. The CI image rehearsal uses the
 no-issuer lab configuration and exercises install, rejected candidate, update,
 rollback and recovery only when both images pass intake.
+
+To enable signed offline receipt import on an installed Fleet API, prepare an
+owner-only `--receipt-trust-dir` before the first install or a clean
+`restore-install`. It must contain only `trusted-issuers.json` and one to four
+owner-only Ed25519 public PEM files named `issuer-1.pem` through
+`issuer-N.pem`. The JSON array must list their container paths in that order,
+for example `["/etc/fleet-import/issuer-1.pem", "/etc/fleet-import/issuer-2.pem"]`.
+The installer copies and validates this directory under its private root.
+The API container sees it at `/etc/fleet-import` through a read-only bind
+mount, and runtime identity checks reject mount, environment or public-key
+content drift. The private signing keys stay on the offline issuer
+workstation. Receipt trust is
+outside the encrypted Fleet catalog backup, so supply the approved trust
+directory again during a clean restore. Trust changes to a running installation
+use `rotate-receipt-trust` with a new approved directory. The command copies
+and checks the new trust, starts the active signed release with the candidate
+trust, commits only after the candidate passes, and then retires the old
+runtime. Its owner-only journal makes interrupted rotation visible; `status`,
+`install` and `rollback` fail closed until `recover` reconciles the old or new
+runtime. Editing installed trust files in place is rejected by the runtime
+identity check.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_installer rotate-receipt-trust \
+  --root /private/fleet-install --trusted-key /protected/fleet-trust-key.pem \
+  --crane /path/to/pinned/crane \
+  --receipt-trust-dir /protected/approved-next-issuers
+```
+
+For an overlap window, provide both old and new public keys. After receipts
+signed by the new issuer have been proven, use a second rotation containing
+only the new public key. Keep each source directory owner-only and separate
+from the installed trust directory. This local operation does not establish
+company issuer approval, revocation timing, protected media or target-host
+reboot recovery; those remain B-12.
+
+The signed-image CI rehearsal now attempts both rotations against actual
+Fleet containers. It imports receipts from both issuers during overlap,
+rejects an old-issuer receipt after retirement, then checks update, rollback,
+boot recovery and encrypted catalog restore under the retired trust set.
+The signed Fleet image CI rehearsal now provisions a fictional issuer,
+submits its CLI-signed coded receipt through the running API container, and
+checks that the receipt survives encrypted catalog restore with separately
+reprovisioned trust. This remains a synthetic offline handoff rehearsal.
+
+The OIDC signed-image rehearsal also installs the same receipt trust in the
+company identity mode. It submits a CLI-signed receipt to the running Fleet
+API with a signed company administrator token, rejects a wrong-audience token,
+and checks that the receipt is stored. A local scoped-role test additionally
+denies support users, foreign-customer imports, unknown issuers and replay.
+These tests use fictional company identities and do not close B-12 identity
+or offline handoff governance.
 
 The OIDC runtime candidate accepts a company HTTPS issuer in
 `fleet-config.json`. Before installation, a company administrator provisions a
@@ -162,6 +220,13 @@ TLS, backup or operator access.
 The local Fleet backup command verifies the catalog audit chain, snapshots
 only `fleet.db` through the existing SQLite-safe backup code and encrypts it
 with AES-256-GCM. It excludes the lab token, signing keys and portal config.
+Before creating a snapshot, it estimates space for the SQLite staging copy and
+encrypted archive on the backup volume, with a 128 MiB reserve; insufficient
+space rejects the backup before an archive or staging file is created. Clean
+restore also estimates room for the decrypted payload and restored SQLite copy
+before decryption or destination creation. These are preflight estimates;
+production quotas, concurrent writes and actual peak usage need target-host
+measurement.
 An OIDC roles file and the identity network are also outside the encrypted
 catalog archive and must be reprovisioned separately during recovery.
 Restore authenticates into a new private directory and verifies the catalog
@@ -182,8 +247,10 @@ The synthetic daily backup candidate creates a new timestamped encrypted
 archive and immediately performs an authenticated clean restore of the newest
 archive, including the Fleet audit-chain check. It fails if no archive exists,
 the newest one is stale or damaged, or the archive count reaches the configured
-limit. It never deletes an archive: an owner-approved retention policy and
-protected storage capacity are still required. Render the units into a private
+limit. The timer never deletes an archive. The service creates an owner-only
+`.fleet-backup.lock` in the archive directory, shared with the manual retention
+command. An owner-approved production retention policy and protected storage
+capacity are still required. Render the units into a private
 staging directory, review them, and validate with `systemd-analyze verify`
 on a compatible host before installation. The `sovereign-fleet` service user
 must own the catalog, archive directory and key source. The timer and service
@@ -198,6 +265,41 @@ names are fixed so the timer cannot point at a different unit.
   --workdir /opt/sovereign --hour-utc 3 --max-age-hours 26 \
   --max-archives 30
 ```
+
+The manual synthetic retention command takes an owner-only JSON policy such as
+`{"schema":1,"keep_last":2,"max_age_hours":26}`. `plan` records the exact
+archive names, sizes and SHA-256 digests in a new owner-only file outside the
+archive directory; it deletes nothing. Review its `retain` and `remove` lists,
+then supply the printed plan digest to `apply` within 24 hours. `apply` rejects
+changed policy bytes, archive inventory or directory identity and clean-restores
+every retained encrypted archive before deleting the listed older archives.
+The latest retained archive must meet the policy freshness limit. A failed
+restore leaves every archive in place. If deletion is interrupted, inspect the
+remaining set and make a new plan; there is no automatic retry or rollback.
+
+```sh
+.venv/bin/python -m infrastructure.deploy.fleet_backup_retention plan \
+  --directory /private/backups --policy /protected/fleet-retention.json \
+  --output /protected/fleet-retention-plan.json
+.venv/bin/python -m infrastructure.deploy.fleet_backup_retention apply \
+  --directory /private/backups --policy /protected/fleet-retention.json \
+  --plan /protected/fleet-retention-plan.json --plan-sha256 REVIEWED_DIGEST \
+  --key /protected/fleet-backup.key
+```
+
+The minimum keep count of two is a software guard, not an approved retention
+period. The company must approve policy, archive media, legal holds and key
+custody before this process can govern production backups. Target systemd and
+protected-media behavior remain unverified.
+
+The actual-image Fleet release rehearsal now creates three encrypted catalog
+archives against a three-archive limit, confirms that a fourth is refused,
+reviews and applies an exact plan retaining the newest two, creates another
+archive, verifies its clean restore and uses it for the second signed Fleet
+installation. The retained result field is
+`archive_retention: reviewed-plan-applied-and-backup-resumed`. This exercises
+the host-side retention command with a catalog produced by the signed Fleet
+runtime; it does not establish an approved production retention policy.
 
 For boot recovery, render the Fleet one-shot unit into the same private staging
 area and validate it before installation. It waits for Docker, requires an

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { fleetApi } from './api'
-import type { FleetAuthMode, FleetRow } from './api'
+import { fleetApi, parseFleetOverview } from './api'
+import type { FleetAuthMode, FleetOverview, FleetRow, RecordKind } from './api'
 import { beginOidc, endOidc, finishOidc, oidcEnabled } from './oidc'
 import { signedReceiptEnvelope } from './receipt'
 import type { ReceiptInput } from './receipt'
@@ -11,6 +11,10 @@ type Section = 'overview' | 'customers' | 'releases' | 'deployments' |
 type Field = { name: string; label: string; type?: 'date'; options?: string[] }
 type FleetRole = 'fleet_admin' | 'fleet_release_manager' | 'fleet_support' | 'fleet_viewer'
 type Identity = { id: string; role: FleetRole; customer_codes: string[] }
+const sectionKinds: Partial<Record<Section, RecordKind>> = {
+  customers: 'customer', releases: 'release', deployments: 'deployment',
+  licences: 'licence', tickets: 'ticket', maintenance: 'maintenance', receipts: 'receipt',
+}
 
 function mayWrite(role: FleetRole, section: Section): boolean {
   if (role === 'fleet_admin') return true
@@ -103,6 +107,7 @@ export default function App() {
   const [entryToken, setEntryToken] = useState('')
   const [section, setSection] = useState<Section>('overview')
   const [rows, setRows] = useState<Record<string, FleetRow[]>>({})
+  const [overview, setOverview] = useState<FleetOverview | null>(null)
   const [hasMore, setHasMore] = useState<Record<string, boolean>>({})
   const [form, setForm] = useState<Record<string, string>>({})
   const [receiptForm, setReceiptForm] = useState<ReceiptInput>(emptyReceipt)
@@ -114,10 +119,14 @@ export default function App() {
     setLoading(true)
     setError('')
     try {
-      const entries = await Promise.all(sections.filter((item) =>
-        item.endpoint && (item.id !== 'audit' || mayReadAudit(role))).map(async (item) =>
-        [item.id, await fleetApi<FleetRow[]>(`/api/fleet/${item.endpoint}`, activeToken,
-                                     undefined, authMode)] as const))
+      const [summary, entries] = await Promise.all([
+        fleetApi<unknown>('/api/fleet/overview', activeToken, undefined, authMode),
+        Promise.all(sections.filter((item) =>
+          item.endpoint && (item.id !== 'audit' || mayReadAudit(role))).map(async (item) =>
+          [item.id, await fleetApi<FleetRow[]>(`/api/fleet/${item.endpoint}`, activeToken,
+                                       undefined, authMode)] as const)),
+      ])
+      setOverview(parseFleetOverview(summary))
       setRows(Object.fromEntries(entries))
       setHasMore(Object.fromEntries(entries.map(([id, values]) => [id, values.length === 100])))
     } catch (cause) {
@@ -126,6 +135,7 @@ export default function App() {
         setToken('')
         setIdentity(null)
         setRows({})
+        setOverview(null)
         setHasMore({})
       }
       setError(message)
@@ -177,6 +187,7 @@ export default function App() {
     setIdentity(null)
     setEntryToken('')
     setRows({})
+    setOverview(null)
     setHasMore({})
     setForm({})
     setReceiptForm(emptyReceipt)
@@ -273,7 +284,7 @@ export default function App() {
   if (!token || !identity) return (
     <main className="signin-shell">
       <div className="signin-panel">
-        <div className="brand-mark">S<span>◇</span></div>
+        <div className="brand-mark" aria-hidden="true">S<span>◇</span></div>
         <p className="eyebrow">Sovereign · company workspace</p>
         <h1>Fleet operations</h1>
         <p className="muted">Synthetic local portal for coded company metadata. Vessel documents, prompts, embeddings and security logs are excluded.</p>
@@ -294,7 +305,7 @@ export default function App() {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">S<span>◇</span></span><span><strong>Sovereign</strong><small>FLEET · LAB</small></span></div>
+        <div className="brand"><span className="brand-mark" aria-hidden="true">S<span>◇</span></span><span><strong>Sovereign</strong><small>FLEET · LAB</small></span></div>
         <nav aria-label="Fleet sections">
           {availableSections.map((item) => <button key={item.id} type="button"
             className={section === item.id ? 'nav-link active' : 'nav-link'}
@@ -317,8 +328,24 @@ export default function App() {
             <>
               <div className="metrics">{availableSections.filter((item) => item.endpoint && item.id !== 'audit').map((item) =>
                 <button type="button" className="metric" key={item.id} onClick={() => setSection(item.id)}>
-                  <span>{item.label}</span><strong>{rows[item.id] ? `${rows[item.id].length}${hasMore[item.id] ? '+' : ''}` : '—'}</strong><small>View records →</small>
+                  <span>{item.label}</span><strong>{overview && sectionKinds[item.id] ?
+                    overview.counts[sectionKinds[item.id]!] : '—'}</strong><small>View records →</small>
                 </button>)}</div>
+              <section className="table-panel" aria-label="Operational attention">
+                <div className="panel-heading"><h2>Needs review</h2><span>{overview ?
+                  `${overview.attention_total} as of ${overview.as_of}` : 'Loading'}</span></div>
+                <p className="muted">Synthetic date and priority flags. An operator decides any status change.</p>
+                <div className="table-scroll"><table><thead><tr>
+                  <th scope="col">Type</th><th scope="col">Code</th><th scope="col">Vessel</th>
+                  <th scope="col">Reason</th><th scope="col">Date</th>
+                </tr></thead><tbody>{overview?.attention.map((item) => <tr key={`${item.kind}:${item.code}`}>
+                  <td>{display(item.kind, 'kind')}</td><td>{item.code}</td><td>{item.vessel_code}</td>
+                  <td>{display(item.reason, 'reason')}</td><td>{item.due_on || '—'}</td>
+                </tr>)}</tbody></table></div>
+                {overview && !overview.attention_total && <p className="empty">No dated or urgent records need review.</p>}
+                {overview && overview.attention_total > overview.attention.length &&
+                  <p className="muted">Showing the first {overview.attention.length} attention records.</p>}
+              </section>
               <div className="info-panel"><h2>Offline by design</h2><p>Fleet has no standing connection to a strict-mode vessel. Signed receipt imports and verified product releases use an approved offline administrative process. This portal currently runs only in a synthetic local lab.</p></div>
             </>
           ) : (

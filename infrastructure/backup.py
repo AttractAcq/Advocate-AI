@@ -28,7 +28,7 @@ NONCE_SIZE = 12
 TAG_SIZE = 16
 CHUNK = 1024 * 1024
 MAX_MANIFEST = 64 * 1024
-MAX_FILES = 32
+MAX_FILES = 128
 MAX_FILE = 256 * 1024 * 1024
 MAX_TOTAL = 1024 * 1024 * 1024
 
@@ -88,7 +88,9 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def _snapshot(spec: dict[str, object], base: Path, stage: Path, key_path: Path,
-              output: Path) -> list[dict[str, object]]:
+              output: Path, *, max_file: int = MAX_FILE) -> list[dict[str, object]]:
+    if type(max_file) is not int or not 1 <= max_file <= MAX_TOTAL:
+        raise BackupError("invalid snapshot file limit")
     if not isinstance(spec, dict) or set(spec) != {"schema", "files"} or spec["schema"] != 1:
         raise BackupError("invalid backup specification")
     files = spec["files"]
@@ -123,9 +125,10 @@ def _snapshot(spec: dict[str, object], base: Path, stage: Path, key_path: Path,
                 raise BackupError("SQLite snapshot failed") from exc
         else:
             shutil.copyfile(source, destination)
+        destination.chmod(0o600)
         size = destination.stat().st_size
         total += size
-        if size > MAX_FILE or total > MAX_TOTAL:
+        if size > max_file or total > MAX_TOTAL:
             raise BackupError("backup exceeds synthetic size limit")
         rows.append({"name": name, "kind": entry["kind"], "size": size,
                      "sha256": _sha256(destination)})

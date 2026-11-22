@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import base64
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import tempfile
@@ -13,10 +16,15 @@ from unittest.mock import patch
 import httpx
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from apps.api.oidc import OidcVerifier
 from apps.fleet.main import FleetSettings, create_app
-from services.fleet.catalog import FleetCatalog, Release
+from services.fleet.catalog import (
+    Customer, Deployment, DeploymentReceipt, FleetCatalog, Licence, Release, Ticket,
+)
+from services.fleet.offline_import import key_id, receipt_bytes
+from scripts.phase8_fleet_oidc_rehearsal import _post_signed_receipt
 
 
 class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
@@ -39,12 +47,12 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
         key = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.private.public_key()))
         key.update(kid="fleet-lab-key", alg="RS256", use="sig")
         self.issuer = "http://127.0.0.1:18086/realms/fleet-lab"
-        verifier = OidcVerifier(
+        self.verifier = OidcVerifier(
             self.issuer, self.roles_path, audience="sovereign-fleet",
             authorized_client="sovereign-fleet-portal",
             transport=httpx.MockTransport(lambda request: httpx.Response(
                 200, json={"keys": [key]})))
-        app = create_app(FleetSettings(self.db, None, oidc_verifier=verifier))
+        app = create_app(FleetSettings(self.db, None, oidc_verifier=self.verifier))
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                         base_url="http://fleet.invalid")
 
@@ -140,6 +148,99 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
             "/api/fleet/customers", headers={"X-Fleet-Lab-Token":
                                               "synthetic-fleet-admin-token-0123456789"}
         )).status_code, 401)
+
+    async def test_operational_overview_obeys_customer_scope(self) -> None:
+        catalog = FleetCatalog(self.db)
+        catalog.add_verified_release(Release(
+            code="REL-LAB1", version="1.0.0", manifest_sha256="a" * 64,
+            signing_key_id="b" * 64, status="candidate"))
+        catalog.transition("release", "REL-LAB1", "approved")
+        today = datetime.now(timezone.utc).date()
+        for suffix in ("1", "2"):
+            customer, vessel = f"CUST-LAB{suffix}", f"VSL-LAB{suffix}"
+            catalog.add("customer", Customer(code=customer, category="owner_manager"))
+            catalog.add("deployment", Deployment(
+                code=vessel, customer_code=customer, release_code="REL-LAB1",
+                hardware_profile="pilot_gpu", status="pilot"))
+            catalog.add("licence", Licence(
+                code=f"LIC-LAB{suffix}", customer_code=customer, vessel_code=vessel,
+                tier="pilot", valid_from=today - timedelta(days=30),
+                valid_until=today - timedelta(days=1), status="active"))
+            catalog.add("ticket", Ticket(
+                code=f"TKT-LAB{suffix}", vessel_code=vessel, category="recovery",
+                priority="p1", status="open"))
+        support = self.headers("support", "fleet_support")
+        scoped = (await self.client.get("/api/fleet/overview", headers=support)).json()
+        self.assertEqual(scoped["counts"], {
+            "customer": 1, "release": 0, "deployment": 1, "licence": 1,
+            "ticket": 1, "maintenance": 0, "receipt": 0})
+        self.assertEqual(scoped["attention_total"], 2)
+        self.assertEqual({item["code"] for item in scoped["attention"]},
+                         {"LIC-LAB1", "TKT-LAB1"})
+        global_view = (await self.client.get(
+            "/api/fleet/overview", headers=self.headers("admin", "fleet_admin"))).json()
+        self.assertEqual(global_view["counts"]["licence"], 2)
+        self.assertEqual(global_view["counts"]["release"], 1)
+        self.assertEqual(global_view["attention_total"], 4)
+        self.policy["users"][2]["customer_codes"] = []
+        self._write_policy()
+        empty = (await self.client.get("/api/fleet/overview", headers=support)).json()
+        self.assertEqual(sum(empty["counts"].values()), 0)
+        self.assertEqual(empty["attention"], [])
+
+    async def test_oidc_scoped_admin_imports_only_trusted_signed_receipt(self) -> None:
+        catalog = FleetCatalog(self.db)
+        catalog.add_verified_release(Release(
+            code="REL-LAB1", version="1.0.0", manifest_sha256="a" * 64,
+            signing_key_id="b" * 64, status="candidate"))
+        catalog.transition("release", "REL-LAB1", "approved")
+        for customer, vessel in (("CUST-LAB1", "VSL-LAB1"),
+                                 ("CUST-LAB2", "VSL-LAB2")):
+            catalog.add("customer", Customer(code=customer,
+                                             category="owner_manager"))
+            catalog.add("deployment", Deployment(
+                code=vessel, customer_code=customer, release_code="REL-LAB1",
+                hardware_profile="pilot_gpu", status="lab"))
+        signer = Ed25519PrivateKey.generate()
+        app = create_app(FleetSettings(
+            self.db, None, oidc_verifier=self.verifier,
+            import_public_keys=(signer.public_key(),)))
+
+        def envelope(code: str, vessel: str) -> dict[str, object]:
+            record = DeploymentReceipt(
+                code=code, vessel_code=vessel, release_code="REL-LAB1",
+                source="approved_offline_admin", observed_on="2026-11-19",
+                health="healthy")
+            return {"schema_version": 1,
+                    "key_id": key_id(signer.public_key()),
+                    "receipt": record.model_dump(mode="json"),
+                    "signature": base64.b64encode(
+                        signer.sign(receipt_bytes(record))).decode()}
+
+        self.policy["users"][0]["customer_codes"] = ["CUST-LAB1"]
+        self._write_policy()
+        admin = self.headers("admin", "fleet_admin")
+        support = self.headers("support", "fleet_support")
+        own = envelope("RCP-LAB1", "VSL-LAB1")
+        foreign = envelope("RCP-LAB2", "VSL-LAB2")
+        path = "/api/fleet/import/deployment-receipts"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://fleet.invalid") as client:
+            self.assertEqual((await client.post(path, headers=support,
+                                                json=own)).status_code, 403)
+            self.assertEqual((await client.post(path, headers=admin,
+                                                json=foreign)).status_code, 404)
+            self.assertEqual((await client.post(path, headers=admin,
+                json={**own, "key_id": "a" * 64})).status_code, 400)
+            accepted = await client.post(path, headers=admin, json=own)
+            self.assertEqual(accepted.status_code, 201, accepted.text)
+            self.assertEqual((await client.post(path, headers=admin,
+                                                json=own)).status_code, 409)
+            visible = (await client.get(path, headers=admin)).json()
+            self.assertEqual([row["code"] for row in visible], ["RCP-LAB1"])
+            audit = (await client.get("/api/fleet/audit", headers=admin)).json()
+            self.assertEqual(audit[-1]["action"],
+                             "import-signed:" + own["key_id"])
 
     async def test_claim_binding_and_revocation(self) -> None:
         for claims in ({"aud": "sovereign-core"},
@@ -336,6 +437,23 @@ class FleetOidcTests(unittest.IsolatedAsyncioTestCase):
                     "https://user:pass@identity.example.invalid/realms/fleet"):
             with self.subTest(issuer=bad), self.assertRaises(ValueError):
                 OidcVerifier(bad, self.roles_path, allow_https_issuer=True)
+
+
+class FleetOidcReceiptProbeTests(unittest.TestCase):
+    def test_probe_sends_token_through_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            envelope = Path(directory) / "receipt.json"
+            envelope.write_text('{"receipt":"synthetic"}')
+            with patch("scripts.phase8_fleet_oidc_rehearsal.subprocess.run") as runner:
+                runner.return_value.stdout = b"201\n"
+                self.assertEqual(_post_signed_receipt("a" * 64, "token-value",
+                                                      envelope), 201)
+            command = runner.call_args.args[0]
+            self.assertEqual(command[:4], ["docker", "exec", "-i", "a" * 64])
+            ast.parse(command[-1])
+            self.assertNotIn("token-value", command[-1])
+            self.assertEqual(runner.call_args.kwargs["input"],
+                             b'token-value\n{"receipt":"synthetic"}')
 
 
 if __name__ == "__main__":

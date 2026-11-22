@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import base64
+from datetime import datetime, timedelta, timezone
+import os
 from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -17,7 +20,9 @@ from cryptography.hazmat.primitives import serialization
 from apps.fleet.main import FleetSettings, create_app
 from apps.fleet.body_limit import MAX_BODY_BYTES
 from services.fleet.catalog import DeploymentReceipt, FleetCatalog, Release
-from services.fleet.offline_import import key_id, load_import_key, receipt_bytes
+from services.fleet.offline_import import (
+    key_id, load_import_key, load_import_trust, receipt_bytes,
+)
 
 
 class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
@@ -88,6 +93,43 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("payload", audit[-1])
         self.assertEqual(len((await self.client.get("/api/fleet/licences")).json()), 1)
         self.assertEqual(self.db.stat().st_mode & 0o077, 0)
+
+    async def test_overview_counts_and_flags_without_mutating_status(self) -> None:
+        await self._seed()
+        today = datetime.now(timezone.utc).date()
+        licences = (
+            ("LIC-PAST1", today - timedelta(days=1), today - timedelta(days=40)),
+            ("LIC-SOON1", today + timedelta(days=10), today - timedelta(days=40)),
+            ("LIC-EARLY1", today + timedelta(days=100), today + timedelta(days=1)),
+        )
+        for code, until, start in licences:
+            response = await self.client.post("/api/fleet/licences", json={
+                "code": code, "customer_code": "CUST-ACME1", "vessel_code": "VSL-TEST1",
+                "tier": "pilot", "valid_from": start.isoformat(),
+                "valid_until": until.isoformat(), "status": "active"})
+            self.assertEqual(response.status_code, 201, response.text)
+        for code, priority in (("TKT-HIGH1", "p1"), ("TKT-LOW1", "p4")):
+            response = await self.client.post("/api/fleet/tickets", json={
+                "code": code, "vessel_code": "VSL-TEST1",
+                "category": "recovery", "priority": priority, "status": "open"})
+            self.assertEqual(response.status_code, 201, response.text)
+        response = await self.client.post("/api/fleet/maintenance", json={
+            "code": "MNT-LATE1", "vessel_code": "VSL-TEST1", "kind": "backup_rehearsal",
+            "due_on": (today - timedelta(days=1)).isoformat(),
+            "engineer_code": "ENGR-LAB1", "status": "planned"})
+        self.assertEqual(response.status_code, 201, response.text)
+        summary = (await self.client.get("/api/fleet/overview")).json()
+        self.assertEqual(summary["as_of"], today.isoformat())
+        self.assertEqual(summary["counts"], {
+            "customer": 1, "release": 1, "deployment": 1, "licence": 3,
+            "ticket": 2, "maintenance": 1, "receipt": 0})
+        self.assertEqual(summary["attention_total"], 5)
+        self.assertEqual({item["reason"] for item in summary["attention"]}, {
+            "licence_past_end", "licence_ends_soon", "licence_not_started",
+            "maintenance_overdue", "urgent_support"})
+        self.assertEqual(len((await self.client.get("/api/fleet/licences")).json()), 3)
+        self.assertTrue(all(row["status"] == "active" for row in
+                            (await self.client.get("/api/fleet/licences")).json()))
 
     async def test_prompt_document_embedding_and_log_fields_are_rejected(self) -> None:
         await self._seed()
@@ -180,6 +222,96 @@ class FleetMetadataTests(unittest.IsolatedAsyncioTestCase):
         alias.symlink_to(key_path)
         with self.assertRaises(OSError):
             load_import_key(alias)
+
+    async def test_offline_issuer_overlap_and_retirement(self) -> None:
+        await self._seed()
+        replacement = Ed25519PrivateKey.generate()
+        old_key = self.import_signer.public_key()
+        new_key = replacement.public_key()
+
+        async def submit(client, signer, code):
+            receipt = DeploymentReceipt.model_validate({
+                "code": code, "vessel_code": "VSL-TEST1",
+                "release_code": "REL-DEMO1", "source": "approved_offline_admin",
+                "observed_on": "2026-11-16", "health": "healthy"})
+            return await client.post("/api/fleet/import/deployment-receipts", json={
+                "schema_version": 1, "key_id": key_id(signer.public_key()),
+                "receipt": receipt.model_dump(mode="json"),
+                "signature": base64.b64encode(
+                    signer.sign(receipt_bytes(receipt))).decode()})
+
+        async def client_for(*keys):
+            app = create_app(FleetSettings(self.db, self.token,
+                                           import_public_keys=keys))
+            return httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://fleet.invalid",
+                                     headers={"X-Fleet-Lab-Token": self.token})
+
+        async with await client_for(old_key, new_key) as overlap:
+            self.assertEqual((await submit(overlap, self.import_signer,
+                                           "RCP-OLD1")).status_code, 201)
+            self.assertEqual((await submit(overlap, replacement,
+                                           "RCP-NEW1")).status_code, 201)
+        async with await client_for(new_key) as retired:
+            self.assertEqual((await submit(retired, self.import_signer,
+                                           "RCP-OLD2")).status_code, 400)
+            self.assertEqual((await submit(retired, replacement,
+                                           "RCP-NEW2")).status_code, 201)
+            audit = (await retired.get("/api/fleet/audit")).json()
+            self.assertEqual(audit[-1]["action"], "import-signed:" + key_id(new_key))
+            self.assertEqual(len((await retired.get(
+                "/api/fleet/import/deployment-receipts")).json()), 3)
+
+    async def test_offline_trust_manifest_rejects_weak_or_duplicate_keys(self) -> None:
+        root = Path(self.temporary.name)
+        key_path = root / "issuer.pem"
+        key_path.write_bytes(self.import_signer.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo))
+        key_path.chmod(0o600)
+        manifest = root / "trusted-issuers.json"
+        manifest.write_text(json.dumps([str(key_path)]))
+        manifest.chmod(0o600)
+        self.assertEqual(key_id(load_import_trust(manifest)[0]),
+                         key_id(self.import_signer.public_key()))
+        manifest.write_text(json.dumps([str(key_path), str(key_path)]))
+        with self.assertRaises(ValueError):
+            load_import_trust(manifest)
+        manifest.write_text(json.dumps([str(key_path)]))
+        manifest.chmod(0o644)
+        with self.assertRaises(ValueError):
+            load_import_trust(manifest)
+        manifest.chmod(0o600)
+        alias = root / "linked-trust.json"
+        alias.symlink_to(manifest)
+        with self.assertRaises(OSError):
+            load_import_trust(alias)
+
+    async def test_fleet_env_loads_trust_manifest_exclusively(self) -> None:
+        root = Path(self.temporary.name)
+        token_path = root / "fleet-token"
+        token_path.write_text(self.token)
+        token_path.chmod(0o600)
+        key_path = root / "issuer.pem"
+        key_path.write_bytes(self.import_signer.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo))
+        key_path.chmod(0o600)
+        manifest = root / "trusted-issuers.json"
+        manifest.write_text(json.dumps([str(key_path)]))
+        manifest.chmod(0o600)
+        values = {"SOVEREIGN_FLEET_DB": str(self.db),
+                  "SOVEREIGN_FLEET_TOKEN_FILE": str(token_path),
+                  "SOVEREIGN_FLEET_IMPORT_TRUST_FILE": str(manifest)}
+        with patch.dict(os.environ, values, clear=True):
+            settings = FleetSettings.from_env()
+            self.assertEqual(len(settings.import_public_keys), 1)
+            create_app(settings)
+        with patch.dict(os.environ, {**values,
+                                      "SOVEREIGN_FLEET_IMPORT_KEY_FILE":
+                                      str(key_path)}, clear=True):
+            with self.assertRaises(ValueError):
+                FleetSettings.from_env()
 
     async def test_record_and_audit_pages_have_stable_cursors(self) -> None:
         for code in ("CUST-LAB1", "CUST-LAB2", "CUST-LAB3"):

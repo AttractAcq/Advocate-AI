@@ -8,23 +8,16 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 from pathlib import Path
-import re
 
 from services.knowledge.acl import source_access
-from services.knowledge.paths import source_path
-
-_WORDS = re.compile(r"[a-z0-9]{3,}")
-_STOPWORDS = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "for",
-              "with", "from", "into", "about", "that", "this", "are", "can", "does", "did",
-              "tell", "please", "there", "their", "your"}
+from services.knowledge.paths import read_source_bytes
+from services.knowledge.query_terms import (search_terms as _search_terms,
+                                            selected_overview as _selected_overview,
+                                            terms as _terms)
+from services.policy.policy_file import load_policy
 _MAX_DOCUMENT_BYTES = 64 * 1024
 _MAX_QUERY_CHARS = 1000
-
-
-def _terms(value: str) -> set[str]:
-    return set(_WORDS.findall(value.casefold())) - _STOPWORDS
 
 
 def search_fixture_documents(
@@ -47,9 +40,10 @@ def search_fixture_documents(
         raise ValueError("limit must be between 1 and 10")
     base = fixture_root.resolve(strict=True)
     manifest = base / "manifest.csv"
-    policy = json.loads((base / "roles.json").read_text(encoding="utf-8"))
-    wanted = _terms(query)
-    if not wanted:
+    policy = load_policy(base / "roles.json")
+    wanted = _search_terms(query)
+    overview = _selected_overview(wanted, document_ids)
+    if not wanted and not overview:
         return []
 
     matches: list[tuple[int, str, dict[str, object]]] = []
@@ -66,12 +60,9 @@ def search_fixture_documents(
             if not relative.endswith(".txt"):
                 continue
             try:
-                path = source_path(base, relative)
+                payload = read_source_bytes(base, relative, _MAX_DOCUMENT_BYTES)
             except (OSError, ValueError):
                 continue
-            if path.stat().st_size > _MAX_DOCUMENT_BYTES:
-                continue
-            payload = path.read_bytes()
             if hashlib.sha256(payload).hexdigest() != source["sha256"]:
                 continue
             try:
@@ -79,7 +70,7 @@ def search_fixture_documents(
             except UnicodeDecodeError:
                 continue
             present = _terms(body)
-            if not wanted.issubset(present):
+            if wanted and not wanted.issubset(present):
                 continue
             score = len(wanted)
             hit: dict[str, object] = {

@@ -26,3 +26,7 @@ hardware, recovery time objectives, protected media or release key custody.
 PostgreSQL notes that `pg_dump` covers one database and is not generally the
 right sole method for regular production backup. Those choices and the
 site-specific restore plan remain [open](../blockers-and-build-queue.md).
+
+The later [pgvector knowledge recovery rehearsal](pgvector-knowledge-recovery.md)
+adds the actual Phase 3 index schema, approved manifest, policy and source
+bytes to one encrypted synthetic recovery set.

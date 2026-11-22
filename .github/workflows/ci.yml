@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sovereign-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   synthetic-containers:
     if: github.event_name == 'pull_request'
@@ -21,8 +25,44 @@ jobs:
         run: |
           docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
           docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
+      - name: Reject mismatched Core state schema image
+        run: |
+          set -euo pipefail
+          if docker build --progress=plain -f infrastructure/containers/Core.Dockerfile \
+              --build-arg SOVEREIGN_CORE_STATE_SCHEMA=2 \
+              -t sovereign-core:invalid-compatibility . \
+              > "$RUNNER_TEMP/core-schema-denial.log" 2>&1; then
+            echo "Core image accepted an unsupported state schema"
+            exit 1
+          fi
+          if ! grep -q 'exit code: 1' "$RUNNER_TEMP/core-schema-denial.log"; then
+            cat "$RUNNER_TEMP/core-schema-denial.log"
+            exit 1
+          fi
       - name: Exercise isolated synthetic stack
         run: bash infrastructure/containers/smoke.sh
+      - name: Exercise Core against networkless pgvector socket
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          docker pull "$image"
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image "$image" --core-image sovereign-core:synthetic
+      - name: Exercise Core against pinned Trixie pgvector candidate
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d"
+          docker pull "$image"
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image "$image" --core-image sovereign-core:synthetic
+      - name: Build and exercise Alpine Knowledge candidate
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/Knowledge.Dockerfile \
+            -t sovereign-knowledge:synthetic .
+          python3 -m scripts.phase3_pgvector_core_socket \
+            --pgvector-image sovereign-knowledge:synthetic \
+            --core-image sovereign-core:synthetic
       - name: Build and exercise separate Fleet images
         run: |
           docker build -f infrastructure/containers/FleetApi.Dockerfile -t sovereign-fleet-api:synthetic .
@@ -233,6 +273,16 @@ jobs:
         run: .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal
       - name: Rehearse encrypted Keycloak clean recovery
         run: .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --recovery
+      - name: Build vessel Core and exercise real Keycloak interoperability
+        run: |
+          docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
+          .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal
+      - name: Rehearse encrypted vessel Keycloak clean recovery
+        run: .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal --recovery
+      - name: Rehearse vessel Keycloak signing-key rotation
+        run: .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal --rotation
+      - name: Rehearse vessel identity outage
+        run: .venv/bin/python -m scripts.phase3_vessel_keycloak_rehearsal --outage
 
   fleet-browser-https-rehearsal:
     if: github.event_name == 'pull_request'
@@ -285,13 +335,53 @@ jobs:
           set -euo pipefail
           driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
           test -n "$driver"
-          .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --chromedriver "$driver"
+          .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --chromedriver "$driver" \
+            --screenshot-output "$RUNNER_TEMP/fleet-mobile.png"
       - name: Require and exercise Fleet OTP in Chrome
         run: |
           set -euo pipefail
           driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
           test -n "$driver"
           .venv/bin/python -m scripts.phase8_fleet_keycloak_rehearsal --browser --mfa --chromedriver "$driver"
+      - name: Retain synthetic Fleet mobile screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-fleet-mobile-review
+          path: ${{ runner.temp }}/fleet-mobile.png
+          if-no-files-found: ignore
+          retention-days: 30
+
+  vessel-keycloak-browser-integration:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Build Console and Core and pull pinned synthetic Keycloak
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          docker build -f infrastructure/containers/Core.Dockerfile -t sovereign-core:synthetic .
+          docker build -f infrastructure/containers/Console.Dockerfile -t sovereign-console:synthetic .
+          docker pull "$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)"
+      - name: Exercise Chrome through Console, Keycloak, and Core
+        run: |
+          set -euo pipefail
+          driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
+          test -n "$driver"
+          .venv/bin/python -m scripts.phase3_vessel_keycloak_browser_rehearsal --chromedriver "$driver"
+      - name: Require and exercise vessel crew OTP in Chrome
+        run: |
+          set -euo pipefail
+          driver="$(command -v chromedriver || find /usr/local/share /opt -name chromedriver -type f -print -quit)"
+          test -n "$driver"
+          .venv/bin/python -m scripts.phase3_vessel_keycloak_browser_rehearsal --mfa --chromedriver "$driver"
 
   upstream-release-rehearsal:
     if: github.event_name == 'pull_request'
@@ -355,10 +445,107 @@ jobs:
             --restic "$RUNNER_TEMP/upstream/restic" \
             --restic-sha256 "$(sha256sum "$RUNNER_TEMP/upstream/restic" | cut -d' ' -f1)"
       - name: Retain product image evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: synthetic-product-image-release-evidence
           path: ${{ runner.temp }}/product-image-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Qualify pinned pgvector Knowledge image archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_pgvector_image_intake \
+            --image "$image" --output "$RUNNER_TEMP/knowledge-image-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Knowledge image evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-knowledge-image-release-evidence
+          path: ${{ runner.temp }}/knowledge-image-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Compare updated pgvector Trixie image intake
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:494f5c1091d49ad96d6070f07ce3c08d92912d6edce1e1595028eb6bbd1db71d"
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_pgvector_image_intake \
+            --image "$image" --output "$RUNNER_TEMP/knowledge-trixie-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Trixie Knowledge comparison
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-knowledge-trixie-comparison
+          path: ${{ runner.temp }}/knowledge-trixie-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Build and qualify Alpine Knowledge image candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f infrastructure/containers/Knowledge.Dockerfile \
+            -t sovereign-knowledge:synthetic .
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_alpine_knowledge_image \
+            --output "$RUNNER_TEMP/alpine-knowledge-evidence" \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
+      - name: Retain Alpine Knowledge image evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-alpine-knowledge-image-evidence
+          path: ${{ runner.temp }}/alpine-knowledge-evidence
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Sign and verify exact three-image vessel bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$(jq -r '.name + "@" + .digest' infrastructure/lab/container-image.json)"
+          docker build -f infrastructure/containers/Core.Dockerfile \
+            --build-arg SOVEREIGN_SYNTHETIC_RELEASE=second \
+            -t sovereign-core:synthetic-v2 .
+          crane="$RUNNER_TEMP/upstream/crane/crane"
+          syft="$RUNNER_TEMP/upstream/syft/syft"
+          trivy="$RUNNER_TEMP/upstream/trivy/trivy"
+          .venv/bin/python -m scripts.phase5_three_image_release \
+            --output "$RUNNER_TEMP/three-image-release-evidence" \
+            --update-core-image sovereign-core:synthetic-v2 \
+            --crane "$crane" --crane-sha256 "$(sha256sum "$crane" | cut -d' ' -f1)" \
+            --syft "$syft" --syft-sha256 "$(sha256sum "$syft" | cut -d' ' -f1)" \
+            --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
+            --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache" \
+            --restic "$RUNNER_TEMP/upstream/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/upstream/restic" | cut -d' ' -f1)"
+      - name: Retain three-image bundle evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-three-image-bundle-evidence
+          path: ${{ runner.temp }}/three-image-release-evidence
+          if-no-files-found: ignore
           retention-days: 30
       - name: Bind actual Fleet image archives to release evidence
         shell: bash
@@ -376,10 +563,12 @@ jobs:
             --trivy "$trivy" --trivy-sha256 "$(sha256sum "$trivy" | cut -d' ' -f1)" \
             --trivy-cache "$RUNNER_TEMP/upstream/trivy-cache"
       - name: Retain Fleet image evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: synthetic-fleet-image-release-evidence
           path: ${{ runner.temp }}/fleet-image-evidence
+          if-no-files-found: ignore
           retention-days: 30
 
   restic-recovery-rehearsal:
@@ -406,7 +595,7 @@ jobs:
         run: |
           set -euo pipefail
           uv sync --locked
-          SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository -v
+          SOVEREIGN_TEST_RESTIC="$RUNNER_TEMP/restic" .venv/bin/python -m unittest tests.test_restic_repository tests.test_history_migration tests.test_stopped_vessel_history_migration -v
       - name: Validate synthetic backup service and timer syntax
         shell: bash
         run: |
@@ -445,6 +634,20 @@ jobs:
           systemd-analyze verify "$RUNNER_TEMP/sovereign-fleet-recover.service" \
             "$RUNNER_TEMP/sovereign-fleet-backup.service" \
             "$RUNNER_TEMP/sovereign-fleet-backup.timer"
+      - name: Validate synthetic vessel boot recovery unit syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m infrastructure.deploy.vessel_boot_service \
+            --output "$RUNNER_TEMP/sovereign-vessel-recover.service" \
+            --root /var/lib/sovereign-vessel \
+            --core-state /var/lib/sovereign-core-state \
+            --trusted-key /etc/sovereign/vessel-trusted.pem \
+            --crane /opt/sovereign/bin/crane \
+            --python /usr/bin/python3 \
+            --workdir /opt/sovereign/app \
+            --user sovereign-vessel --group sovereign-vessel
+          systemd-analyze verify "$RUNNER_TEMP/sovereign-vessel-recover.service"
       - name: Rehearse encrypted PostgreSQL dump and clean restore
         shell: bash
         run: |
@@ -452,6 +655,15 @@ jobs:
           image="docker.io/library/postgres@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015"
           docker pull "$image"
           .venv/bin/python -m scripts.phase5_postgres_rehearsal \
+            --image "$image" --restic "$RUNNER_TEMP/restic" \
+            --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
+      - name: Restore encrypted pgvector knowledge set and recheck permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          docker pull "$image"
+          .venv/bin/python -m scripts.phase3_pgvector_recovery \
             --image "$image" --restic "$RUNNER_TEMP/restic" \
             --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
       - name: Start restored synthetic Core state and recheck permissions
@@ -463,6 +675,39 @@ jobs:
           .venv/bin/python -m scripts.phase5_core_state_restore \
             --image sovereign-core:synthetic --restic "$RUNNER_TEMP/restic" \
             --restic-sha256 "$(sha256sum "$RUNNER_TEMP/restic" | cut -d' ' -f1)"
+
+  pgvector-knowledge:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.3"
+          python-version: "3.14"
+      - name: Start disposable loopback pgvector database
+        run: |
+          set -euo pipefail
+          image="docker.io/pgvector/pgvector@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd"
+          docker pull "$image"
+          docker run -d --rm --name sovereign-pgvector-test \
+            -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:55439:5432 \
+            --tmpfs /var/lib/postgresql/data "$image"
+          for attempt in $(seq 1 40); do
+            if docker exec sovereign-pgvector-test pg_isready -U postgres -q; then break; fi
+            sleep 1
+          done
+          docker exec sovereign-pgvector-test createdb -U postgres sovereign_pgvector_test
+          docker exec sovereign-pgvector-test psql -U postgres -d sovereign_pgvector_test \
+            -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION vector'
+      - name: Test live policy, revocation, ingestion and vector ranking
+        env:
+          SOVEREIGN_TEST_PG_DSN: postgresql://postgres@127.0.0.1:55439/sovereign_pgvector_test
+        run: |
+          uv sync --locked --extra phase3
+          .venv/bin/python -m unittest tests.test_phase3_postgres_index -v
 
   openfga-policy-probe:
     if: github.event_name == 'pull_request'

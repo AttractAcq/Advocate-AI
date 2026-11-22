@@ -23,12 +23,43 @@ from infrastructure.deploy.container_runtime import (
     _core_state_options, cleanup_orphan_runtimes, probe_runtime, start_verified_bundle, stop_runtime,
     verify_runtime_identity,
 )
+from infrastructure.deploy.core_state_inventory import source_files
+from infrastructure.deploy.knowledge_state_inventory import verify_knowledge_pair
 from infrastructure.release.bundle import BundleError, verify_bundle
 from infrastructure.restic_repository import restore_snapshot
+from infrastructure.upload_quarantine_backup import restore_upload_snapshot
+from services.policy.audit import AuditLog, verify as verify_audit
 
 
 class ProductInstallError(ValueError):
     """The staged product or installer state is invalid."""
+
+
+def _require_audit(state: Path) -> int:
+    path = state / "audit.jsonl"
+    if (path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid()
+            or path.stat().st_mode & 0o077):
+        raise ProductInstallError("installed Core audit trail is missing or unsafe")
+    try:
+        count, _ = verify_audit(path, require_current_clock=True)
+    except (OSError, ValueError) as exc:
+        raise ProductInstallError("installed Core audit trail is invalid") from exc
+    if count < 1:
+        raise ProductInstallError("installed Core audit trail is empty")
+    return count
+
+
+def _initialize_audit(state: Path) -> None:
+    path = state / "audit.jsonl"
+    if not path.exists() and not path.is_symlink():
+        try:
+            AuditLog(path).append(
+                actor="synthetic-installer", action="install", resource="core-state",
+                decision="allow",
+                policy_version=hashlib.sha256((state / "roles.json").read_bytes()).hexdigest())
+        except (OSError, ValueError) as exc:
+            raise ProductInstallError("cannot initialise Core audit trail") from exc
+    _require_audit(state)
 
 
 _RELEASE = re.compile(r"[0-9a-f]{24}\Z")
@@ -121,13 +152,13 @@ def _installation_id(root: Path) -> str:
     return value
 
 
-def _mount_config(root: Path) -> tuple[Path | None, Path | None]:
+def _mount_config(root: Path) -> tuple[Path | None, Path | None, Path | None, Path | None]:
     """Read the owner-only path record; credentials remain outside this file."""
     path = root / "product-core-mount.json"
     if path.is_symlink():
         raise ProductInstallError("linked Core mount record")
     if not path.exists():
-        return None, None
+        return None, None, None, None
     if (not path.is_file() or path.stat().st_uid != os.getuid()
             or path.stat().st_mode & 0o077 or path.stat().st_size > 4096):
         raise ProductInstallError("invalid Core mount record")
@@ -135,49 +166,84 @@ def _mount_config(root: Path) -> tuple[Path | None, Path | None]:
         record = json.loads(path.read_bytes(), object_pairs_hook=_unique)
     except (ValueError, UnicodeError) as exc:
         raise ProductInstallError("invalid Core mount record JSON") from exc
-    if (not isinstance(record, dict) or set(record) != {"schema", "state", "credential"}
-            or type(record["schema"]) is not int or record["schema"] != 1
+    if (not isinstance(record, dict) or type(record.get("schema")) is not int
+            or record["schema"] not in (1, 2, 3)
+            or set(record) != ({"schema", "state", "credential"} if record["schema"] == 1
+                               else {"schema", "state", "credential", "emergency_credential"}
+                               if record["schema"] == 2 else
+                               {"schema", "state", "credential", "emergency_credential", "upload_root"})
             or not isinstance(record["state"], str)
-            or not isinstance(record["credential"], str)):
+            or not isinstance(record["credential"], str)
+            or (record["schema"] == 2 and
+                not isinstance(record["emergency_credential"], str))
+            or (record["schema"] == 3 and
+                (record["emergency_credential"] is not None and
+                 not isinstance(record["emergency_credential"], str) or
+                 not isinstance(record["upload_root"], str)))):
         raise ProductInstallError("invalid Core mount record fields")
     state, credential = Path(record["state"]), Path(record["credential"])
+    emergency = (Path(record["emergency_credential"])
+                 if record["schema"] in (2, 3) and record["emergency_credential"] else None)
+    upload_root = Path(record["upload_root"]) if record["schema"] == 3 else None
     try:
-        _core_state_options(state, credential)
+        _core_state_options(state, credential, emergency, upload_root)
     except ContainerRuntimeError as exc:
         raise ProductInstallError("Core mount record no longer resolves safely") from exc
-    return state, credential
+    _require_audit(state)
+    if upload_root is not None and upload_root.resolve() != (root / "product-uploads").resolve():
+        raise ProductInstallError("upload quarantine path changed")
+    return state, credential, emergency, upload_root
 
 
 def _configure_mount(root: Path, state: Path | None,
-                     credential: Path | None) -> tuple[Path | None, Path | None]:
+                     credential: Path | None,
+                     emergency: Path | None = None,
+                     *, enable_uploads: bool = False) -> tuple[Path | None, Path | None, Path | None, Path | None]:
     """Pin external lab state paths for every future release and restart."""
     existing = _mount_config(root)
-    if state is None and credential is None:
+    if state is None and credential is None and emergency is None:
+        if enable_uploads and existing[3] is None:
+            raise ProductInstallError("uploads can be enabled only at first install")
         return existing
     try:
-        _core_state_options(state, credential)
+        _core_state_options(state, credential, emergency)
     except ContainerRuntimeError as exc:
         raise ProductInstallError("invalid Core mount paths") from exc
-    canonical = state.resolve(), credential.resolve()
-    if existing != (None, None):
-        if existing != canonical:
+    canonical = state.resolve(), credential.resolve(), (emergency.resolve() if emergency else None)
+    if existing != (None, None, None, None):
+        if existing[:3] != canonical or (enable_uploads and existing[3] is None):
             raise ProductInstallError("Core mount paths cannot change during install")
         return existing
     if _state(root) is not None:
         raise ProductInstallError("cannot attach Core state to an active installation")
+    _initialize_audit(state)
+    upload_root = root / "product-uploads" if enable_uploads else None
+    if upload_root is not None:
+        _owner_directory(upload_root, create=True)
+        try:
+            _core_state_options(state, credential, emergency, upload_root)
+        except ContainerRuntimeError as exc:
+            raise ProductInstallError("invalid upload quarantine") from exc
     path = root / "product-core-mount.json"
     descriptor, filename = tempfile.mkstemp(prefix=".product-core-mount-", dir=root)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            stream.write(json.dumps({"schema": 1, "state": str(canonical[0]),
-                                     "credential": str(canonical[1])},
+            record = {"schema": 3 if upload_root else 2 if emergency else 1,
+                      "state": str(canonical[0]),
+                      "credential": str(canonical[1])}
+            if upload_root:
+                record["emergency_credential"] = str(canonical[2]) if canonical[2] else None
+                record["upload_root"] = str(upload_root.resolve())
+            elif emergency:
+                record["emergency_credential"] = str(canonical[2])
+            stream.write(json.dumps(record,
                                     sort_keys=True, separators=(",", ":")).encode())
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(filename, path)
     finally:
         Path(filename).unlink(missing_ok=True)
-    return canonical
+    return (*canonical, upload_root.resolve() if upload_root else None)
 
 
 def _identifier(bundle: Path, config: Path) -> str:
@@ -240,12 +306,13 @@ def _write_state(root: Path, active: str, previous: str | None,
 
 def _activate(root: Path, stage: Path, identifier: str,
               trusted_key: Path, crane: Path) -> dict[str, object]:
-    core_state, lab_password_file = _mount_config(root)
+    core_state, lab_password_file, emergency_password_file, upload_root = _mount_config(root)
     current = _state(root)
     if current is not None:
         _verify_stage(root / "product-releases" / str(current["active"]),
                       trusted_key, str(current["active"]))
-        probe_runtime(_handle(current), core_state, lab_password_file)
+        probe_runtime(_handle(current), core_state, lab_password_file,
+                      emergency_password_file, upload_root=upload_root)
         if current["active"] == identifier:
             return {"result": "unchanged", "active": identifier,
                     "previous": current["previous"]}
@@ -254,7 +321,9 @@ def _activate(root: Path, stage: Path, identifier: str,
                                       stage / "console-config.json",
                                       installation_id=_installation_id(root),
                                       core_state=core_state,
-                                      lab_password_file=lab_password_file)
+                                      lab_password_file=lab_password_file,
+                                      emergency_password_file=emergency_password_file,
+                                      upload_root=upload_root)
     try:
         _write_state(root, identifier, str(current["active"]) if current else None,
                      candidate)
@@ -270,11 +339,14 @@ def _activate(root: Path, stage: Path, identifier: str,
 def install_product(bundle: Path, trusted_key: Path, crane: Path,
                     console_config: Path, root: Path,
                     core_state: Path | None = None,
-                    lab_password_file: Path | None = None) -> dict[str, object]:
+                    lab_password_file: Path | None = None,
+                    emergency_password_file: Path | None = None,
+                    *, enable_uploads: bool = False) -> dict[str, object]:
     """Stage a signed product release, then switch only after runtime health."""
     _owner_directory(root, create=True)
     with _lock(root):
-        _configure_mount(root, core_state, lab_password_file)
+        _configure_mount(root, core_state, lab_password_file, emergency_password_file,
+                         enable_uploads=enable_uploads)
         identifier, stage = _stage(root, bundle, console_config, trusted_key)
         return _activate(root, stage, identifier, trusted_key, crane)
 
@@ -283,10 +355,24 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
                             console_config: Path, root: Path, snapshot_id: str,
                             repository: Path, restic_password_file: Path,
                             restic: Path, restic_sha256: str,
-                            lab_password_file: Path) -> dict[str, object]:
+                            lab_password_file: Path,
+                            emergency_password_file: Path | None = None,
+                            *, enable_uploads: bool = False,
+                            upload_snapshot_id: str | None = None,
+                            upload_repository: Path | None = None,
+                            upload_password_file: Path | None = None,
+                            require_audit: bool = False,
+                            audit_checkpoint: tuple[int, str] | None = None) -> dict[str, object]:
     """Clean-restore fictional Core state before first signed installation."""
     if not root.is_absolute() or root.exists() or root.is_symlink():
         raise ProductInstallError("restore installation requires a new absolute root")
+    upload_options = (upload_snapshot_id, upload_repository, upload_password_file)
+    if audit_checkpoint is not None and not require_audit:
+        raise ProductInstallError("audit checkpoint requires an audited snapshot")
+    if any(value is not None for value in upload_options):
+        if (not enable_uploads or any(value is None for value in upload_options)
+                or upload_repository.resolve() == repository.resolve()):
+            raise ProductInstallError("upload restore requires uploads and a separate repository")
     _owner_directory(root.parent, create=False)
     manifest = verify_bundle(bundle, trusted_key)
     if manifest["schema"] != 4:
@@ -296,12 +382,46 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
     try:
         restored = restore_snapshot(snapshot_id, repository, restic_password_file,
                                     restic, restic_sha256, root / "core-state")
-        if restored["files"] != 4:
+        if require_audit:
+            try:
+                sources = source_files(root / "core-state")
+            except ValueError as exc:
+                raise ProductInstallError("unexpected synthetic Core snapshot contents") from exc
+            if restored["files"] != len(sources) + 4 + (2 if (root / "core-state" / "knowledge-manifest.json").exists() else 0):
+                raise ProductInstallError("unexpected synthetic Core snapshot contents")
+        elif restored["files"] not in (4, 5, 6, 7):
             raise ProductInstallError("unexpected synthetic Core snapshot contents")
+        knowledge = root / "core-state" / "knowledge-manifest.json"
+        knowledge_db = root / "core-state" / "knowledge.db"
+        if knowledge.exists() != knowledge_db.exists() or (knowledge.exists() and
+                (not knowledge.is_file() or not knowledge_db.is_file())):
+            raise ProductInstallError("unexpected Core knowledge snapshot contents")
+        if not require_audit and (restored["files"] in (6, 7)) != knowledge.is_file():
+            raise ProductInstallError("unexpected Core knowledge snapshot contents")
+        if knowledge.is_file():
+            try:
+                verify_knowledge_pair(root / "core-state")
+            except (OSError, ValueError) as exc:
+                raise ProductInstallError("restored Core knowledge index is inconsistent") from exc
+        if require_audit or restored["files"] in (5, 7):
+            _require_audit(root / "core-state")
+            if (audit_checkpoint is not None and
+                    verify_audit(root / "core-state" / "audit.jsonl",
+                                 require_current_clock=True) != audit_checkpoint):
+                raise ProductInstallError("restored Core audit checkpoint mismatch")
+        upload_result = None
+        if upload_snapshot_id is not None:
+            upload_result = restore_upload_snapshot(
+                upload_snapshot_id, upload_repository, upload_password_file,
+                restic, restic_sha256, root / "product-uploads")
         activated = install_product(bundle, trusted_key, crane, console_config,
-                                    root, root / "core-state", lab_password_file)
+                                    root, root / "core-state", lab_password_file,
+                                    emergency_password_file, enable_uploads=enable_uploads)
         return {**activated, "snapshot_id": snapshot_id,
-                "restored_files": restored["files"]}
+                "restored_files": restored["files"],
+                **({"upload_snapshot_id": upload_snapshot_id,
+                    "restored_upload_files": upload_result["quarantine_files"]}
+                   if upload_result is not None else {})}
     except Exception:
         if not (root / "product-state.json").exists() and not root.is_symlink():
             shutil.rmtree(root)
@@ -309,13 +429,14 @@ def restore_install_product(bundle: Path, trusted_key: Path, crane: Path,
 
 
 def product_status(root: Path, trusted_key: Path) -> dict[str, object]:
-    core_state, lab_password_file = _mount_config(root)
+    core_state, lab_password_file, emergency_password_file, upload_root = _mount_config(root)
     current = _state(root)
     if current is None:
         raise ProductInstallError("no active product release")
     identifier = str(current["active"])
     _verify_stage(root / "product-releases" / identifier, trusted_key, identifier)
-    probe_runtime(_handle(current), core_state, lab_password_file)
+    probe_runtime(_handle(current), core_state, lab_password_file,
+                  emergency_password_file, upload_root=upload_root)
     return {"result": "healthy", "active": identifier, "previous": current["previous"]}
 
 
@@ -334,7 +455,7 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
     """Recreate the signed active lab release when its runtime is unhealthy."""
     _owner_directory(root, create=False)
     with _lock(root):
-        core_state, lab_password_file = _mount_config(root)
+        core_state, lab_password_file, emergency_password_file, upload_root = _mount_config(root)
         current = _state(root)
         if current is None:
             raise ProductInstallError("no active product release")
@@ -342,7 +463,8 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
         stage = root / "product-releases" / identifier
         _verify_stage(stage, trusted_key, identifier)
         try:
-            probe_runtime(_handle(current), core_state, lab_password_file)
+            probe_runtime(_handle(current), core_state, lab_password_file,
+                          emergency_password_file, upload_root=upload_root)
         except ContainerRuntimeError:
             pass
         else:
@@ -358,7 +480,9 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
                                           stage / "console-config.json",
                                           installation_id=_installation_id(root),
                                           core_state=core_state,
-                                          lab_password_file=lab_password_file)
+                                          lab_password_file=lab_password_file,
+                                          emergency_password_file=emergency_password_file,
+                                          upload_root=upload_root)
         try:
             _write_state(root, identifier, current["previous"], candidate)
         except Exception:
@@ -370,18 +494,55 @@ def recover_product(root: Path, trusted_key: Path, crane: Path) -> dict[str, obj
                 "previous": current["previous"]}
 
 
+def refresh_emergency_product(root: Path, trusted_key: Path,
+                              crane: Path) -> dict[str, object]:
+    """Rebind a rotated host emergency file through a new signed lab runtime."""
+    _owner_directory(root, create=False)
+    with _lock(root):
+        core_state, lab_password_file, emergency_password_file, upload_root = _mount_config(root)
+        if emergency_password_file is None:
+            raise ProductInstallError("no emergency credential is mounted")
+        current = _state(root)
+        if current is None:
+            raise ProductInstallError("no active product release")
+        identifier = str(current["active"])
+        stage = root / "product-releases" / identifier
+        _verify_stage(stage, trusted_key, identifier)
+        probe_runtime(_handle(current), core_state, lab_password_file,
+                      emergency_password_file, upload_root=upload_root,
+                      allow_stale_emergency=True)
+        candidate = start_verified_bundle(stage / "bundle", trusted_key, crane,
+                                          stage / "console-config.json",
+                                          installation_id=_installation_id(root),
+                                          core_state=core_state,
+                                          lab_password_file=lab_password_file,
+                                          emergency_password_file=emergency_password_file,
+                                          upload_root=upload_root)
+        try:
+            probe_runtime(candidate, core_state, lab_password_file,
+                          emergency_password_file, upload_root=upload_root)
+            _write_state(root, identifier, current["previous"], candidate)
+        except Exception:
+            stop_runtime(candidate)
+            raise
+        stop_runtime(_handle(current))
+        return {"result": "emergency_credential_refreshed", "active": identifier,
+                "previous": current["previous"]}
+
+
 def cleanup_product_orphans(root: Path, trusted_key: Path) -> dict[str, object]:
     """Retire validated labelled lab runtimes not named by active state."""
     _owner_directory(root, create=False)
     with _lock(root):
-        core_state, lab_password_file = _mount_config(root)
+        core_state, lab_password_file, emergency_password_file, upload_root = _mount_config(root)
         current = _state(root)
         if current is None:
             raise ProductInstallError("no active product release")
         identifier = str(current["active"])
         _verify_stage(root / "product-releases" / identifier, trusted_key,
                       identifier)
-        probe_runtime(_handle(current), core_state, lab_password_file)
+        probe_runtime(_handle(current), core_state, lab_password_file,
+                      emergency_password_file, upload_root=upload_root)
         counts = cleanup_orphan_runtimes(_installation_id(root), _handle(current))
         return {"result": "cleaned", "active": identifier, **counts}
 
@@ -390,11 +551,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Synthetic two-image product installer")
     actions = parser.add_subparsers(dest="action", required=True)
     for action in ("install", "restore-install", "status", "rollback", "recover",
+                   "refresh-emergency",
                    "cleanup-orphans"):
         command = actions.add_parser(action)
         command.add_argument("--root", required=True, type=Path)
         command.add_argument("--trusted-key", required=True, type=Path)
-        if action in ("install", "restore-install", "rollback", "recover"):
+        if action in ("install", "restore-install", "rollback", "recover",
+                      "refresh-emergency"):
             command.add_argument("--crane", required=True, type=Path)
         if action in ("install", "restore-install"):
             command.add_argument("--bundle", required=True, type=Path)
@@ -406,25 +569,40 @@ def main() -> None:
             command.add_argument("--restic", required=True, type=Path)
             command.add_argument("--restic-sha256", required=True)
             command.add_argument("--lab-password-file", required=True, type=Path)
+            command.add_argument("--emergency-password-file", type=Path)
+            command.add_argument("--enable-uploads", action="store_true")
+            command.add_argument("--upload-snapshot-id")
+            command.add_argument("--upload-repository", type=Path)
+            command.add_argument("--upload-password-file", type=Path)
         if action == "install":
             command.add_argument("--core-state", type=Path)
             command.add_argument("--lab-password-file", type=Path)
+            command.add_argument("--emergency-password-file", type=Path)
+            command.add_argument("--enable-uploads", action="store_true")
     args = parser.parse_args()
     try:
         if args.action == "install":
             result = install_product(args.bundle, args.trusted_key, args.crane,
                                      args.console_config, args.root,
-                                     args.core_state, args.lab_password_file)
+                                     args.core_state, args.lab_password_file,
+                                     args.emergency_password_file,
+                                     enable_uploads=args.enable_uploads)
         elif args.action == "restore-install":
             result = restore_install_product(
                 args.bundle, args.trusted_key, args.crane, args.console_config,
                 args.root, args.snapshot_id, args.repository,
                 args.restic_password_file, args.restic, args.restic_sha256,
-                args.lab_password_file)
+                args.lab_password_file, args.emergency_password_file,
+                enable_uploads=args.enable_uploads,
+                upload_snapshot_id=args.upload_snapshot_id,
+                upload_repository=args.upload_repository,
+                upload_password_file=args.upload_password_file)
         elif args.action == "rollback":
             result = rollback_product(args.root, args.trusted_key, args.crane)
         elif args.action == "recover":
             result = recover_product(args.root, args.trusted_key, args.crane)
+        elif args.action == "refresh-emergency":
+            result = refresh_emergency_product(args.root, args.trusted_key, args.crane)
         elif args.action == "cleanup-orphans":
             result = cleanup_product_orphans(args.root, args.trusted_key)
         else:

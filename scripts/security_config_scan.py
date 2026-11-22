@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 from infrastructure.deploy.installer import InstallError, validate_config
-from scripts.phase3_identity import container_create_command
+from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG, container_create_command
 
 ROOT = Path(__file__).resolve().parents[1]
 _IMAGE_NAME = "quay.io/keycloak/keycloak"
@@ -64,6 +64,9 @@ def scan(config: object, topology: object, image: object, command: list[str]) ->
             issues.append("lab container requests a privileged or host resource")
         if any(token.startswith("0.0.0.0:") or token.startswith("[::]:") for token in command):
             issues.append("lab container publishes a public port")
+        if (command.count("-e") != 1 or command.index("-e") + 1 >= len(command) or
+                command[command.index("-e") + 1] != KEYCLOAK_BASE64_FLAG):
+            issues.append("lab Keycloak is missing the Base64 JVM mitigation")
     return issues
 
 

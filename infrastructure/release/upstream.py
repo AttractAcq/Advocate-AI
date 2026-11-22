@@ -8,8 +8,12 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
+import tarfile
 import tempfile
+
+from infrastructure.release.intake import MAX_EVIDENCE_BYTES
 
 CRANE_VERSION = "0.22.1"
 SYFT_VERSION = "1.57.1"
@@ -21,12 +25,59 @@ class UpstreamError(ValueError):
     """The local image or an approved upstream tool failed verification."""
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise UpstreamError("duplicate generated evidence key")
+        result[key] = value
+    return result
+
+
+def _read_generated_json(path: Path) -> object:
+    """Read only one bounded, regular tool output without following links."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise UpstreamError("generated evidence is not a regular file")
+        raw = stream.read(MAX_EVIDENCE_BYTES + 1)
+    if len(raw) > MAX_EVIDENCE_BYTES:
+        raise UpstreamError("generated evidence exceeds size limit")
+    try:
+        return json.loads(raw, object_pairs_hook=_unique_object)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise UpstreamError("invalid generated evidence JSON") from exc
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _write_new_json(path: Path, value: dict[str, object]) -> str:
+    """Create one private evidence file without following a replaced path."""
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if len(payload) > MAX_EVIDENCE_BYTES:
+        raise UpstreamError("generated evidence exceeds size limit")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    identity = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        try:
+            current = path.lstat()
+            if (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+                path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _binary(path: Path, expected_hash: str) -> None:
@@ -57,12 +108,70 @@ def validate_image_archive(archive: Path, image_ref: str, crane: Path,
     _binary(crane, crane_sha256)
     if _run([str(crane), "version"]) != CRANE_VERSION:
         raise UpstreamError("unapproved crane version")
+    archive_sha256 = _sha256(archive)
     _run([str(crane), "validate", "--tarball", str(archive)], timeout=300)
     digest = _run([str(crane), "digest", "--tarball", str(archive)], timeout=300)
     if digest != f"sha256:{match.group(1)}":
         raise UpstreamError("saved image manifest does not match scanned digest")
-    return {"image_ref": image_ref, "archive_sha256": _sha256(archive),
+    if _sha256(archive) != archive_sha256:
+        raise UpstreamError("image archive changed during validation")
+    return {"image_ref": image_ref, "archive_sha256": archive_sha256,
             "manifest_digest": digest, "crane_version": CRANE_VERSION}
+
+
+def image_labels_from_archive(archive: Path, role: str) -> dict[str, str]:
+    """Read the hash-bound config labels from one validated Docker save."""
+    if archive.is_symlink() or not archive.is_file() or not re.fullmatch(r"[a-z-]+", role):
+        raise UpstreamError("invalid image archive or role")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise UpstreamError("duplicate image configuration key")
+            value[key] = item
+        return value
+
+    try:
+        with tarfile.open(archive, "r") as stream:
+            members: dict[str, list[tarfile.TarInfo]] = {}
+            for member in stream.getmembers():
+                members.setdefault(member.name, []).append(member)
+
+            def small_file(name: str) -> bytes:
+                matches = members.get(name, [])
+                if (len(matches) != 1 or not matches[0].isfile() or
+                        not 0 < matches[0].size <= 1024 * 1024):
+                    raise UpstreamError("invalid image configuration file")
+                source = stream.extractfile(matches[0])
+                if source is None:
+                    raise UpstreamError("missing image configuration file")
+                return source.read()
+
+            manifest = json.loads(small_file("manifest.json"), object_pairs_hook=unique_object)
+            if (not isinstance(manifest, list) or len(manifest) != 1 or
+                    not isinstance(manifest[0], dict) or
+                    manifest[0].get("RepoTags") != [f"sovereign-{role}:synthetic"]):
+                raise UpstreamError("archive has unexpected image tags")
+            config_path = manifest[0].get("Config")
+            if isinstance(config_path, str) and re.fullmatch(r"[0-9a-f]{64}\.json", config_path):
+                expected = config_path[:-5]
+            elif isinstance(config_path, str) and re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", config_path):
+                expected = config_path.rsplit("/", 1)[-1]
+            else:
+                raise UpstreamError("invalid image configuration path")
+            raw = small_file(config_path)
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise UpstreamError("image configuration digest mismatch")
+            configuration = json.loads(raw, object_pairs_hook=unique_object)
+            labels = configuration.get("config", {}).get("Labels") if isinstance(configuration, dict) else None
+            if (not isinstance(labels, dict) or
+                    any(not isinstance(key, str) or not isinstance(value, str)
+                        for key, value in labels.items())):
+                raise UpstreamError("image labels are unavailable")
+            return labels
+    except (OSError, tarfile.TarError, json.JSONDecodeError, AttributeError, TypeError) as exc:
+        raise UpstreamError("invalid image configuration archive") from exc
 
 
 def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
@@ -83,10 +192,9 @@ def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
         raw_path = Path(directory) / "raw.json"
         _run([str(syft), str(archive), "--from", "docker-archive", "-o",
               f"cyclonedx-json@1.6={raw_path}", "-q"], timeout=300)
-        try:
-            sbom = json.loads(raw_path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise UpstreamError("invalid generated SBOM") from exc
+        sbom = _read_generated_json(raw_path)
+    if _sha256(archive) != identity["archive_sha256"]:
+        raise UpstreamError("image archive changed during inventory generation")
     if (not isinstance(sbom, dict) or sbom.get("bomFormat") != "CycloneDX" or
             sbom.get("specVersion") != "1.6" or
             not isinstance(sbom.get("metadata"), dict) or
@@ -112,9 +220,9 @@ def generate_resolved_sbom(archive: Path, image_ref: str, output: Path,
         {"name": "sovereign-ai:archive-sha256", "value": identity["archive_sha256"]},
         {"name": "sovereign-ai:crane-version", "value": CRANE_VERSION},
     ])
-    output.write_text(json.dumps(sbom, sort_keys=True, separators=(",", ":")) + "\n")
+    sbom_sha256 = _write_new_json(output, sbom)
     return {"image_ref": image_ref, "archive_sha256": identity["archive_sha256"],
-            "sbom_sha256": _sha256(output), "components": len(sbom["components"]),
+            "sbom_sha256": sbom_sha256, "components": len(sbom["components"]),
             "crane_version": CRANE_VERSION, "syft_version": SYFT_VERSION}
 
 

@@ -9,12 +9,15 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import time
 import uuid
 from urllib.request import Request, urlopen
 import ssl
+
+from scripts.phase3_identity import KEYCLOAK_BASE64_FLAG
 
 import jwt
 
@@ -29,6 +32,14 @@ def _run(*args: str, timeout: int = 120) -> str:
         raise RuntimeError(f"synthetic Docker command failed ({args[0]} {args[1]}): " +
                            result.stderr[-1200:])
     return result.stdout.strip()
+
+
+def _verify_base64_mitigation(container: str) -> None:
+    flags = _run("docker", "exec", container, "jcmd",
+                 "io.quarkus.bootstrap.runner.QuarkusEntryPoint", "VM.flags", "-all")
+    if not any(re.search(r"\bUseBASE64Intrinsics\s*=\s*false\b", line) and
+               "{command line}" in line for line in flags.splitlines()):
+        raise AssertionError("running Keycloak JVM has Base64 intrinsics enabled")
 
 
 def _realm(password: str, mfa: bool = False) -> dict[str, object]:
@@ -213,14 +224,31 @@ def _run_flow(api: str, flow: str) -> dict[str, object]:
     # Docker's embedded DNS can briefly return EAI_AGAIN while an application
     # network is settling. Retry only that transport error with a fresh PKCE
     # exchange; assertion and authorization failures still fail immediately.
-    for attempt in range(3):
+    for attempt in range(15):
         try:
             return json.loads(_run("docker", "exec", api, "python", "-c", flow))
         except RuntimeError as error:
-            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 2:
+            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 14:
                 raise
             time.sleep(1)
     raise AssertionError("unreachable PKCE retry state")
+
+
+def _lab_token_denied(api: str) -> None:
+    script = ("import httpx; r=httpx.get('http://fleet-portal:8080/api/fleet/me', "
+              "headers={'X-Fleet-Lab-Token': 'synthetic-fleet-admin-token-0123456789'}, "
+              "trust_env=False, timeout=5); assert r.status_code == 401")
+    # Docker DNS may briefly return EAI_AGAIN after connecting the portal to
+    # the application network. Retry that transport error only; a response
+    # other than 401 or any other failure still fails immediately.
+    for attempt in range(15):
+        try:
+            _run("docker", "exec", api, "python", "-c", script)
+            return
+        except RuntimeError as error:
+            if "httpx.ConnectError: [Errno -3] Try again" not in str(error) or attempt == 14:
+                raise
+            time.sleep(1)
 
 
 def _admin_rotate(api: str, password: str, action: str, old_kid: str,
@@ -306,6 +334,7 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
     _run("docker", "run", "-d", "--name", keycloak,
          "--network", identity_network, "--network-alias", IDENTITY_HOST,
          "--ip", keycloak_ip,
+         "--env", KEYCLOAK_BASE64_FLAG,
          "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
          "--mount", f"type=bind,source={certs / 'key.pem'},target=/tmp/fleet-key.pem,readonly",
          "--mount", f"type=bind,source={restored},target=/opt/keycloak/data/import,readonly",
@@ -327,6 +356,7 @@ def _recover_keycloak(root: Path, reference: str, keycloak: str, api: str,
                               capture_output=True, text=True)
         raise AssertionError("restored Keycloak did not become ready: " +
                              logs.stderr[-1600:])
+    _verify_base64_mitigation(keycloak)
     _run("docker", "restart", api)
     for _ in range(20):
         probe = subprocess.run(["docker", "exec", api, "python", "-c",
@@ -355,7 +385,8 @@ def _totp(secret: str, offset: int = 0, at: float | None = None) -> str:
     return f"{number % 1_000_000:06d}"
 
 
-def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[str, str]:
+def browser_flow(password: str, chromedriver: str, mfa: bool = False,
+                 screenshot_output: Path | None = None) -> dict[str, str]:
     driver = subprocess.Popen([chromedriver, "--port=9515", "--allowed-ips=127.0.0.1"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     session = None
@@ -370,10 +401,12 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                    "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
                        "--no-proxy-server", "--host-resolver-rules=MAP fleet.example.invalid 127.0.0.2,"
                        "MAP identity.fleet 127.0.0.3"]}}
-        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}})
+        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}},
+                                timeout=45)
         assert isinstance(result, dict)
         session = result["sessionId"]
-        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"})
+        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"},
+                       timeout=45)
         until(session, "document.querySelector('button.primary')?.textContent?.includes('Sign in with local identity')")
         driver_request("POST", f"/session/{session}/execute/sync",
                        {"script": "document.querySelector('button.primary').click()", "args": []})
@@ -401,13 +434,57 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                 document.querySelector('#kc-totp-settings-form').requestSubmit();
             """, "args": [enrollment_code]})
         until(session, "location.hostname === 'fleet.example.invalid' && document.body.textContent.includes('admin · fleet admin')", 45)
+        until(session, "document.querySelector('[aria-label=\"Operational attention\"] .panel-heading span')?.textContent?.includes('as of')", 45)
         cleared = driver_request("POST", f"/session/{session}/execute/sync", {"script": """
             return !location.search && !sessionStorage.getItem('sovereign_fleet_oidc_state')
                 && !sessionStorage.getItem('sovereign_fleet_pkce_verifier');
         """, "args": []})
         assert cleared, "real Keycloak callback state or code remained in the browser"
-        driver_request("POST", f"/session/{session}/execute/sync",
-                       {"script": "document.querySelector('.sidebar-bottom button').click()", "args": []})
+        driver_request("POST", f"/session/{session}/window/rect",
+                       {"width": 390, "height": 844})
+        mobile = driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": """
+                const button = document.querySelector('.sidebar-bottom button');
+                const rect = button?.getBoundingClientRect();
+                const style = button && getComputedStyle(button);
+                return {narrow: matchMedia('(max-width: 760px)').matches,
+                    visible: !!rect && style.display !== 'none' && style.visibility !== 'hidden',
+                    width: rect?.width, height: rect?.height,
+                    inWidth: !!rect && rect.left >= 0 && rect.right <= innerWidth + 1,
+                    pageFits: document.documentElement.scrollWidth <= innerWidth + 1,
+                    viewport: innerWidth, pageWidth: document.documentElement.scrollWidth,
+                    signOutRight: rect?.right,
+                    overflow: [...document.querySelectorAll('.shell, .sidebar, .content, .page, .table-panel, .table-scroll, .topbar')]
+                        .filter((item) => item.getBoundingClientRect().right > innerWidth + 1)
+                        .map((item) => ({name: item.className, right: item.getBoundingClientRect().right}))};
+            """, "args": []})
+        assert (mobile["narrow"] and mobile["visible"] and mobile["inWidth"] and
+                mobile["pageFits"] and mobile["width"] >= 44 and
+                mobile["height"] >= 44), f"mobile sign-out is unreachable: {mobile}"
+        if screenshot_output is not None:
+            encoded = driver_request("GET", f"/session/{session}/screenshot")
+            if not isinstance(encoded, str) or len(encoded) > 14_000_000:
+                raise AssertionError("Fleet mobile screenshot is missing or oversized")
+            screenshot = base64.b64decode(encoded, validate=True)
+            if not screenshot.startswith(b"\x89PNG\r\n\x1a\n") or len(screenshot) > 10_000_000:
+                raise AssertionError("Fleet mobile screenshot is not a bounded PNG")
+            with screenshot_output.open("xb") as stream:
+                stream.write(screenshot)
+        driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": "document.querySelector('.sidebar nav button:last-of-type').focus()",
+            "args": []})
+        driver_request("POST", f"/session/{session}/actions", {"actions": [{
+            "type": "key", "id": "fleet-keyboard", "actions": [
+                {"type": "keyDown", "value": "\ue004"},
+                {"type": "keyUp", "value": "\ue004"}]}]})
+        focused = driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": "return document.activeElement === document.querySelector('.sidebar-bottom button') && document.activeElement.matches(':focus-visible')",
+            "args": []})
+        assert focused, "keyboard tab did not reach visible mobile sign-out"
+        driver_request("POST", f"/session/{session}/actions", {"actions": [{
+            "type": "key", "id": "fleet-keyboard", "actions": [
+                {"type": "keyDown", "value": "\ue007"},
+                {"type": "keyUp", "value": "\ue007"}]}]})
         outcome = until(session, """location.hostname === 'fleet.example.invalid'
             && document.body.textContent.includes('Sign in with local identity') ? 'fleet' :
             location.hostname === 'identity.fleet' && !!document.querySelector('form') ? 'confirm' : false""", 45)
@@ -454,9 +531,10 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                 """, "args": []})
                 raise AssertionError(f"valid synthetic OTP did not reach Fleet: {state}") from error
             return {"browser_flow": "keycloak-mfa-enrolled-and-authorized",
-                    "invalid_otp": "denied", "callback_state": "cleared", "api_role": "fleet_admin"}
+                    "invalid_otp": "denied", "callback_state": "cleared", "api_role": "fleet_admin",
+                    "mobile_keyboard": "sign-out-reached-and-activated"}
         return {"browser_flow": "real-keycloak-pkce-sign-in-and-sign-out", "callback_state": "cleared",
-                "api_role": "fleet_admin"}
+                "api_role": "fleet_admin", "mobile_keyboard": "sign-out-reached-and-activated"}
     finally:
         if session:
             try:
@@ -468,9 +546,12 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
 
 
 def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
-             mfa: bool = False, recovery: bool = False) -> dict[str, str]:
+             mfa: bool = False, recovery: bool = False,
+             screenshot_output: Path | None = None) -> dict[str, str]:
     if mfa and not browser:
         raise ValueError("MFA rehearsal requires the browser")
+    if screenshot_output is not None and not browser:
+        raise ValueError("Fleet screenshot requires the browser")
     if recovery and (mfa or browser):
         raise ValueError("clean recovery uses the non-browser fictional realm")
     image = json.loads(Path("infrastructure/lab/container-image.json").read_text())
@@ -527,6 +608,7 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
         try:
             _run("docker", "run", "-d", "--name", keycloak,
                  "--network", browser_network if browser else identity_network,
+                 "--env", KEYCLOAK_BASE64_FLAG,
                  *([] if browser else ["--network-alias", IDENTITY_HOST]),
                  *(["--publish", "127.0.0.3:443:443"] if browser else []),
                  "--mount", f"type=bind,source={certs / 'cert.pem'},target=/tmp/fleet-cert.pem,readonly",
@@ -591,11 +673,9 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                                       capture_output=True, text=True)
                 raise AssertionError("synthetic Keycloak did not become ready: " +
                                      logs.stderr[-1600:])
+            _verify_base64_mitigation(keycloak)
             if mfa:
-                _run("docker", "exec", api, "python", "-c",
-                     "import httpx; r=httpx.get('http://fleet-portal:8080/api/fleet/me', "
-                     "headers={'X-Fleet-Lab-Token': 'synthetic-fleet-admin-token-0123456789'}, "
-                     "trust_env=False); assert r.status_code == 401")
+                _lab_token_denied(api)
                 outcome = {"keycloak_flow": "mfa-required", "lab_token": "denied"}
             else:
                 flow = _FLOW.replace("__ISSUER__", repr(ISSUER)).replace(
@@ -655,7 +735,8 @@ def rehearse(browser: bool = False, chromedriver: str = "chromedriver",
                         time.sleep(0.2)
                 else:
                     raise RuntimeError(f"Fleet HTTPS bridge did not become ready: {last_error}")
-                outcome.update(browser_flow(password, chromedriver, mfa))
+                outcome.update(browser_flow(password, chromedriver, mfa,
+                                            screenshot_output))
             return outcome
         finally:
             if proxy:
@@ -679,6 +760,8 @@ if __name__ == "__main__":
     parser.add_argument("--mfa", action="store_true")
     parser.add_argument("--recovery", action="store_true")
     parser.add_argument("--chromedriver", default=os.environ.get("CHROMEDRIVER", "chromedriver"))
+    parser.add_argument("--screenshot-output", type=Path)
     arguments = parser.parse_args()
     print(json.dumps(rehearse(arguments.browser, arguments.chromedriver,
-                             arguments.mfa, arguments.recovery), sort_keys=True))
+                             arguments.mfa, arguments.recovery,
+                             arguments.screenshot_output), sort_keys=True))

@@ -10,18 +10,92 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from infrastructure.deploy.fleet_installer import (
     FleetInstallError, fleet_status, install_fleet, recover_fleet, rollback_fleet,
-    rotate_fleet_ca, _state, _write_ca_journal, _write_state,
+    rotate_fleet_ca, _provision_receipt_trust, _state, _write_ca_journal,
+    _write_state,
 )
 from infrastructure.deploy.fleet_runtime import FleetRuntime, RuntimeError
 from infrastructure.deploy.fleet_runtime import (
-    _health, start_verified_bundle, validate_config, verify_runtime_identity,
+    _health, _import_trust, _trust_digest, start_verified_bundle, validate_config,
+    verify_runtime_identity,
 )
 from scripts.phase8_fleet_oidc_rehearsal import _identity_material
 
 
 class FleetInstallerTests(unittest.TestCase):
+    def test_installed_receipt_trust_mount_and_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            state = root / "state"
+            state.mkdir(mode=0o700)
+            token = state / "token"
+            token.write_text("synthetic-fleet-admin-token-0123456789")
+            token.chmod(0o600)
+            source = root / "external-trust"
+            source.mkdir(mode=0o700)
+            trust = root / "receipt-import"
+            public = Ed25519PrivateKey.generate().public_key()
+            issuer = source / "issuer-1.pem"
+            issuer.write_bytes(public.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo))
+            issuer.chmod(0o600)
+            manifest = source / "trusted-issuers.json"
+            manifest.write_text('["/etc/fleet-import/issuer-1.pem"]')
+            manifest.chmod(0o600)
+            _provision_receipt_trust(root, source)
+            self.assertEqual(_import_trust(state), trust)
+            original_digest = _trust_digest(trust)
+            config = root / "fleet-config.json"
+            config.write_text('{"schema":1,"oidc_issuer":null}')
+            bundle = root / "bundle"
+            bundle.mkdir()
+            calls = []
+
+            def docker(*args):
+                calls.append(args)
+                if args[:2] == ("network", "create"):
+                    return "a" * 64
+                if args[:2] == ("run", "-d"):
+                    return ("b" if sum(call[:2] == ("run", "-d")
+                                       for call in calls) == 1 else "c") * 64
+                return ""
+
+            with patch("infrastructure.deploy.fleet_runtime.verify_bundle",
+                       return_value={"schema": 5, "target": "fleet",
+                                     "images": {"fleet-api": {}, "fleet-portal": {}}}), \
+                 patch("infrastructure.deploy.fleet_runtime._image_id",
+                       side_effect=["api-image", "portal-image"]), \
+                 patch("infrastructure.deploy.fleet_runtime._docker",
+                       side_effect=docker), \
+                 patch("infrastructure.deploy.fleet_runtime.probe_runtime"):
+                start_verified_bundle(bundle, root / "release-key.pem",
+                                      root / "crane", config, state)
+            api = next(call for call in calls if call[:2] == ("run", "-d"))
+            self.assertIn("SOVEREIGN_FLEET_IMPORT_TRUST_FILE=/etc/fleet-import/trusted-issuers.json",
+                          api)
+            self.assertIn(f"type=bind,source={trust.resolve()},target=/etc/fleet-import,readonly",
+                          api)
+            self.assertIn(f"SOVEREIGN_FLEET_IMPORT_TRUST_SHA256={original_digest}", api)
+            replacement = Ed25519PrivateKey.generate().public_key()
+            (trust / "issuer-1.pem").write_bytes(replacement.public_bytes(
+                serialization.Encoding.PEM,
+                serialization.PublicFormat.SubjectPublicKeyInfo))
+            self.assertEqual(_import_trust(state), trust)
+            self.assertNotEqual(_trust_digest(trust), original_digest)
+            (trust / "issuer-1.pem").chmod(0o644)
+            with self.assertRaises(RuntimeError):
+                _import_trust(state)
+            (trust / "issuer-1.pem").chmod(0o600)
+            (trust / "unapproved.pem").write_text("extra")
+            with self.assertRaises(RuntimeError):
+                _import_trust(state)
+
     def test_runtime_probe_python_is_valid(self) -> None:
         commands = []
         with patch("infrastructure.deploy.fleet_runtime._docker",

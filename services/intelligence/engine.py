@@ -19,9 +19,16 @@ _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 _UNSAFE_ANALYSIS = re.compile(
     r"https?://|\b(?:disable|delete|modify|reconfigure|execute|run|curl|wget|"
     r"send|reveal|ignore|override|credential|password|token|api[_-]?key|"
-    r"compromised|breached|confirmed)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
+    r"compromised|breached|confirmed|cause|caused|causal|linked|coordinated|"
+    r"attributed|campaign|related|correlated|correlation)\b|"
+    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|half|several)"
+    r"(?:\s|-)*(?:minute|hour|day|week)s?\b|"
+    r"\bhalf\s+an?\s+hour\b|"
+    r"\bsame\s+(?:incident|attack)\b|\b\d{1,3}(?:\.\d{1,3}){3}\b",
     re.I,
 )
+_TIME_MENTION = re.compile(
+    r"(?<![0-9:+-])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b")
 
 
 def _text(value: object, *, limit: int = 160) -> str:
@@ -58,6 +65,22 @@ def safe_incident_analysis(text: str) -> bool:
             or not text.rstrip().endswith((".", "!", "?"))):
         return False
     return not instruction_like(text) and not _UNSAFE_ANALYSIS.search(text)
+
+
+def supported_incident_times(text: str, timestamps: list[str]) -> bool:
+    """Require every stated clock time to appear in a cited alert timestamp."""
+    allowed = set()
+    for timestamp in timestamps:
+        try:
+            moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            return False
+        if moment.utcoffset() is None:
+            return False
+        allowed.update((moment.strftime("%H:%M"), moment.strftime("%H:%M:%S")))
+        allowed.update((f"{moment.hour}:{moment.minute:02d}",
+                        f"{moment.hour}:{moment.minute:02d}:{moment.second:02d}"))
+    return all(match in allowed for match in _TIME_MENTION.findall(text))
 
 
 def normalize_alert(hit: Mapping[str, object], registry: AssetRegistry) -> dict[str, object]:
@@ -138,6 +161,32 @@ def incident_view(event: Mapping[str, object]) -> dict[str, object]:
             "evidence": [{"event_id": event["event_id"], "index_name": event["index_name"],
                           "index_id": event["index_id"], "timestamp": event["timestamp"],
                           "rule_id": event["rule_id"], "location": event["location"]}]}
+
+
+def related_alert_evidence(primary: Mapping[str, object],
+                           candidates: list[dict[str, object]], *,
+                           since: datetime, until: datetime) -> dict[str, object]:
+    """Correlate only alerts with the same explicitly resolved source asset."""
+    event = primary["event"]
+    asset = event["asset"]
+    if event["asset_status"] != "known" or not isinstance(asset, dict):
+        return {"incident_id": primary["incident_id"], "status": "unresolved-source",
+                "related": [], "examined": len(candidates), "limit": 100}
+    matches = []
+    for item in candidates:
+        other = item["event"]
+        other_asset = other["asset"]
+        observed_at = datetime.fromisoformat(str(other["timestamp"]))
+        if (item["incident_id"] != primary["incident_id"] and
+                since <= observed_at < until and
+                other["asset_status"] == "known" and isinstance(other_asset, dict) and
+                other_asset["asset_id"] == asset["asset_id"]):
+            matches.append({"incident_id": item["incident_id"],
+                            "summary": item["summary"], "timestamp": other["timestamp"],
+                            "severity": other["severity"], "evidence": item["evidence"]})
+    matches.sort(key=lambda row: (row["timestamp"], row["incident_id"]), reverse=True)
+    return {"incident_id": primary["incident_id"], "status": "observed-same-source",
+            "related": matches[:20], "examined": len(candidates), "limit": 100}
 
 
 def supported_incidents(hits: list[dict[str, object]], registry: AssetRegistry) -> list[dict[str, object]]:

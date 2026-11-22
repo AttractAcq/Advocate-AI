@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -22,13 +25,113 @@ from infrastructure.deploy.container_runtime import (
 )
 from infrastructure.deploy.product_installer import (
     cleanup_product_orphans, install_product, product_status, recover_product,
-    restore_install_product, rollback_product,
+    refresh_emergency_product, restore_install_product, rollback_product,
+)
+from infrastructure.deploy.product_recovery_set import (
+    create_product_recovery_set, restore_product_recovery_set,
+    verify_product_recovery_set,
 )
 from infrastructure.deploy.boot_service import write_recovery_unit
+from infrastructure.deploy.core_state_inventory import source_files
 from infrastructure.release.intake import IntakeError, verify_intake
 from infrastructure.release.scan import generate_archive_scan
 from infrastructure.release.upstream import generate_resolved_sbom, validate_image_archive
-from scripts.phase5_core_state_restore import PASSPHRASE, _probe, snapshot_synthetic_state
+from services.knowledge.ingestion import sync_manifest
+from services.policy.audit import verify as verify_audit
+from scripts.phase5_core_state_restore import ROOT, PASSPHRASE, _probe, snapshot_synthetic_state
+
+
+def _expand_recovery_sources(state: Path) -> int:
+    """Install the complete fictional manifest after the signed runtime stops."""
+    fixtures = ROOT / "fixtures"
+    for source in (fixtures / "sources").iterdir():
+        if source.is_symlink() or not source.is_file():
+            raise AssertionError("unsafe fictional recovery fixture")
+        shutil.copyfile(source, state / "sources" / source.name)
+    shutil.copyfile(fixtures / "manifest.csv", state / "manifest.csv")
+    count = len(source_files(state))
+    if count != 100:
+        raise AssertionError("fictional recovery inventory is incomplete")
+    with (state / "manifest.csv").open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    manifest = state / "knowledge-manifest.json"
+    manifest.write_text(json.dumps({"schema": 1, "sources": rows}, sort_keys=True))
+    indexed = sync_manifest(state, manifest, state / "knowledge.db")
+    with sqlite3.connect(state / "knowledge.db") as database:
+        ready = database.execute("SELECT COUNT(*) FROM sources WHERE state='ready'").fetchone()[0]
+    if ready != count or indexed["quarantined"]:
+        raise AssertionError("fictional recovery index is incomplete")
+    return count
+
+_UPLOAD_PROBE = r'''
+import hashlib, json, sys, urllib.request
+phase, expected_id = sys.argv[1:3]
+base = "http://127.0.0.1:18100"
+password = open("/run/secrets/lab-password", encoding="utf-8").read().strip()
+body = json.dumps({"user_id":"lab-chief_engineer-1", "password":password}).encode()
+login = urllib.request.Request(base + "/api/login", data=body,
+                               headers={"Content-Type":"application/json"})
+token = json.load(urllib.request.urlopen(login, timeout=5))["access_token"]
+headers = {"Authorization":"Bearer " + token}
+if phase == "stage":
+    payload = b"synthetic product upload boundary"
+    request = urllib.request.Request(base + "/api/documents/stage", data=payload,
+                                     headers={**headers, "Content-Type":"application/octet-stream",
+                                              "X-Filename":"synthetic-note.txt"})
+    item = json.load(urllib.request.urlopen(request, timeout=5))["upload"]
+    expected_id = item["id"]
+    assert item["sha256"] == hashlib.sha256(payload).hexdigest()
+uploads = json.load(urllib.request.urlopen(
+    urllib.request.Request(base + "/api/documents/staged", headers=headers), timeout=5))["uploads"]
+assert len(uploads) == 1 and uploads[0]["id"] == expected_id and uploads[0]["status"] == "pending"
+sources = json.load(urllib.request.urlopen(
+    urllib.request.Request(base + "/api/sources", headers=headers), timeout=5))["sources"]
+assert all(item["document_id"] != "synthetic-note" for item in sources)
+assert len(sources) == (20 if phase == "recovered" else 0 if phase == "late" else 1)
+print(json.dumps({"upload_id":expected_id, "status":"pending", "source_count":len(sources)}))
+'''
+
+_RECOVERED_INDEX_PROBE = r'''
+import json, sys, urllib.error, urllib.request
+base = "http://127.0.0.1:18100"
+password = open("/run/secrets/lab-password", encoding="utf-8").read().strip()
+def login(user):
+    request = urllib.request.Request(base + "/api/login",
+        data=json.dumps({"user_id":user,"password":password}).encode(),
+        headers={"Content-Type":"application/json"})
+    return json.load(urllib.request.urlopen(request, timeout=5))["access_token"]
+def get(path, token):
+    request = urllib.request.Request(base + path,
+        headers={"Authorization":"Bearer " + token})
+    return json.load(urllib.request.urlopen(request, timeout=5))
+captain = login("lab-captain-1")
+chief = login("lab-chief_engineer-1")
+deck = login("lab-deckhand-1")
+expected = {"captain": (captain, 80, {"management","engineering","interior","deck"}),
+            "chief": (chief, 20, {"deck"}), "deck": (deck, 20, {"deck"})}
+for role, (token, count, collections) in expected.items():
+    sources = get("/api/sources", token)["sources"]
+    assert len(sources) == count, role
+    assert {row["collection"] for row in sources} == collections, role
+    assert all(row["document_id"] != "RES-001" for row in sources), role
+assert get("/api/sources/MAN-002/preview", captain)["document_id"] == "MAN-002"
+for token, document in ((chief,"MAN-002"),(deck,"ENG-002"),(captain,"RES-001")):
+    try:
+        get("/api/sources/" + document + "/preview", token)
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 404
+    else:
+        raise AssertionError("cross-role source preview was disclosed")
+request = urllib.request.Request(base + "/api/search",
+    data=json.dumps({"query":"SYN-MANAGEMENT-002-ALPHA",
+                     "selected_documents":["MAN-002"]}).encode(),
+    headers={"Content-Type":"application/json", "Authorization":"Bearer " + captain})
+hits = json.load(urllib.request.urlopen(request, timeout=5))["results"]
+assert hits and all(row["document_id"] == "MAN-002" for row in hits)
+print(json.dumps({"ready_sources":100,"captain_sources":80,
+                  "chief_sources":20,"deck_sources":20,"cross_role_denied":True,
+                  "cited_search":True}))
+'''
 
 
 def _sha256(path: Path) -> str:
@@ -45,6 +148,12 @@ def _docker(*arguments: str) -> str:
     return completed.stdout.strip()
 
 
+def _mounted_emergency_digest(core_id: str) -> str:
+    code = ("import hashlib; from pathlib import Path; "
+            "print(hashlib.sha256(Path('/run/secrets/emergency-password').read_bytes()).hexdigest())")
+    return _docker("exec", core_id, "python", "-c", code)
+
+
 def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
                   image_ref: str, crane: Path, crane_sha256: str) -> None:
     payload = root / "payload"
@@ -59,6 +168,7 @@ def _signed_trial(root: Path, archive: Path, scan: Path, sbom: Path,
     private.write_bytes(key.private_bytes(serialization.Encoding.PEM,
                                           serialization.PrivateFormat.PKCS8,
                                           serialization.NoEncryption()))
+    private.chmod(0o600)
     trusted.write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,
                                                       serialization.PublicFormat.SubjectPublicKeyInfo))
     evidence = {"image_ref": image_ref, "archive_path": "images/core.tar",
@@ -169,10 +279,13 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                 state_root = root / "core-restore"
                 state_root.mkdir(mode=0o700)
                 repository, backup_password, snapshot_id, conversation_id = snapshot_synthetic_state(
-                    state_root, restic, restic_sha256)
+                    state_root, restic, restic_sha256, include_index=True)
                 lab_credential = root / "lab-password"
                 lab_credential.write_text(PASSPHRASE + "\n")
                 lab_credential.chmod(0o600)
+                emergency_credential = root / "emergency-password"
+                emergency_credential.write_text(secrets.token_urlsafe(24) + "\n")
+                emergency_credential.chmod(0o600)
                 second_bundle = root / "signed-product-trial-2"
                 create_product_bundle(payload, second_bundle, private,
                                       "synthetic-product-trial-2", descriptors,
@@ -188,7 +301,8 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     first = restore_install_product(
                         product_bundle, trusted, crane, config, install_root,
                         snapshot_id, repository, backup_password, restic,
-                        restic_sha256, lab_credential)
+                        restic_sha256, lab_credential, emergency_credential,
+                        enable_uploads=True)
                     state = install_root / "core-state"
                     try:
                         def active_core() -> str:
@@ -196,6 +310,50 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                             return str(active["runtime"]["core_id"])
 
                         before = _probe(active_core(), conversation_id, "before")
+                        staged = json.loads(_docker("exec", active_core(), "python", "-c",
+                                                    _UPLOAD_PROBE, "stage", "-"))
+                        staged_id = staged["upload_id"]
+                        if (not isinstance(staged_id, str) or len(staged_id) != 32 or
+                                not (install_root / "product-uploads" / f"{staged_id}.blob").is_file() or
+                                staged["source_count"] != 1):
+                            raise AssertionError("signed Core upload quarantine failed")
+                        result["upload_quarantine"] = "staged-and-not-indexed"
+                        old_core = active_core()
+                        initial_digest = _sha256(emergency_credential)
+                        if _mounted_emergency_digest(old_core) != initial_digest:
+                            raise AssertionError("initial emergency mount content mismatch")
+                        replacement = root / "replacement-emergency-password"
+                        replacement.write_text(secrets.token_urlsafe(24) + "\n")
+                        replacement.chmod(0o600)
+                        replacement.replace(emergency_credential)
+                        rotated_digest = _sha256(emergency_credential)
+                        if rotated_digest == initial_digest or \
+                                _mounted_emergency_digest(old_core) != initial_digest:
+                            raise AssertionError("old Core did not retain the prior file bind")
+                        try:
+                            product_status(install_root, trusted)
+                        except ContainerRuntimeError as exc:
+                            if "stale" not in str(exc):
+                                raise
+                        else:
+                            raise AssertionError("stale emergency mount passed product status")
+                        refreshed = refresh_emergency_product(install_root, trusted, crane)
+                        if (refreshed["active"] != first["active"] or
+                                active_core() == old_core or
+                                _mounted_emergency_digest(active_core()) != rotated_digest or
+                                product_status(install_root, trusted)["active"] != first["active"]):
+                            raise AssertionError("emergency credential did not rebind")
+                        try:
+                            _docker("inspect", old_core)
+                        except subprocess.CalledProcessError:
+                            pass
+                        else:
+                            raise AssertionError("old Core survived emergency refresh")
+                        result["emergency_rotation"] = "atomic-file-rebound"
+                        retained = json.loads(_docker("exec", active_core(), "python", "-c",
+                                                      _UPLOAD_PROBE, "verify", staged_id))
+                        if retained["upload_id"] != staged_id:
+                            raise AssertionError("upload quarantine did not survive runtime refresh")
                         roles = json.loads((state / "roles.json").read_text())
                         roles["allow"]["chief_engineer"] = ["deck"]
                         (state / "roles.json").write_text(json.dumps(roles))
@@ -270,6 +428,10 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                                 product_status(install_root, trusted)["active"] != first["active"]:
                             raise AssertionError("stopped runtime did not recover from staged bundle")
                         _probe(active_core(), conversation_id, "after")
+                        late_upload = json.loads(_docker("exec", active_core(), "python", "-c",
+                                                        _UPLOAD_PROBE, "late", staged_id))
+                        if late_upload["upload_id"] != staged_id:
+                            raise AssertionError("upload quarantine did not survive release recovery")
                         try:
                             _docker("inspect", stopped_runtime.core_id)
                         except subprocess.CalledProcessError:
@@ -281,6 +443,60 @@ def rehearse(output: Path, crane: Path, crane_sha256: str,
                     finally:
                         active_state = json.loads((install_root / "product-state.json").read_text())
                         stop_runtime(RuntimeHandle(**active_state["runtime"]))
+                    recovery_sources = _expand_recovery_sources(state)
+                    core_repository = state_root / "coordinated-core-repository"
+                    upload_repository = state_root / "upload-repository"
+                    receipt_path = root / "coordinated-recovery-set.json"
+                    audit_before = (state / "audit.jsonl").read_bytes()
+                    audit_count, _ = verify_audit(state / "audit.jsonl")
+                    if audit_count < 1:
+                        raise AssertionError("installed Core did not record audited requests")
+                    created_set = create_product_recovery_set(
+                        install_root, core_repository, upload_repository,
+                        backup_password, backup_password, restic, restic_sha256,
+                        state_root, private, receipt_path)
+                    recovery_set = verify_product_recovery_set(receipt_path, trusted)
+                    if recovery_set != created_set:
+                        raise AssertionError("coordinated recovery receipt mismatch")
+                    recovered_root = root / "product-upload-restore-install"
+                    combined = restore_product_recovery_set(
+                        receipt_path, trusted, product_bundle, trusted,
+                        crane, config, recovered_root, backup_password,
+                        backup_password, restic, restic_sha256, lab_credential,
+                        emergency_credential)
+                    try:
+                        recovered_state = json.loads((recovered_root / "product-state.json").read_text())
+                        if len(source_files(recovered_root / "core-state")) != recovery_sources:
+                            raise AssertionError("restored fictional source inventory mismatch")
+                        recovered_core = str(recovered_state["runtime"]["core_id"])
+                        recovered_upload = json.loads(_docker(
+                            "exec", recovered_core, "python", "-c", _UPLOAD_PROBE,
+                            "recovered", staged_id))
+                        recovered_index = json.loads(_docker(
+                            "exec", recovered_core, "python", "-c", _RECOVERED_INDEX_PROBE))
+                        recovered_audit = recovered_root / "core-state" / "audit.jsonl"
+                        recovered_count, _ = verify_audit(recovered_audit)
+                        if (combined["restored_files"] != recovery_sources + 6 or
+                                not recovered_audit.read_bytes().startswith(audit_before) or
+                                recovered_count <= audit_count or
+                                combined["restored_upload_files"] != 2 or
+                                recovered_upload["upload_id"] != staged_id or
+                                recovered_upload["source_count"] != 20 or
+                                recovered_index["ready_sources"] != recovery_sources or
+                                product_status(recovered_root, trusted)["active"] != combined["active"]):
+                            raise AssertionError("checked upload restore did not activate")
+                        result["combined_upload_restore"] = "encrypted-snapshot-activated"
+                        result["coordinated_recovery_set"] = {
+                            "core_snapshot_id": recovery_set["core_snapshot_id"],
+                            "upload_snapshot_id": recovery_set["upload_snapshot_id"],
+                            "signed_receipt": "verified",
+                            "audit_continuity": "verified",
+                            "sources_restored": recovery_sources,
+                            "indexed_permissions": recovered_index,
+                        }
+                    finally:
+                        recovered_state = json.loads((recovered_root / "product-state.json").read_text())
+                        stop_runtime(RuntimeHandle(**recovered_state["runtime"]))
                 finally:
                     config.unlink(missing_ok=True)
         (output / "result.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
@@ -297,10 +513,13 @@ def main() -> None:
         parser.add_argument("--" + name, required=True,
                             type=Path if name in {"output", "crane", "syft", "trivy", "trivy-cache", "restic"} else str)
     args = parser.parse_args()
-    print(json.dumps(rehearse(args.output, args.crane, args.crane_sha256,
-                             args.syft, args.syft_sha256, args.trivy,
-                             args.trivy_sha256, args.trivy_cache,
-                             args.restic, args.restic_sha256), sort_keys=True))
+    result = rehearse(args.output, args.crane, args.crane_sha256,
+                      args.syft, args.syft_sha256, args.trivy,
+                      args.trivy_sha256, args.trivy_cache,
+                      args.restic, args.restic_sha256)
+    print(json.dumps(result, sort_keys=True))
+    if result.get("product_bundle") != "verified":
+        parser.exit(1, "product image release: signed product rehearsal was not run\n")
 
 
 if __name__ == "__main__":

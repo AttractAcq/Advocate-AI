@@ -7,8 +7,10 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
+import tempfile
 
-from infrastructure.release.upstream import _binary, _run, _sha256, validate_image_archive
+from infrastructure.release.upstream import (_binary, _read_generated_json, _run, _sha256, _write_new_json,
+                                             validate_image_archive)
 
 TRIVY_VERSION = "0.76.2"
 MAX_DATABASE_AGE = timedelta(days=7)
@@ -62,20 +64,13 @@ def generate_archive_scan(archive: Path, image_ref: str, output: Path,
         raise ScanError("offline vulnerability database is stale")
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         raise ScanError("scan output must be a new file in an existing directory")
-    raw_path = output.parent / (output.name + ".raw.tmp")
-    if raw_path.exists() or raw_path.is_symlink():
-        raise ScanError("temporary scan path already exists")
-    try:
+    with tempfile.TemporaryDirectory() as directory:
+        raw_path = Path(directory) / "raw-scan.json"
         _run([str(trivy), "image", "--input", str(archive), "--scanners", "vuln",
               "--format", "json", "--output", str(raw_path), "--cache-dir", str(cache),
               "--skip-db-update", "--skip-java-db-update", "--skip-check-update",
               "--offline-scan", "--quiet"], timeout=600)
-        try:
-            report = json.loads(raw_path.read_text())
-        except (OSError, ValueError) as exc:
-            raise ScanError("invalid Trivy report") from exc
-    finally:
-        raw_path.unlink(missing_ok=True)
+        report = _read_generated_json(raw_path)
     if (not isinstance(report, dict) or report.get("SchemaVersion") != 2 or
             report.get("ArtifactType") != "container_image" or
             report.get("ArtifactName") != str(archive) or
@@ -100,9 +95,9 @@ def generate_archive_scan(archive: Path, image_ref: str, output: Path,
         "DatabaseUpdatedAt": db_metadata["UpdatedAt"],
         "DatabaseNextUpdate": db_metadata["NextUpdate"],
     }
-    output.write_text(json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n")
+    scan_sha256 = _write_new_json(output, report)
     return {"image_ref": image_ref, "archive_sha256": identity["archive_sha256"],
-            "scan_sha256": _sha256(output), "database_sha256": report["Sovereign"]["DatabaseSHA256"],
+            "scan_sha256": scan_sha256, "database_sha256": report["Sovereign"]["DatabaseSHA256"],
             "trivy_version": TRIVY_VERSION}
 
 

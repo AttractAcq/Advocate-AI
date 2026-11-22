@@ -15,6 +15,7 @@ import time
 
 from apps.api.auth import LabSessions
 from infrastructure.restic_repository import create_snapshot, restore_snapshot
+from services.knowledge.ingestion import sync_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,7 +79,7 @@ def _probe(container: str, conversation_id: str, phase: str) -> dict[str, object
     return value
 
 
-def prepare_synthetic_state(live: Path) -> str:
+def prepare_synthetic_state(live: Path, *, include_index: bool = False) -> str:
     """Create fictional policy, source and cited history for runtime rehearsals."""
     source = ROOT / "fixtures/sources/ENG-001.txt"
     if not source.is_file():
@@ -96,6 +97,12 @@ def prepare_synthetic_state(live: Path) -> str:
         writer.writerow(row)
     if hashlib.sha256(source.read_bytes()).hexdigest() != row["sha256"]:
         raise RuntimeError("synthetic source manifest hash mismatch")
+    if include_index:
+        manifest = live / "knowledge-manifest.json"
+        manifest.write_text(json.dumps({"schema": 1, "sources": [row]}, sort_keys=True))
+        indexed = sync_manifest(live, manifest, live / "knowledge.db")
+        if indexed["indexed"] != ["ENG-001"] or indexed["quarantined"]:
+            raise RuntimeError("synthetic indexed source was not ready")
     sessions = LabSessions(live / "roles.json", PASSPHRASE, live / "history.db")
     conversation_id, _ = sessions.create_conversation(USER)
     sessions.add_turn(conversation_id, USER, {"message": "fictional generator inspection",
@@ -106,16 +113,24 @@ def prepare_synthetic_state(live: Path) -> str:
 
 
 def snapshot_synthetic_state(root: Path, restic: Path,
-                             restic_sha256: str) -> tuple[Path, Path, str, str]:
+                             restic_sha256: str, *,
+                             include_index: bool = False) -> tuple[Path, Path, str, str]:
     """Snapshot fictional Core state, then remove its live copy."""
     live = root / "live"
-    conversation_id = prepare_synthetic_state(live)
+    conversation_id = prepare_synthetic_state(live, include_index=include_index)
     spec = root / "spec.json"
-    spec.write_text(json.dumps({"schema": 1, "files": [
+    files = [
         {"name": "roles.json", "kind": "file", "source": "live/roles.json"},
         {"name": "manifest.csv", "kind": "file", "source": "live/manifest.csv"},
         {"name": "sources/ENG-001.txt", "kind": "file", "source": "live/sources/ENG-001.txt"},
-        {"name": "history.db", "kind": "sqlite", "source": "live/history.db"}]}))
+        {"name": "history.db", "kind": "sqlite", "source": "live/history.db"}]
+    if include_index:
+        files.extend([
+            {"name": "knowledge-manifest.json", "kind": "file",
+             "source": "live/knowledge-manifest.json"},
+            {"name": "knowledge.db", "kind": "sqlite", "source": "live/knowledge.db"},
+        ])
+    spec.write_text(json.dumps({"schema": 1, "files": files}))
     password = root / "restic-password"
     password.write_text(os.urandom(32).hex())
     password.chmod(0o600)

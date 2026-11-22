@@ -1,0 +1,126 @@
+{
+  "corpus_sha256": "468f56d12a424494ede4fad153294a520d13c68eb3b42fd3b02ddb9ac70acf7b",
+  "fixture_manifest_sha256": "f377e8e5a683de55348a72d797f8771d5bd83b5137340b310b47316dad5563a9",
+  "gpu_thermals": null,
+  "host": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "limits": [
+    "Core uses non-streaming chat; time to first token is not observable here",
+    "no 300-token workload or GPU telemetry in this Core-only run",
+    "target packet capture, process observation and independent review remain"
+  ],
+  "mode": "local-in-process-core",
+  "model_300_token_p95_seconds": null,
+  "oom_or_restart_observation": null,
+  "recorded_at_utc": "2026-11-22T01:42:03.319483+00:00",
+  "result": {
+    "attempts": 10,
+    "failed": 0,
+    "latency_p50_seconds": 2.367,
+    "latency_p95_seconds": 12.76,
+    "latency_p99_seconds": 12.76,
+    "passed": 10,
+    "requests_per_role": 2,
+    "samples": [
+      {
+        "case_id": "visitor",
+        "expected_outcome": "citation",
+        "http_status": 200,
+        "latency_seconds": 11.091,
+        "number": 1,
+        "outcome_pass": true,
+        "user": "lab-captain-1"
+      },
+      {
+        "case_id": "hvac",
+        "expected_outcome": "citation",
+        "http_status": 200,
+        "latency_seconds": 4.704,
+        "number": 2,
+        "outcome_pass": true,
+        "user": "lab-captain-1"
+      },
+      {
+        "case_id": "hvac",
+        "expected_outcome": "citation",
+        "http_status": 200,
+        "latency_seconds": 8.12,
+        "number": 1,
+        "outcome_pass": true,
+        "user": "lab-chief_engineer-1"
+      },
+      {
+        "case_id": "deny-visitor",
+        "expected_outcome": "denial",
+        "http_status": 200,
+        "latency_seconds": 0.021,
+        "number": 2,
+        "outcome_pass": true,
+        "user": "lab-chief_engineer-1"
+      },
+      {
+        "case_id": "table",
+        "expected_outcome": "citation",
+        "http_status": 200,
+        "latency_seconds": 5.084,
+        "number": 1,
+        "outcome_pass": true,
+        "user": "lab-chief_stewardess-1"
+      },
+      {
+        "case_id": "deny-hvac",
+        "expected_outcome": "denial",
+        "http_status": 200,
+        "latency_seconds": 0.017,
+        "number": 2,
+        "outcome_pass": true,
+        "user": "lab-chief_stewardess-1"
+      },
+      {
+        "case_id": "line",
+        "expected_outcome": "citation",
+        "http_status": 200,
+        "latency_seconds": 12.76,
+        "number": 1,
+        "outcome_pass": true,
+        "user": "lab-deckhand-1"
+      },
+      {
+        "case_id": "deny-hvac",
+        "expected_outcome": "denial",
+        "http_status": 200,
+        "latency_seconds": 0.031,
+        "number": 2,
+        "outcome_pass": true,
+        "user": "lab-deckhand-1"
+      },
+      {
+        "case_id": "line",
+        "expected_outcome": "citation",
+        "http_status": 200,
+        "latency_seconds": 2.367,
+        "number": 1,
+        "outcome_pass": true,
+        "user": "lab-avit_admin-1"
+      },
+      {
+        "case_id": "deny-visitor",
+        "expected_outcome": "denial",
+        "http_status": 200,
+        "latency_seconds": 0.025,
+        "number": 2,
+        "outcome_pass": true,
+        "user": "lab-avit_admin-1"
+      }
+    ],
+    "scheduled_seconds": 2.0,
+    "throughput_per_second": 0.633,
+    "wall_seconds": 15.795
+  },
+  "schema": 1,
+  "source_bundle_sha256": "c869ad44b0aa89e1c266f0dbae13ae3596a24cbab852bf1db749a330eb5a3f29",
+  "source_commit": "f012bf9d61084ffbbd50720a654e8787fb11d172",
+  "ttft_seconds": null
+}

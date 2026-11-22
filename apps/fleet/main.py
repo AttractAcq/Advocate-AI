@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import secrets
@@ -22,7 +23,8 @@ from services.fleet.catalog import (
     ReleaseStatus, Ticket, TicketStatus,
 )
 from services.fleet.offline_import import (
-    SignedDeploymentReceipt, load_import_key, verify_signed_receipt,
+    SignedDeploymentReceipt, key_id, load_import_key, load_import_trust,
+    verify_signed_receipt,
 )
 
 
@@ -47,6 +49,7 @@ class FleetSettings:
     admin_token: str | None
     import_public_key: Ed25519PublicKey | None = None
     oidc_verifier: OidcVerifier | None = None
+    import_public_keys: tuple[Ed25519PublicKey, ...] = ()
 
     @classmethod
     def from_env(cls) -> "FleetSettings":
@@ -60,7 +63,11 @@ class FleetSettings:
                 (ca_filename is not None and not issuer)):
             raise ValueError("Fleet requires exactly one local identity mode")
         import_path = os.environ.get("SOVEREIGN_FLEET_IMPORT_KEY_FILE")
+        trust_path = os.environ.get("SOVEREIGN_FLEET_IMPORT_TRUST_FILE")
+        if import_path and trust_path:
+            raise ValueError("configure one Fleet offline import trust source")
         import_key = load_import_key(Path(import_path)) if import_path else None
+        import_keys = load_import_trust(Path(trust_path)) if trust_path else ()
         if issuer and roles_filename:
             roles_path = Path(roles_filename)
             _owner_file(roles_path, 1024 * 1024)
@@ -70,13 +77,13 @@ class FleetSettings:
             verifier = OidcVerifier(issuer, roles_path, audience="sovereign-fleet",
                                     authorized_client="sovereign-fleet-portal",
                                     allow_https_issuer=True, ca_file=ca_path)
-            return cls(Path(database), None, import_key, verifier)
+            return cls(Path(database), None, import_key, verifier, import_keys)
         path = Path(filename or "")
         _owner_file(path, 4096)
         token = path.read_text(encoding="utf-8").rstrip("\n")
         if not 32 <= len(token) <= 200 or "\n" in token or "\r" in token:
             raise ValueError("invalid Fleet lab token")
-        return cls(Path(database), token, import_key)
+        return cls(Path(database), token, import_key, None, import_keys)
 
 
 def create_app(settings: FleetSettings | None = None) -> FastAPI:
@@ -89,6 +96,10 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
             (settings.oidc_verifier.audience != "sovereign-fleet" or
              settings.oidc_verifier.authorized_client != "sovereign-fleet-portal")):
         raise ValueError("Fleet OIDC audience and client must be separate from Core")
+    import_keys = ((settings.import_public_key,) if settings.import_public_key else ()) + settings.import_public_keys
+    if len(import_keys) > 4 or len({key_id(key) for key in import_keys}) != len(import_keys):
+        raise ValueError("Fleet offline import trust set must have distinct issuers")
+    trusted_issuers = {key_id(key): key for key in import_keys}
     catalog = FleetCatalog(settings.db_path)
     app = FastAPI(title="Sovereign Fleet synthetic lab", docs_url=None,
                   redoc_url=None, openapi_url=None)
@@ -158,6 +169,15 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     def me(user: dict = Depends(authorise)):
         return {"id": user["id"], "role": user["role"],
                 "customer_codes": user["customer_codes"]}
+
+    @router.get("/overview")
+    def overview(user: dict = Depends(authorise)):
+        try:
+            return catalog.operational_overview(datetime.now(timezone.utc).date(),
+                                                allowed_customers=scope(user))
+        except FleetIntegrityError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Fleet store integrity check failed") from exc
 
     def add(kind: str, record):
         try:
@@ -264,11 +284,15 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
     def import_receipt(envelope: SignedDeploymentReceipt,
                        user: dict = Depends(authorise)):
         require_record(user, "deployment", envelope.receipt.vessel_code)
-        if settings.import_public_key is None:
+        if not trusted_issuers:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 "offline receipt import is not configured")
+        issuer = trusted_issuers.get(envelope.key_id)
+        if issuer is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "offline import issuer is untrusted")
         try:
-            record = verify_signed_receipt(envelope, settings.import_public_key)
+            record = verify_signed_receipt(envelope, issuer)
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
         try:
@@ -298,6 +322,11 @@ def create_app(settings: FleetSettings | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
+        try:
+            catalog.check_clock()
+        except (FleetError, OSError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Fleet store integrity check failed") from exc
         return {"status": "ok"}
 
     return app

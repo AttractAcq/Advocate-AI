@@ -98,6 +98,14 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 elif url.path == "/api/fleet/me":
                     self.send_bytes(200, b'{"id":"admin","role":"fleet_admin","customer_codes":["*"]}',
                                     "application/json")
+                elif url.path == "/api/fleet/overview":
+                    self.send_bytes(200, json.dumps({
+                        "as_of": datetime.now(timezone.utc).date().isoformat(),
+                        "counts": {kind: 0 for kind in (
+                            "customer", "release", "deployment", "licence", "ticket",
+                            "maintenance", "receipt")},
+                        "attention_total": 0, "attention": [],
+                    }).encode(), "application/json")
                 else:
                     self.send_bytes(200, b"[]", "application/json")
                 return
@@ -198,11 +206,12 @@ def serve(folder: Path) -> None:
     identity.serve_forever()
 
 
-def driver_request(method: str, path: str, payload: dict | None = None) -> object:
+def driver_request(method: str, path: str, payload: dict | None = None,
+                   *, timeout: float = 15) -> object:
     raw = None if payload is None else json.dumps(payload).encode()
     request = Request(f"http://127.0.0.1:9515{path}", data=raw, method=method,
                       headers={"Content-Type": "application/json"})
-    with urlopen(request, timeout=15) as response:
+    with urlopen(request, timeout=timeout) as response:
         result = json.load(response)
     if isinstance(result.get("value"), dict) and result["value"].get("error"):
         raise RuntimeError(result["value"])
@@ -235,10 +244,12 @@ def run_browser(chromedriver: str) -> dict[str, str]:
                    "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
                        "--no-proxy-server", "--host-resolver-rules=MAP fleet.example.invalid 127.0.0.2,"
                        "MAP identity.example.invalid 127.0.0.3"]}}
-        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}})
+        result = driver_request("POST", "/session", {"capabilities": {"alwaysMatch": options}},
+                                timeout=45)
         assert isinstance(result, dict)
         session = result["sessionId"]
-        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"})
+        driver_request("POST", f"/session/{session}/url", {"url": f"https://{FLEET}/"},
+                       timeout=45)
         until(session, "document.querySelector('button.primary')?.textContent?.includes('Sign in with local identity')")
         driver_request("POST", f"/session/{session}/execute/sync",
                        {"script": "document.querySelector('button.primary').click()", "args": []})

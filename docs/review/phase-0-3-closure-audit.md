@@ -32,23 +32,25 @@ independent PR/security review.
 | T-012 Sovereign Console | React sign-in, chat, document selection, inspectable passage citations, scope, history, read-only admin; build and [source review](../phase-2/console-accessibility.md) | Rendered keyboard, screen-reader and zoom QA was unavailable in the current browser service; target TLS/proxy deployment remains |
 | T-013 end-to-end demo | [Synthetic demo](../phase-2/demo-result.json) and [runbook](../phase-2/runbook.md) show local role and cited-answer flow | G1 requires a disconnected-WAN run, egress capture and target-host evidence |
 | **G1** offline cited chat | Local synthetic model and citations work | Disconnected target-host proof is absent; gate remains open |
-| T-014 ingestion | [Format register](../phase-3/supported-formats.md): Docling PDF/DOCX/XLSX, UTF-8, SHA-256 allowlist, quarantine, bounded worker, deletion reconciliation | Read-only NAS identity/mount, ACL mapping, OCR qualification and target parser resource controls |
+| T-014 ingestion | [Format register](../phase-3/supported-formats.md): Docling PDF/DOCX/XLSX, UTF-8, SHA-256 allowlist, quarantine, bounded worker, Linux address-space/CPU limits, deletion reconciliation, polling manifest watcher, bounded manifest intake with strict duplicate-key rejection, and parsing from the verified byte snapshot | Read-only NAS identity/mount, ACL mapping, OCR qualification and target Linux parser/polling validation |
 | T-015 authorised retrieval | Passage/embedding index, pre-ranking permission filter, source recheck, passage-ordinal citations and [fixed evaluation](../phase-3/evaluation.json); [generated answers](../phase-3/answer-evaluation.json) | Semantic/claim-support assessment by an independent reviewer; target database topology |
-| T-016 identity and policy | Local Keycloak lab, Console PKCE, signed JWTs, role/source policy, logout revocation, audit, [operations design](../phase-3/identity-operations.md) | MFA enforcement, service identities, approved policy administration and emergency access are designed but not implemented or reviewed for deployment |
+| T-016 identity and policy | Local Keycloak lab, Console PKCE, signed JWTs, bounded role-file intake, unique/unexpired identity checks, lab role-bound tokens, role/source policy, logout revocation, [audit file boundary](../phase-3/audit-file-boundary.md), [two-person offline policy change](../phase-3/policy-change-rehearsal.md) and a [restricted emergency diagnostic drill](../phase-3/emergency-access-rehearsal.md) | MFA enforcement, service identities, owner-approved production policy administration and recovery actions remain unimplemented or unreviewed for deployment; audit retention/anchoring remain |
 | T-017 role non-disclosure | Automated five-role/action matrix, revocation, deletion, injection, audit tamper, corrupt-manifest and history-redaction tests | Independent adversarial QA/security execution; target NAS/identity/cache propagation checks |
-| **Phase 3 gate** role, revocation, citation and injection tests | Local regression suite and 50-question evidence exist; 40/40 expected markers, 10/10 no-answer denials, 32/40 generated source labels | Human citation/claim review and independent security sign-off are missing; target boundaries unqualified |
+| **Phase 3 gate** role, revocation, citation and injection tests | Local regression suite and historical 50-question evidence exist; an [internal reading](../phase-3/claim-support-review.md) finds six wording/support exceptions. A fresh [Core API run](../phase-3/core-answer-evaluation.json) captures 40/40 matching marker and structured citation passages, 10/10 denials and five preliminary prose exceptions | Independent claim review, agreed AT-09 threshold and security sign-off are missing; target boundaries unqualified |
 
 ## Actionable nonhardware work still open
 
 1. Appoint an external reviewer, request PR approval and obtain an
    attributable Phase 0–3 report using the [review brief](phase-0-3-external-review.md).
-2. Review the 50 generated answers against their sources for claim support,
-   uncertainty and citation correctness; agree AT-09 quality thresholds.
+2. Have an independent reviewer assess both 50-answer runs, their recorded
+   wording exceptions and the fresh Core citation passages; then agree AT-09
+   quality thresholds.
 3. Complete a rendered Console keyboard/screen-reader/zoom run when a browser
    automation surface or human tester is available.
-4. Implement and test the synthetic administrative identity/emergency workflow
-   or obtain the authorised vessel policy needed to scope it; the current
-   [design](../phase-3/identity-operations.md) is not an operational control.
+4. Extend the [synthetic emergency diagnostic drill](../phase-3/emergency-access-rehearsal.md)
+   to controlled recovery actions, installer secret mounting, operator
+   notification and retrospective review. Obtain the vessel authority and
+   target identity/key design before deployment.
 
 The requested move to Phase 4 can be planned with synthetic fixtures, but
 this audit does not change the original G0A, G1 or Phase 3 exit criteria.

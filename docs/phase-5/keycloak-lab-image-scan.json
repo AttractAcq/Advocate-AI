@@ -1,10 +1,10 @@
 {
   "status": "untriaged-lab-image-findings",
-  "scan_date_utc": "2026-11-16",
-  "ci_run": "https://github.com/AttractAcq/Advocate-AI/actions/runs/43850286761",
-  "image": "quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0",
+  "scan_date_utc": "2026-11-21",
+  "ci_run": "https://github.com/AttractAcq/Advocate-AI/actions/runs/44854299539",
+  "image": "quay.io/keycloak/keycloak@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3",
   "scanner": "Trivy 0.76.2",
-  "report_sha256": "ae83135d089d11da97ea616968aaaded198092e033594b6a9dc7e5a45ebe1a95",
+  "report_sha256": "3d357c18e841e221fc3f6e23465b5e93fc891cc0a193ce0c3a5470c33d1ec2fa",
   "severity_counts": {
     "HIGH": 6,
     "CRITICAL": 0

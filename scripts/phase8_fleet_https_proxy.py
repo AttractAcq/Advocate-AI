@@ -27,7 +27,7 @@ class Bridge(BaseHTTPRequestHandler):
         self.forward()
 
     def forward(self) -> None:
-        if self.headers.get("Host") != "fleet.example.invalid":
+        if self.headers.get("Host") != self.server.expected_host:
             self.send_error(421)
             return
         size = int(self.headers.get("Content-Length", "0"))
@@ -35,7 +35,7 @@ class Bridge(BaseHTTPRequestHandler):
             self.send_error(413)
             return
         request_body = self.rfile.read(size) if size else None
-        connection = HTTPConnection("127.0.0.1", 18080, timeout=15)
+        connection = HTTPConnection("127.0.0.1", self.server.upstream_port, timeout=15)
         try:
             headers = {name: value for name, value in self.headers.items()
                        if name.lower() not in ("connection", "transfer-encoding", "content-length")}
@@ -59,10 +59,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cert", type=Path, required=True)
     parser.add_argument("--key", type=Path, required=True)
+    parser.add_argument("--host", default="fleet.example.invalid")
+    parser.add_argument("--upstream-port", type=int, default=18080)
     args = parser.parse_args()
+    if (args.host not in {"fleet.example.invalid", "vessel.example.invalid"} or
+            not 1 <= args.upstream_port <= 65535):
+        parser.error("invalid synthetic HTTPS bridge target")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(args.cert, args.key)
     server = ThreadingHTTPServer(("127.0.0.2", 443), Bridge)
+    server.expected_host = args.host
+    server.upstream_port = args.upstream_port
     server.socket = context.wrap_socket(server.socket, server_side=True)
     server.serve_forever()
 

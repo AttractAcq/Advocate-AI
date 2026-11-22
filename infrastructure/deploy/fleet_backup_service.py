@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import tempfile
 
 from infrastructure.backup import BackupError
@@ -26,6 +29,23 @@ class FleetScheduleError(ValueError):
 _ARCHIVE = re.compile(r"fleet-[0-9]{8}T[0-9]{6}-[0-9]{6}Z\.svb\Z")
 
 
+@contextmanager
+def _backup_lock(directory: Path, *, exclusive: bool):
+    _owner_directory(directory)
+    descriptor = os.open(directory / ".fleet-backup.lock",
+                         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        details = os.fstat(descriptor)
+        if (not stat.S_ISREG(details.st_mode) or
+                details.st_uid != os.getuid() or
+                stat.S_IMODE(details.st_mode) & 0o077):
+            raise FleetScheduleError("Fleet backup lock must be owner-only")
+        fcntl.flock(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def _archives(directory: Path, max_archives: int) -> list[Path]:
     _owner_directory(directory)
     if type(max_archives) is not int or not 1 <= max_archives <= 10000:
@@ -41,11 +61,12 @@ def _archives(directory: Path, max_archives: int) -> list[Path]:
 def create_scheduled(db: Path, directory: Path, key: Path,
                      max_archives: int) -> dict[str, object]:
     """Write one unique archive; stop before filling an unapproved retention set."""
-    archives = _archives(directory, max_archives)
-    if len(archives) >= max_archives:
-        raise FleetScheduleError("archive capacity reached; review retention")
-    name = datetime.now(timezone.utc).strftime("fleet-%Y%m%dT%H%M%S-%fZ.svb")
-    return backup_fleet(db, directory / name, key)
+    with _backup_lock(directory, exclusive=True):
+        archives = _archives(directory, max_archives)
+        if len(archives) >= max_archives:
+            raise FleetScheduleError("archive capacity reached; review retention")
+        name = datetime.now(timezone.utc).strftime("fleet-%Y%m%dT%H%M%S-%fZ.svb")
+        return backup_fleet(db, directory / name, key)
 
 
 def verify_latest(directory: Path, key: Path, max_age_hours: int,
@@ -53,24 +74,25 @@ def verify_latest(directory: Path, key: Path, max_age_hours: int,
     """Authenticate and clean-restore the newest archive, then check age."""
     if type(max_age_hours) is not int or not 1 <= max_age_hours <= 720:
         raise FleetScheduleError("invalid maximum backup age")
-    archives = _archives(directory, max_archives)
-    _owner_file(key)
-    if not archives:
-        raise FleetScheduleError("no Fleet backup archives")
-    latest = archives[-1]
-    stage = Path(tempfile.mkdtemp(prefix=".fleet-verify-", dir=directory))
-    try:
-        result = restore_fleet(latest, key, stage / "restored")
-        created = datetime.fromisoformat(str(result["created_utc"]))
-        if created.tzinfo is None:
-            raise FleetScheduleError("backup timestamp has no timezone")
-        age = (datetime.now(timezone.utc) - created.astimezone(timezone.utc)).total_seconds()
-        if age < -300 or age > max_age_hours * 3600:
-            raise FleetScheduleError("latest Fleet backup is outside freshness limit")
-        return {"archive": str(latest), "created_utc": result["created_utc"],
-                "archive_count": len(archives), "clean_restore": "verified"}
-    finally:
-        shutil.rmtree(stage)
+    with _backup_lock(directory, exclusive=False):
+        archives = _archives(directory, max_archives)
+        _owner_file(key)
+        if not archives:
+            raise FleetScheduleError("no Fleet backup archives")
+        latest = archives[-1]
+        stage = Path(tempfile.mkdtemp(prefix=".fleet-verify-", dir=directory))
+        try:
+            result = restore_fleet(latest, key, stage / "restored")
+            created = datetime.fromisoformat(str(result["created_utc"]))
+            if created.tzinfo is None:
+                raise FleetScheduleError("backup timestamp has no timezone")
+            age = (datetime.now(timezone.utc) - created.astimezone(timezone.utc)).total_seconds()
+            if age < -300 or age > max_age_hours * 3600:
+                raise FleetScheduleError("latest Fleet backup is outside freshness limit")
+            return {"archive": str(latest), "created_utc": result["created_utc"],
+                    "archive_count": len(archives), "clean_restore": "verified"}
+        finally:
+            shutil.rmtree(stage)
 
 
 def render_fleet_backup_units(db: Path, directory: Path, key: Path,

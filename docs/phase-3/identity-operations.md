@@ -21,8 +21,45 @@ administrative role; evaluate WebAuthn or local TOTP against the vessel's
 offline device and recovery constraints. Disable password grant, self-service
 registration and unreviewed role assignment in the deployed realm. Keep
 Keycloak storage, signing keys and local TLS under the deployment's protected
-backup and recovery process. The synthetic realm intentionally keeps direct
-password grant for scripted tests; it must not be copied into production.
+backup and recovery process. The synthetic realm uses browser authorization
+code plus PKCE and disables direct password grants; its fictional users and
+development-mode server configuration must not be copied into production.
+
+Core can now be configured with `SOVEREIGN_OIDC_ISSUER` and a private
+`SOVEREIGN_OIDC_CA_FILE` for a DNS-named HTTPS Keycloak realm on port 443. The
+CA file must contain valid PEM trust material in an absolute, owner-only
+regular file with one link and at most 64 KiB. An HTTPS issuer without this
+explicit trust file, a CA file without an
+issuer, or a CA file paired with lab HTTP is refused at startup. The existing
+loopback HTTP realm remains available for fictional lab tests. Token validation
+still requires the Core audience, Console client, current local role and
+active user. Malformed signed role claims and ambiguous JWKS key IDs or JSON
+fields deny authentication. The signed vessel installer now checks an
+owner-only Core-state CA file, mounts the protected Core state read-write into
+Core for audit, history and revocation persistence, and verifies the
+configured Keycloak JWKS through that CA before OIDC activation. The synthetic
+signed-image rehearsals cover fictional TLS JWKS and a pinned local Keycloak.
+The installer does not provision Keycloak, a production TLS ingress, MFA
+enrollment, persistent identity storage or certificate renewal. Those need a reviewed
+site configuration and target-network tests before vessel use. The
+[vessel identity integration contract](vessel-identity-integration.md) defines
+the required installer, network and recovery transition.
+
+The OIDC logout revocation log is opened through a checked local directory
+without following a final symlink. Reads deny authentication if the log or its
+directory is missing, redirected, exposed, hard-linked, oversized or contains
+ambiguous or partial records. An append is durable before logout reports
+success; a failed append returns 503. This is a local tamper-detection boundary,
+not an independent revocation authority. The deployment must protect and back
+up the store, keep it across release changes, and test restart and restore
+behavior with real Keycloak tokens. The synthetic signed recovery set captures
+the CA and revocation log in a schema-3 receipt. A separate encrypted Keycloak
+realm export is [signed as a pair](../phase-5/vessel-identity-recovery-pair.md)
+with that exact receipt; OIDC activation, interrupted finish and abandoned
+retry require the matching pair. The real Keycloak rehearsal restores its
+signing key and checks that an old unrevoked token still works while a logged
+out token remains denied. Production database capture, live import
+attestation and key custody remain open.
 
 ## Policy change workflow
 
@@ -41,10 +78,22 @@ password grant for scripted tests; it must not be copied into production.
 6. A reviewer checks the resulting effective permissions and the denial
    regression. Roll back an unintended grant and record the corrective action.
 
-The current lab policy file supports immediate source denial and revocation,
-but lacks an approved administrative change API and two-person approval. The
+The current lab policy file supports immediate source denial and revocation.
+The [synthetic offline policy-change tool](policy-change-rehearsal.md) checks
+two distinct signatures and records an interrupted-change recovery packet,
+but it is not an owner-approved administrative process or deployed API. The
 local ACL test proves denial through API paths within 60 seconds after a policy
 file update; target NAS and identity propagation remain unmeasured.
+Core now reads that lab file through a 4 MiB regular-file-only boundary for
+authentication, retrieval and audit policy hashes. Symlinks, duplicate JSON
+keys and oversized content fail closed. A lab session invalidated during a
+policy-file fault needs a new sign-in after repair. These software checks do
+not approve the file's production ownership, change process or role map.
+The shared active-user check also rejects duplicate identities and expired or
+malformed `expires_at` values. A lab token is bound to the role at sign-in, so
+a later role change requires a new login; OIDC still checks the current local
+role against the signed token role on each request. These are prerequisites for
+the proposed emergency workflow, not emergency activation.
 
 ## Emergency access drill to implement before pilot
 
@@ -55,6 +104,13 @@ security owner locally. Restrict the account to recovery actions, not private
 document browsing. Verify every action in the audit chain, rotate the secret
 after use and obtain retrospective review. Test activation, expiry, misuse
 denial and audit evidence in the target lab before calling the control complete.
+
+The [synthetic emergency drill](emergency-access-rehearsal.md) now exercises a
+disabled fixture identity, two-person signed activation, a separate owner-only
+lab secret, no document access, a restricted diagnostic endpoint, expiry and
+secret-rotation revocation. Real recovery actions, Keycloak/MFA enrollment,
+custody, notification and retrospective review still need implementation and
+approval before a pilot.
 
 ## Decisions needed for site configuration
 

@@ -13,6 +13,8 @@ import unittest
 from infrastructure.restic_repository import (ResticError, create_snapshot,
                                               restore_snapshot, verify_repository)
 from infrastructure.restic_retention import apply_plan, create_plan
+from infrastructure.upload_quarantine_backup import create_upload_snapshot, restore_upload_snapshot
+from services.knowledge.upload_staging import stage_upload
 
 
 class ResticRepositoryTests(unittest.TestCase):
@@ -58,9 +60,28 @@ class ResticRepositoryTests(unittest.TestCase):
                                   self.restic, self.restic_sha256, restored)
         self.assertEqual(result["status"], "restored")
         self.assertEqual((restored / "config.json").read_text(), '{"fictional":true}\n')
+        self.assertEqual((restored / "config.json").stat().st_mode & 0o077, 0)
+        self.assertEqual((restored / "knowledge.db").stat().st_mode & 0o077, 0)
         with sqlite3.connect(restored / "knowledge.db") as connection:
             self.assertEqual(connection.execute("SELECT value FROM records").fetchone(),
                              ("fictional entry",))
+
+    def test_upload_quarantine_encrypted_snapshot_and_clean_restore(self) -> None:
+        uploads = self.root / "uploads"
+        uploads.mkdir(mode=0o700)
+        item = stage_upload(uploads, "lab-engineer", "fictional.txt",
+                            b"Fictional vessel note.\n")
+        repository = self.root / "upload-repository"
+        created = create_upload_snapshot(uploads, repository, self.password,
+                                         self.restic, self.restic_sha256, self.staging)
+        self.assertEqual(created["quarantine_files"], 2)
+        (uploads / f"{item['id']}.blob").unlink()
+        destination = self.root / "restored-uploads"
+        result = restore_upload_snapshot(created["snapshot_id"], repository,
+            self.password, self.restic, self.restic_sha256, destination)
+        self.assertEqual(result["quarantine_files"], 2)
+        self.assertEqual((destination / f"{item['id']}.blob").read_bytes(),
+                         b"Fictional vessel note.\n")
 
     def test_wrong_key_or_unapproved_binary_rejected_without_restore(self) -> None:
         created = create_snapshot(self.spec, self.repository, self.password,

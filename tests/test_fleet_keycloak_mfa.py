@@ -13,10 +13,28 @@ from unittest.mock import patch
 
 from infrastructure.backup import BackupError, generate_key
 from scripts.phase8_fleet_keycloak_rehearsal import (
-    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _realm, _run_flow, _totp)
+    _ADMIN_ROTATE, _backup_realm, _checked_realm_restore, _lab_token_denied,
+    _realm, _run_flow, _totp,
+    _verify_base64_mitigation)
 
 
 class FleetKeycloakMfaTests(unittest.TestCase):
+    def test_live_jvm_mitigation_must_be_observed(self) -> None:
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   return_value="bool UseBASE64Intrinsics    = false    {product} {command line}") as command:
+            _verify_base64_mitigation("synthetic-keycloak")
+            command.assert_called_once_with(
+                "docker", "exec", "synthetic-keycloak", "jcmd",
+                "io.quarkus.bootstrap.runner.QuarkusEntryPoint", "VM.flags", "-all")
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   return_value="bool UseBASE64Intrinsics = true {product}"):
+            with self.assertRaisesRegex(AssertionError, "Base64 intrinsics"):
+                _verify_base64_mitigation("synthetic-keycloak")
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   return_value="bool UseBASE64Intrinsics = false {product} {default}"):
+            with self.assertRaisesRegex(AssertionError, "Base64 intrinsics"):
+                _verify_base64_mitigation("synthetic-keycloak")
+
     def test_rfc6238_sha1_vector_with_six_digits(self) -> None:
         # RFC 6238 uses 8 digits; the configured lab realm uses the last 6.
         encoded = base64.b32encode(b"12345678901234567890").decode()
@@ -65,15 +83,36 @@ class FleetKeycloakMfaTests(unittest.TestCase):
 
     def test_pkce_flow_retries_only_transient_container_dns(self) -> None:
         with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
-                   side_effect=[RuntimeError("httpx.ConnectError: [Errno -3] Try again"),
-                                '{"fleet_role":"fleet_admin"}']) as command, \
-             patch("scripts.phase8_fleet_keycloak_rehearsal.time.sleep"):
+                   side_effect=[RuntimeError("httpx.ConnectError: [Errno -3] Try again")] * 14 +
+                               ['{"fleet_role":"fleet_admin"}']) as command, \
+             patch("scripts.phase8_fleet_keycloak_rehearsal.time.sleep") as pause:
             self.assertEqual(_run_flow("api", "flow"), {"fleet_role": "fleet_admin"})
-            self.assertEqual(command.call_count, 2)
+            self.assertEqual(command.call_count, 15)
+            self.assertEqual(pause.call_count, 14)
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=RuntimeError("httpx.ConnectError: [Errno -3] Try again")) as command, \
+             patch("scripts.phase8_fleet_keycloak_rehearsal.time.sleep") as pause:
+            with self.assertRaises(RuntimeError):
+                _run_flow("api", "flow")
+            self.assertEqual(command.call_count, 15)
+            self.assertEqual(pause.call_count, 14)
         with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
                    side_effect=RuntimeError("assert status_code == 200")) as command:
             with self.assertRaises(RuntimeError):
                 _run_flow("api", "flow")
+            command.assert_called_once()
+
+    def test_lab_token_probe_retries_only_transient_container_dns(self) -> None:
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=[RuntimeError("httpx.ConnectError: [Errno -3] Try again"), ""]) as command, \
+             patch("scripts.phase8_fleet_keycloak_rehearsal.time.sleep") as pause:
+            _lab_token_denied("api")
+            self.assertEqual(command.call_count, 2)
+            pause.assert_called_once_with(1)
+        with patch("scripts.phase8_fleet_keycloak_rehearsal._run",
+                   side_effect=RuntimeError("AssertionError: status_code was 200")) as command:
+            with self.assertRaisesRegex(RuntimeError, "status_code was 200"):
+                _lab_token_denied("api")
             command.assert_called_once()
 
 
