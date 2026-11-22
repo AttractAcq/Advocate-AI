@@ -439,8 +439,37 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                 && !sessionStorage.getItem('sovereign_fleet_pkce_verifier');
         """, "args": []})
         assert cleared, "real Keycloak callback state or code remained in the browser"
-        driver_request("POST", f"/session/{session}/execute/sync",
-                       {"script": "document.querySelector('.sidebar-bottom button').click()", "args": []})
+        driver_request("POST", f"/session/{session}/window/rect",
+                       {"width": 390, "height": 844})
+        mobile = driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": """
+                const button = document.querySelector('.sidebar-bottom button');
+                const rect = button?.getBoundingClientRect();
+                const style = button && getComputedStyle(button);
+                return {narrow: matchMedia('(max-width: 760px)').matches,
+                    visible: !!rect && style.display !== 'none' && style.visibility !== 'hidden',
+                    width: rect?.width, height: rect?.height,
+                    inWidth: !!rect && rect.left >= 0 && rect.right <= innerWidth + 1,
+                    pageFits: document.documentElement.scrollWidth <= innerWidth + 1};
+            """, "args": []})
+        assert (mobile["narrow"] and mobile["visible"] and mobile["inWidth"] and
+                mobile["pageFits"] and mobile["width"] >= 44 and
+                mobile["height"] >= 44), f"mobile sign-out is unreachable: {mobile}"
+        driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": "document.querySelector('.sidebar nav button:last-of-type').focus()",
+            "args": []})
+        driver_request("POST", f"/session/{session}/actions", {"actions": [{
+            "type": "key", "id": "fleet-keyboard", "actions": [
+                {"type": "keyDown", "value": "\ue004"},
+                {"type": "keyUp", "value": "\ue004"}]}]})
+        focused = driver_request("POST", f"/session/{session}/execute/sync", {
+            "script": "return document.activeElement === document.querySelector('.sidebar-bottom button') && document.activeElement.matches(':focus-visible')",
+            "args": []})
+        assert focused, "keyboard tab did not reach visible mobile sign-out"
+        driver_request("POST", f"/session/{session}/actions", {"actions": [{
+            "type": "key", "id": "fleet-keyboard", "actions": [
+                {"type": "keyDown", "value": "\ue007"},
+                {"type": "keyUp", "value": "\ue007"}]}]})
         outcome = until(session, """location.hostname === 'fleet.example.invalid'
             && document.body.textContent.includes('Sign in with local identity') ? 'fleet' :
             location.hostname === 'identity.fleet' && !!document.querySelector('form') ? 'confirm' : false""", 45)
@@ -487,9 +516,10 @@ def browser_flow(password: str, chromedriver: str, mfa: bool = False) -> dict[st
                 """, "args": []})
                 raise AssertionError(f"valid synthetic OTP did not reach Fleet: {state}") from error
             return {"browser_flow": "keycloak-mfa-enrolled-and-authorized",
-                    "invalid_otp": "denied", "callback_state": "cleared", "api_role": "fleet_admin"}
+                    "invalid_otp": "denied", "callback_state": "cleared", "api_role": "fleet_admin",
+                    "mobile_keyboard": "sign-out-reached-and-activated"}
         return {"browser_flow": "real-keycloak-pkce-sign-in-and-sign-out", "callback_state": "cleared",
-                "api_role": "fleet_admin"}
+                "api_role": "fleet_admin", "mobile_keyboard": "sign-out-reached-and-activated"}
     finally:
         if session:
             try:
