@@ -9,7 +9,7 @@ _STOP = {"what", "which", "who", "when", "where", "why", "how", "the", "and", "f
          "with", "from", "into", "about", "that", "this", "are", "can", "does", "did",
          "tell", "show", "find", "list", "give", "provide", "describe", "explain",
          "summarize", "summary", "overview", "recap", "outline", "please", "there", "their", "your",
-         "according", "should", "done"}
+         "according", "should", "must", "done"}
 _FORMS = {"actions": "action", "required": "require", "requires": "require",
           "requiring": "require", "procedures": "procedure", "documents": "document",
           "manuals": "manual", "sops": "sop", "steps": "step",
@@ -25,8 +25,8 @@ def terms(value: str) -> set[str]:
 
 
 def search_terms(value: str) -> set[str]:
-    """Keep a query only when it identifies more than generic document framing."""
-    wanted = terms(value)
+    """Keep distinguishing queries; omit generic step phrasing from matching."""
+    wanted = terms(value) - {"step"}
     return wanted if wanted - _GENERIC else set()
 
 
