@@ -8,7 +8,8 @@ import unittest
 
 import httpx
 
-from scripts.phase5_core_load import CASES, DENIAL, auth_headers, core_url, exercise, percentile
+from scripts.phase5_core_load import (CASES, DENIAL, auth_headers, core_url,
+                                      exercise, expected_sources, percentile)
 
 
 class CoreLoadHarnessTests(unittest.TestCase):
@@ -37,14 +38,18 @@ class CoreLoadHarnessTests(unittest.TestCase):
         self.assertIsNone(percentile([], 95))
         self.assertEqual(percentile([1, 2, 3, 4, 5], 95), 5)
 
-        async def run(break_denial: bool) -> dict[str, object]:
+        sources = expected_sources()
+
+        async def run(break_kind: str | None) -> dict[str, object]:
             def handler(request: httpx.Request) -> httpx.Response:
                 user = request.headers["Authorization"].removeprefix("Bearer ")
                 question = json.loads(request.content)["message"]
                 expected = next(expected for _, text, expected in CASES[user] if text == question)
-                if break_denial and expected is None and user == "lab-deckhand-1":
+                if break_kind == "denial" and expected is None and user == "lab-deckhand-1":
                     expected = "ENG-006"
-                citations = [{"document_id": expected}] if expected else []
+                citations = [{**sources[expected], "ordinal": 0}] if expected else []
+                if citations and break_kind in ("sha256", "version", "collection", "ordinal"):
+                    citations[0][break_kind] = "wrong"
                 return httpx.Response(200, json={"answer": "supported" if expected else DENIAL,
                                                  "citations": citations})
 
@@ -53,12 +58,15 @@ class CoreLoadHarnessTests(unittest.TestCase):
                 headers = {user: {"Authorization": "Bearer " + user} for user in CASES}
                 return await exercise(client, headers, requests_per_role=2, duration_seconds=0)
 
-        passed = asyncio.run(run(False))
+        passed = asyncio.run(run(None))
         self.assertEqual((passed["attempts"], passed["passed"], passed["failed"]), (10, 10, 0))
         self.assertEqual({row["user"] for row in passed["samples"]}, set(CASES))
-        failed = asyncio.run(run(True))
+        failed = asyncio.run(run("denial"))
         self.assertEqual(failed["failed"], 1)
         self.assertNotIn("Authorization", json.dumps(failed))
+        for field in ("sha256", "version", "collection", "ordinal"):
+            with self.subTest(field=field):
+                self.assertEqual(asyncio.run(run(field))["failed"], 6)
 
 
 if __name__ == "__main__":
