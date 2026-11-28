@@ -13,7 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 phase3 = [
-    "docling==2.150.1",
+    "docling==2.152.0",
 ]
 
 [tool.sovereign]
